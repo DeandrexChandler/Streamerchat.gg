@@ -1,4 +1,4 @@
-- landing, features, about, creators, pricing, signup, login, dashboard, settings, help, faq, contact, terms, privacy, report a bug, billing, getting started, analytics, obs integration (guide) page, cookie notice, roadmap page (peep daisyai)
+- landing, features, about, creators, pricing, signup, login, dashboard, settings, help, faq, contact, terms, privacy, report a bug, billing, getting started, analytics, obs integration (guide) page, cookie notice, roadmap page (peep daisyui)
 
 app/
 ├── layout.tsx                    # Root layout (header, footer, metadata)
