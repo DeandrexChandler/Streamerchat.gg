@@ -96,4 +96,4 @@ app/
 - 7tv emotes on/off, emote only mode (need to add personality to emotes for proper usage)
 - mic transcription to include slang (bruh, SAJ, KEKW, etc.)
 - if nothing said: initiate "bored" mode where ai makes random comments/questions to streamer to keep engagement
-- ai mood settings (happy, serious, funny, sarcastic, etc.)
+- ai mood settings (happy, serious, funny, sarcastic, clipfarming, etc.)
