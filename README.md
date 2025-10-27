@@ -87,3 +87,13 @@ app/
         ├── Button.tsx
         ├── Card.tsx
         └── Modal.tsx
+
+- random questions for engagement
+- mic sensitivity, threshold bar for loudness detection (4 uppercase in chat; like screaming)
+- ignore words filter (n*er, f*g, etc)
+- backgroun noise suprresion (advanced settings for premium)
+- 2 emotes modes for now (W community, Poggers community)
+- 7tv emotes on/off, emote only mode (need to add personality to emotes for proper usage)
+- mic transcription to include slang (bruh, SAJ, KEKW, etc.)
+- if nothing said: initiate "bored" mode where ai makes random comments/questions to streamer to keep engagement
+- ai mood settings (happy, serious, funny, sarcastic, etc.)
