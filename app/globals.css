@@ -1,4 +1,104 @@
-@import "tailwindcss";
-@theme {
-  
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Swap toggle animation */
+.swap {
+  position: relative;
+  display: inline-grid;
+  user-select: none;
+  place-content: center;
+  cursor: pointer;
 }
+
+.swap > * {
+  grid-column-start: 1;
+  grid-row-start: 1;
+  transition: all 0.3s ease-in-out;
+}
+
+.swap input {
+  appearance: none;
+}
+
+.swap .swap-on,
+.swap .swap-indeterminate,
+.swap input:indeterminate ~ .swap-on {
+  opacity: 0;
+}
+
+.swap input:checked ~ .swap-off,
+.swap.swap-active .swap-off,
+.swap input:indeterminate ~ .swap-off {
+  opacity: 0;
+}
+
+.swap input:checked ~ .swap-on,
+.swap.swap-active .swap-on,
+.swap input:indeterminate ~ .swap-indeterminate {
+  opacity: 1;
+}
+
+/* Swap rotate */
+.swap-rotate .swap-on,
+.swap-rotate .swap-indeterminate,
+.swap-rotate input:indeterminate ~ .swap-on {
+  transform: rotate(45deg);
+}
+
+.swap-rotate input:checked ~ .swap-off,
+.swap-rotate.swap-active .swap-off,
+.swap-rotate input:indeterminate ~ .swap-off {
+  transform: rotate(-45deg);
+}
+
+.swap-rotate input:checked ~ .swap-on,
+.swap-rotate.swap-active .swap-on,
+.swap-rotate input:indeterminate ~ .swap-indeterminate {
+  transform: rotate(0deg);
+}
+
+/* Custom animations */
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.delay-1000 {
+  animation-delay: 1s;
+}
+
+/* Custom Scrollbar Styles */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #9ca3af;
+  border-radius: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #374151;
+}
+
