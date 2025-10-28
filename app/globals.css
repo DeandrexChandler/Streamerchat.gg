@@ -2,6 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  html, body {
+    @apply overflow-hidden h-screen;
+  }
+}
+
+/* Toggle Switch */
+.toggle {
+  appearance: none;
+  width: 2.5rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border-width: 2px;
+}
+
+.toggle::before {
+  content: '';
+  position: absolute;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 9999px;
+  background-color: white;
+  top: 50%;
+  left: 0.125rem;
+  transform: translateY(-50%);
+  transition: all 0.3s ease;
+}
+
+.toggle:checked::before {
+  left: calc(100% - 0.875rem);
+}
+
 /* Swap toggle animation */
 .swap {
   position: relative;

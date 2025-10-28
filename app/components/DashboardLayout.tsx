@@ -92,7 +92,7 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="h-screen bg-gray-50 dark:bg-gray-900 overflow-hidden">
       {/* Mobile Menu Button */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -164,9 +164,9 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main Content */}
-      <div className="lg:ml-64">
+      <div className="lg:ml-64 h-screen flex flex-col overflow-hidden">
         {/* Top Bar */}
-        <header className="sticky top-0 z-30 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+        <header className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-5 py-4">
           <div className="flex items-center justify-between">
             <div className="flex-1 lg:ml-0 ml-12">
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -232,7 +232,7 @@ export default function DashboardLayout({
         </header>
 
         {/* Page Content */}
-        <main className="p-6">{children}</main>
+        <main className="flex-1 overflow-hidden p-6">{children}</main>
       </div>
 
       {/* Mobile Sidebar Overlay */}

@@ -611,3 +611,7 @@ Practice makes perfect. Start training today! 🎮
 - mic transcription to include slang (bruh, SAJ, KEKW, etc.)
 - if nothing said: initiate "bored" mode where ai makes random comments/questions to streamer to keep engagement
 - ai mood settings (happy, serious, funny, sarcastic, clipfarming, etc.)
+
+
+ToDo
+- add white/black bg grey emote outline as simulator background. 
