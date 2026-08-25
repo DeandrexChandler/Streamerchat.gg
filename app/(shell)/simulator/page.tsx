@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import DashboardLayout from "../../components/DashboardLayout";
 import { Settings, Maximize2, Minimize2, X } from "lucide-react";
 
 interface ChatMessage {
@@ -1077,11 +1076,5 @@ export default function DashboardSimulatorPage() {
     return <div className="fixed inset-0 z-50 bg-gray-900">{chatContent}</div>;
   }
 
-  return (
-    <DashboardLayout>
-      <div className="h-[calc(100%+3rem)] flex justify-center -my-6">
-        {chatContent}
-      </div>
-    </DashboardLayout>
-  );
+  return <div className="flex h-full justify-center">{chatContent}</div>;
 }
