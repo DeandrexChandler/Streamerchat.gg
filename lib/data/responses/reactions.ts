@@ -29,6 +29,7 @@ export const REACTIONS: ResponsePool = {
   ],
 
   question_to_chat: [
+    { text: "genuinely think you should go with whichever one sounds more fun", length: "long", tags: ["conversational", "warm"] },
     { text: "yes", length: "tiny", tags: ["short"] },
     { text: "no lol", length: "tiny", tags: ["short", "joke"] },
     { text: "honestly yeah", length: "short", tags: ["conversational"] },
@@ -45,6 +46,8 @@ export const REACTIONS: ResponsePool = {
   ],
 
   excitement: [
+    { text: "okay i genuinely did not think that was going to work", length: "long", tags: ["conversational"] },
+    { text: "everyone in chat just made the same noise i think", length: "long", tags: ["joke", "conversational"] },
     { text: "LETS GO", length: "tiny", tags: ["hype", "caps", "short"] },
     { text: "YOOO", length: "tiny", tags: ["hype", "caps", "short"] },
     { text: "no way", length: "tiny", tags: ["short"] },
@@ -61,6 +64,8 @@ export const REACTIONS: ResponsePool = {
   ],
 
   struggle: [
+    { text: "for what it's worth i have done that exact thing twice today", length: "long", tags: ["warm", "joke"] },
+    { text: "honestly the fact that you're still going is impressive to me", length: "long", tags: ["warm"] },
     { text: "you got this", length: "short", tags: ["warm"] },
     { text: "take your time", length: "short", tags: ["warm"] },
     { text: "so close", length: "tiny", tags: ["short", "warm"] },
@@ -90,6 +95,8 @@ export const REACTIONS: ResponsePool = {
   ],
 
   story: [
+    { text: "okay but you have to tell us what happened after that part", length: "long", tags: ["question", "conversational"] },
+    { text: "something almost exactly like this happened to me last summer", length: "long", tags: ["conversational"] },
     { text: "no wayyy", length: "short", tags: ["short"] },
     { text: "wait go back", length: "short", tags: ["question"] },
     { text: "and then what", length: "short", tags: ["question", "conversational"] },
@@ -117,6 +124,8 @@ export const REACTIONS: ResponsePool = {
   ],
 
   showing: [
+    { text: "the amount of effort in that is genuinely kind of insane", length: "long", tags: ["compliment"] },
+    { text: "i keep coming back to how well the colours work together there", length: "long", tags: ["compliment", "conversational"] },
     { text: "ooooh", length: "tiny", tags: ["short"] },
     { text: "that's so pretty", length: "short", tags: ["warm", "compliment"] },
     { text: "wait i love that", length: "short", tags: ["warm", "compliment"] },
@@ -142,6 +151,7 @@ export const REACTIONS: ResponsePool = {
   ],
 
   mundane: [
+    { text: "not to derail but has anyone else been up since five am", length: "long", tags: ["conversational", "joke"] },
     { text: "true", length: "tiny", tags: ["short"] },
     { text: "fair", length: "tiny", tags: ["short"] },
     { text: "real", length: "tiny", tags: ["short"] },

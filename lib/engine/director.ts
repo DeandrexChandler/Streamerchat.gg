@@ -1,3 +1,4 @@
+import { AMBIENT, IDLE_AMBIENT } from "../data/responses/ambient";
 import { REACTIONS } from "../data/responses/reactions";
 import {
   IDLE_NOTICING,
@@ -6,15 +7,23 @@ import {
   SIDE_REPLIES,
 } from "../data/responses/idle";
 import type { SimulationSettings } from "../config/settings";
-import { decorateWithEmotes, generateFromPool } from "./generators/pool";
+import { pickDepth, type Depth } from "./attention";
+import {
+  decorateWithEmotes,
+  generateFromPool,
+  measureLength,
+  pickEmote,
+} from "./generators/pool";
 import type { Population } from "./population";
 import type { Rng } from "./rng";
 import type {
   Classification,
   Emote,
+  LengthClass,
   MessageKind,
   PendingMessage,
   ResponseEntry,
+  Viewer,
 } from "./types";
 
 /**
@@ -99,6 +108,68 @@ function burstOffsets(count: number, energy: number, rng: Rng): number[] {
   return offsets;
 }
 
+/** Length classes each depth is willing to draw from. */
+const DEPTH_LENGTHS: Record<Exclude<Depth, "ambient">, readonly LengthClass[]> = {
+  light: ["tiny", "short"],
+  engaged: ["short", "medium"],
+  invested: ["medium", "long"],
+};
+
+/**
+ * Resolves a depth into the entries it may draw from.
+ *
+ * `ambient` short-circuits to the one-word pools rather than filtering the
+ * reaction pools, because those pools contain almost nothing that short — the
+ * ambient tier is a separate vocabulary, not a subset of the same one.
+ */
+function entriesForDepth(
+  depth: Depth,
+  intentPool: readonly ResponseEntry[],
+  classification: Classification,
+  ambientPool?: readonly ResponseEntry[],
+): readonly ResponseEntry[] {
+  const ambient = ambientPool ?? AMBIENT[classification.sentiment];
+  if (depth === "ambient") return ambient;
+
+  const allowed = DEPTH_LENGTHS[depth];
+  const filtered = intentPool.filter((entry) =>
+    allowed.includes(measureLength(entry.text)),
+  );
+
+  // Not every intent has entries at every length; fall back rather than
+  // dropping the message entirely.
+  if (filtered.length > 0) return filtered;
+  return depth === "invested" ? intentPool : ambient;
+}
+
+/**
+ * Emote-only messages, the cheapest and most common thing in real chat.
+ *
+ * Handled here rather than in decorateWithEmotes so that ambient-depth
+ * messages from emote-happy viewers can bypass text generation completely.
+ */
+function maybeEmoteOnly(
+  viewer: Viewer,
+  emotes: readonly Emote[],
+  classification: Classification,
+  rng: Rng,
+): string | null {
+  if (emotes.length === 0) return null;
+  if (!rng.chance(viewer.emoteAffinity * 0.55)) return null;
+
+  const emote = pickEmote(
+    emotes,
+    classification.intent,
+    classification.sentiment,
+    rng,
+  );
+  if (!emote) return null;
+
+  // Real emote spam repeats one emote rather than mixing three.
+  const count = rng.chance(0.28) ? rng.int(2, 3) : 1;
+  return Array.from({ length: count }, () => emote.name).join(" ");
+}
+
 export interface DirectOptions {
   classification: Classification;
   population: Population;
@@ -157,26 +228,39 @@ export function directReaction(options: DirectOptions): DirectResult {
         ? rng.pick(replyCandidates)
         : undefined;
 
-    const entries: readonly ResponseEntry[] = replyTarget ? SIDE_REPLIES : pool;
+    const depth = pickDepth(
+      { viewer: speaker, energy: classification.energy, position: i },
+      rng,
+    );
 
     let text: string | null = null;
     let source: PendingMessage["source"] = "pool";
 
-    // Spend an AI line only when one is already pooled. The director never
-    // blocks on a network call.
+    // Spend an AI line only when one is already pooled, and only on a message
+    // that was going to be substantive anyway — an AI call to produce "W"
+    // would be pure waste. The director never blocks on a network call.
     const wantsAi =
       aiCandidates.length > 0 &&
       !replyTarget &&
-      rng.chance(settings.aiShare) &&
-      speaker.verbosity > 0.3;
+      (depth === "engaged" || depth === "invested") &&
+      rng.chance(settings.aiShare);
 
     if (wantsAi) {
       text = aiCandidates.shift() ?? null;
       source = "ai";
     }
 
+    // An emote on its own, which is what a large share of real chat is.
+    if (text === null && !replyTarget && depth === "ambient" && settings.emotesEnabled) {
+      text = maybeEmoteOnly(speaker, emotes, classification, rng);
+    }
+
     if (text === null) {
       source = replyTarget ? "template" : "pool";
+      const entries = replyTarget
+        ? SIDE_REPLIES
+        : entriesForDepth(depth, pool, classification);
+
       const result = generateFromPool(
         entries,
         speaker,
@@ -193,10 +277,12 @@ export function directReaction(options: DirectOptions): DirectResult {
       text = result.text;
       seen.add(result.template);
       templates.push(result.template);
-    }
 
-    if (settings.emotesEnabled) {
-      text = decorateWithEmotes(text, speaker, emotes, decorateContext, rng);
+      // Ambient lines are already one word; appending an emote to them turns
+      // every short reaction into a two-token message and defeats the point.
+      if (settings.emotesEnabled && depth !== "ambient") {
+        text = decorateWithEmotes(text, speaker, emotes, decorateContext, rng);
+      }
     }
 
     const kind: MessageKind = replyTarget
@@ -275,31 +361,66 @@ export function directIdle(options: IdleOptions): IdleResult | null {
       ? rng.pick(targets)[1]
       : undefined;
 
-  const entries = replyTo ? SIDE_REPLIES : idlePoolFor(silentMs);
+  // Idle has no strong intent; "mundane"/"neutral" keeps emotes calm.
+  const idleClassification: Classification = {
+    intent: "mundane",
+    sentiment: "neutral",
+    energy: 0,
+    keywords: [],
+    confidence: 0,
+  };
 
-  const result = generateFromPool(
-    entries,
-    speaker,
-    population.tagBias(speaker),
-    { keywords: [], emotes, replyTo, recentTexts: options.recentTexts },
+  // Idle goes through the same depth mix as reactions. Without this it
+  // bypassed the length distribution entirely and, because the idle pools are
+  // written as whole thoughts, quietly became the main source of medium-length
+  // messages in a session.
+  const depth = pickDepth(
+    { viewer: speaker, energy: 0, position: 1 },
     rng,
   );
-  if (result === null) return null;
 
-  let text = result.text;
-  if (settings.emotesEnabled) {
-    // Idle has no strong intent; "mundane" keeps emotes calm rather than hype.
-    text = decorateWithEmotes(
-      text,
+  let text: string | null = null;
+  let template = "";
+
+  if (!replyTo && depth === "ambient" && settings.emotesEnabled) {
+    text = maybeEmoteOnly(speaker, emotes, idleClassification, rng);
+  }
+
+  if (text === null) {
+    const entries = replyTo
+      ? SIDE_REPLIES
+      : entriesForDepth(
+          depth,
+          idlePoolFor(silentMs),
+          idleClassification,
+          IDLE_AMBIENT,
+        );
+
+    const result = generateFromPool(
+      entries,
       speaker,
-      emotes,
-      { intent: "mundane", sentiment: "neutral" },
+      population.tagBias(speaker),
+      { keywords: [], emotes, replyTo, recentTexts: options.recentTexts },
       rng,
     );
+    if (result === null) return null;
+
+    text = result.text;
+    template = result.template;
+
+    if (settings.emotesEnabled && depth !== "ambient") {
+      text = decorateWithEmotes(
+        text,
+        speaker,
+        emotes,
+        { intent: "mundane", sentiment: "neutral" },
+        rng,
+      );
+    }
   }
 
   return {
-    template: result.template,
+    template,
     message: {
       id: `i${now}-${speaker.id}`,
       viewerId: speaker.id,

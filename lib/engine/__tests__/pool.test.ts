@@ -117,13 +117,13 @@ describe("generateFromPool", () => {
   it("favours short entries for terse viewers", () => {
     const rng = createRng(3);
     const mixed: ResponseEntry[] = [
-      { text: "tiny one", length: "tiny" },
+      { text: "W", length: "tiny" },
       { text: "a much longer sentence", length: "long" },
     ];
     let tiny = 0;
     for (let i = 0; i < 500; i++) {
       const r = generateFromPool(mixed, viewer({ verbosity: 0 }), {}, { keywords: [], emotes: [] }, rng);
-      if (r!.template === "tiny one") tiny++;
+      if (r!.template === "W") tiny++;
     }
     expect(tiny / 500).toBeGreaterThan(0.8);
   });

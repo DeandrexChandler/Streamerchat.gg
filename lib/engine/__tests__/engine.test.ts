@@ -172,16 +172,36 @@ describe("SimulationEngine", () => {
   });
 
   it("can use supplied AI candidates when aiShare is high", () => {
+    // AI only fills "engaged"/"invested" messages, which are a minority of
+    // traffic by design — so observing one needs a longer window than the
+    // aiShare value alone would suggest.
     const engine = make({ aiShare: 0.4 });
     engine.supplyAiCandidates(
-      Array.from({ length: 20 }, (_, i) => `ai candidate ${i}`),
+      Array.from({ length: 40 }, (_, i) => `an ai written candidate line ${i}`),
     );
-    const messages = run(engine, 120_000, [
-      [1000, "chat what do you think"],
-      [20_000, "look at this"],
-      [40_000, "let's go"],
+    const messages = run(engine, 400_000, [
+      [1_000, "chat what do you think about the roof or the walls"],
+      [40_000, "look at this, check out how it turned out"],
+      [90_000, "so yesterday this really funny thing happened at work"],
+      [150_000, "I have no idea how any of this works, I'm completely lost"],
+      [220_000, "come on, this is so annoying, not again"],
+      [300_000, "chat should I keep going or call it here"],
     ]);
     expect(messages.some((m) => m.source === "ai")).toBe(true);
+  });
+
+  it("never spends an AI call on a one-word reaction", () => {
+    // Generating "W" through a language model is pure waste.
+    const engine = make({ aiShare: 0.4 });
+    engine.supplyAiCandidates(Array.from({ length: 40 }, () => "x"));
+    const messages = run(engine, 300_000, [
+      [1_000, "chat what do you think about the roof"],
+      [60_000, "look at this"],
+      [140_000, "so yesterday something funny happened"],
+    ]);
+    for (const m of messages.filter((x) => x.source === "ai")) {
+      expect(m.text.trim().split(/\s+/).length).toBeGreaterThan(1);
+    }
   });
 
   it("does not want an AI refill when the tier is disabled", () => {
@@ -313,3 +333,92 @@ describe("username generation", () => {
     }
   });
 });
+
+describe("SimulationEngine message shape", () => {
+  /** Word-count histogram over a long multi-seed session. */
+  function lengthMix(seeds: number[]) {
+    const counts = { one: 0, few: 0, medium: 0, long: 0, total: 0 };
+
+    for (const seed of seeds) {
+      const engine = make({ idleAfterSeconds: 12 }, seed);
+      const messages = run(engine, 400_000, [
+        [1_000, "hey everyone welcome in"],
+        [30_000, "chat what do you think about the roof or the walls"],
+        [70_000, "LET'S GO that was insane!"],
+        [110_000, "look at this, check out how it turned out"],
+        [160_000, "come on, this is so annoying, not again"],
+        [210_000, "so yesterday this really funny thing happened at work"],
+        [260_000, "finally, we did it, got it"],
+        [310_000, "I have no idea how this works, I'm lost"],
+      ]);
+
+      for (const m of messages) {
+        const words = m.text.trim().split(/\s+/).filter(Boolean).length;
+        counts.total++;
+        if (words <= 1) counts.one++;
+        else if (words <= 3) counts.few++;
+        else if (words <= 6) counts.medium++;
+        else counts.long++;
+      }
+    }
+
+    return counts;
+  }
+
+  const SEEDS = [11, 22, 33, 44, 55, 66, 77, 88];
+
+  it("is dominated by emotes and single words", () => {
+    // The realism failure this replaced: a wall of articulate 4-6 word
+    // statements, as if every viewer were competing to say something clever.
+    const mix = lengthMix(SEEDS);
+    expect(mix.one / mix.total).toBeGreaterThan(0.4);
+  });
+
+  it("keeps medium-length statements a minority", () => {
+    const mix = lengthMix(SEEDS);
+    expect(mix.medium / mix.total).toBeLessThan(0.25);
+  });
+
+  it("produces full sentences occasionally but rarely", () => {
+    const mix = lengthMix(SEEDS);
+    const share = mix.long / mix.total;
+    expect(share).toBeGreaterThan(0);
+    expect(share).toBeLessThan(0.1);
+  });
+
+  it("ignores a meaningful share of what the streamer says", () => {
+    // Chat that responds to literally every utterance feels relentless.
+    const engine = make({ idleAfterSeconds: 12 }, 4321);
+    const script: Array<[number, string]> = Array.from({ length: 24 }, (_, i) => [
+      i * 8_000 + 1_000,
+      "okay so anyway I think we're just about done with this part here",
+    ]);
+    run(engine, 220_000, script);
+    expect(engine.stats().ignored).toBeGreaterThan(6);
+  });
+
+  it("still answers every direct question to chat", () => {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const engine = make({ idleEnabled: false }, seed);
+      const messages = run(engine, 40_000, [
+        [1_000, "chat what do you think, should I do the roof or the walls"],
+      ]);
+      expect(messages.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("does not post reply-shaped affirmations into silence", () => {
+    // "true", "gotcha", "makes sense" only mean something as a response;
+    // posted into an empty chat they read as agreeing with nobody.
+    const engine = make({ idleAfterSeconds: 10 }, 8080);
+    const messages = run(engine, 300_000);
+    const idleTexts = messages
+      .filter((m) => m.kind === "idle")
+      .map((m) => m.text.toLowerCase());
+
+    expect(idleTexts.length).toBeGreaterThan(5);
+    for (const text of idleTexts) {
+      expect(["true", "gotcha", "i see", "makes sense", "fair", "sure"]).not.toContain(text);
+    }
+  });
+})

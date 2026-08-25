@@ -1,4 +1,4 @@
-# StreamerChat.gg
+# StreamerChat.gg (fully built using AI)
 
 A simulated live chat for streams that are quiet.
 

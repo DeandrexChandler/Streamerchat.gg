@@ -16,6 +16,23 @@ import type {
  * tops up variety, it never keeps chat moving.
  */
 
+/**
+ * Length class derived from the text itself rather than the authored tag.
+ *
+ * Hand-applied `length` tags drift: entries marked "short" in the reaction
+ * pools were routinely four or five words, which quietly broke every
+ * length-based decision downstream. Measuring the string removes a whole class
+ * of authoring mistake, and means adding a pool entry requires no judgement
+ * about which bucket it belongs in.
+ */
+export function measureLength(text: string): LengthClass {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  if (words <= 1) return "tiny";
+  if (words <= 3) return "short";
+  if (words <= 6) return "medium";
+  return "long";
+}
+
 /** How strongly a viewer's verbosity should favour each length class. */
 const LENGTH_AFFINITY: Record<LengthClass, (verbosity: number) => number> = {
   tiny: (v) => 1.6 - v,
@@ -48,7 +65,7 @@ export function scoreEntry(
 ): number {
   let score = entry.weight ?? 1;
   for (const tag of entry.tags ?? []) score *= tagBias[tag] ?? 1;
-  score *= LENGTH_AFFINITY[entry.length ?? "short"](viewer.verbosity);
+  score *= LENGTH_AFFINITY[measureLength(entry.text)](viewer.verbosity);
   return Math.max(0.001, score);
 }
 

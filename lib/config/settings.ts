@@ -35,7 +35,15 @@ export const SimulationSettingsSchema = z.object({
   /** Words exempted from the built-in filter. */
   allowedWords: z.array(z.string()).default([]),
 
-  /** Share of messages allowed to come from the AI tier. 0 = fully offline. */
+  /**
+   * Probability that a *substantive* message is drawn from the AI tier.
+   * 0 = fully offline.
+   *
+   * Note this is not a share of all traffic. AI is only ever used for
+   * "engaged"/"invested" messages, which are a minority by design — spending
+   * a model call to produce "W" or an emote would be pure waste. Effective
+   * AI usage lands well under this number.
+   */
   aiShare: z.number().min(0).max(0.4).default(0.05),
 
   /** Optional context so chat can reference the streamer and what they're doing. */

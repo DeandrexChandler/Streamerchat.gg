@@ -57,6 +57,7 @@ console.log(`${BOLD}=== headless simulation (seed ${SEED}) ===${RESET}\n`);
 let scriptIndex = 0;
 const gaps: number[] = [];
 let lastMessageAt: number | null = null;
+const emitted: string[] = [];
 
 for (let now = 0; now <= DURATION_S * 1000; now += STEP_MS) {
   while (
@@ -75,6 +76,7 @@ for (let now = 0; now <= DURATION_S * 1000; now += STEP_MS) {
   }
 
   for (const message of engine.tick(now)) {
+    emitted.push(message.text);
     if (lastMessageAt !== null) gaps.push(now - lastMessageAt);
     lastMessageAt = now;
     const tag = message.kind === "idle" ? `${DIM}(idle)${RESET} ` : "";
@@ -110,4 +112,25 @@ for (const [label, n] of Object.entries(buckets)) {
 }
 console.log(`audience:       ${stats.audience}`);
 console.log(`by source:      ${JSON.stringify(stats.bySource)}`);
+
+// Length distribution is the other pacing health check. Real chat is
+// dominated by emotes and one-word reactions; a wall of 4-6 word statements
+// reads as everyone competing to say something clever.
+const lengths = { "emote/1 word": 0, "2-3 words": 0, "4-6 words": 0, "7-9 words": 0, "10+ words": 0 };
+for (const text of emitted) {
+  const n = text.trim().split(/\s+/).length;
+  if (n <= 1) lengths["emote/1 word"]++;
+  else if (n <= 3) lengths["2-3 words"]++;
+  else if (n <= 6) lengths["4-6 words"]++;
+  else if (n <= 9) lengths["7-9 words"]++;
+  else lengths["10+ words"]++;
+}
+console.log("length spread:");
+for (const [label, n] of Object.entries(lengths)) {
+  const pct = (n / Math.max(1, emitted.length)) * 100;
+  console.log(
+    `  ${label.padEnd(13)} ${String(n).padStart(3)}  ${"#".repeat(Math.round(pct / 2))} ${pct.toFixed(0)}%`,
+  );
+}
+console.log(`ignored:        ${stats.ignored} of ${SCRIPT.length} utterances skipped by the attention gate`);
 console.log(`still queued:   ${stats.pending}`);

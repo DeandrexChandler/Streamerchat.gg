@@ -66,6 +66,7 @@ export function useSimulator(
     audience: 0,
     pending: 0,
     released: 0,
+    ignored: 0,
     bySource: {},
   });
   const [settings, setSettings] = useState<SimulationSettings>(DEFAULT_SETTINGS);

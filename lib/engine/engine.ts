@@ -1,5 +1,6 @@
 import type { SimulationSettings } from "../config/settings";
 import { DEFAULT_SETTINGS } from "../config/settings";
+import { shouldReact } from "./attention";
 import { classify } from "./classifier";
 import { directIdle, directReaction } from "./director";
 import { Population } from "./population";
@@ -31,6 +32,8 @@ export interface EngineStats {
   pending: number;
   released: number;
   bySource: Record<string, number>;
+  /** Utterances the attention gate deliberately skipped. */
+  ignored: number;
 }
 
 export class SimulationEngine {
@@ -56,6 +59,9 @@ export class SimulationEngine {
   private aiCandidates: string[] = [];
 
   private previousIntent: Classification["intent"] | undefined;
+  /** Release timestamps, used to compute reaction fatigue. */
+  private releaseTimes: number[] = [];
+  private ignoredCount = 0;
 
   private releasedCount = 0;
   private readonly sourceCounts: Record<string, number> = {};
@@ -116,7 +122,22 @@ export class SimulationEngine {
       previousIntent: this.previousIntent,
       msSincePrevious: now - previousSpeechAt,
     });
+    const repeatsPrevious = this.previousIntent === classification.intent;
     this.previousIntent = classification.intent;
+
+    // Chat is allowed to simply not care. Reacting to every single utterance
+    // is what makes generated chat feel relentless and attention-seeking —
+    // real chat ignores most background talk and answers what's aimed at it.
+    if (
+      !shouldReact(
+        classification,
+        { recentVolume: this.recentVolume(now), repeatsPrevious },
+        this.rng,
+      )
+    ) {
+      this.ignoredCount++;
+      return classification;
+    }
 
     const { messages, templates } = directReaction({
       classification,
@@ -155,6 +176,8 @@ export class SimulationEngine {
       if (this.recentSpeakers.length > 8) this.recentSpeakers.shift();
 
       this.releasedCount++;
+      // Only reactions count toward fatigue — see shouldReact().
+      if (final.kind !== "idle") this.releaseTimes.push(now);
       this.sourceCounts[final.source] = (this.sourceCounts[final.source] ?? 0) + 1;
       visible.push(final);
     }
@@ -179,6 +202,16 @@ export class SimulationEngine {
   private rememberText(template: string): void {
     this.recentTexts.push(template);
     if (this.recentTexts.length > 40) this.recentTexts.shift();
+  }
+
+  /** Messages released in the last 30s. Drives the fatigue damper. */
+  private recentVolume(now: number): number {
+    const cutoff = now - 30_000;
+    // Trim in place; the array is otherwise unbounded over a long stream.
+    while (this.releaseTimes.length > 0 && this.releaseTimes[0] < cutoff) {
+      this.releaseTimes.shift();
+    }
+    return this.releaseTimes.length;
   }
 
   private maybeIdle(now: number): void {
@@ -225,6 +258,7 @@ export class SimulationEngine {
       audience: this.population.size,
       pending: this.scheduler.pending,
       released: this.releasedCount,
+      ignored: this.ignoredCount,
       bySource: { ...this.sourceCounts },
     };
   }
