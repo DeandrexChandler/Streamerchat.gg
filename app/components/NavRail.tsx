@@ -18,7 +18,7 @@ export function NavRail() {
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-purple-600 text-sm font-bold">
           S
         </span>
-        <span className="hidden truncate font-semibold sm:block">StreamerChat</span>
+        <span className="hidden truncate font-semibold sm:block">StreamerChat.gg</span>
       </Link>
 
       {LINKS.map(({ href, label, icon: Icon }) => {

@@ -778,7 +778,7 @@ export default function DashboardSimulatorPage() {
     >
       {/* Chat header */}
       <div className="bg-[#1f1f23] border-b border-gray-700 p-3 flex items-center justify-between">
-        <h2 className="text-white font-semibold text-sm">StreamerChatAi</h2>
+        <h2 className="text-white font-semibold text-sm">StreamerChat.gg</h2>
         <div className="flex items-center gap-3">
           {/* Connection Status */}
           <div className="flex items-center gap-2 text-xs">

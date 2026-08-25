@@ -3,7 +3,7 @@ import { Toaster } from "sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "StreamerChat",
+  title: "StreamerChat.gg",
   description: "A simulated live chat for streamers with quiet chats.",
 };
 

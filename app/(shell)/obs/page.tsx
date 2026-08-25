@@ -42,7 +42,7 @@ export default function OBSPage() {
   };
 
   const handleDownloadCSS = () => {
-    const css = `/* StreamerChatAI Custom Overlay Styles */
+    const css = `/* StreamerChat.gg Custom Overlay Styles */
 .chat-overlay {
   width: ${overlaySettings.width}px;
   height: ${overlaySettings.height}px;
@@ -91,7 +91,7 @@ export default function OBSPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "streamerchatai-overlay.css";
+    a.download = "streamerchat-gg-overlay.css";
     a.click();
     toast.success("CSS file downloaded");
   };
@@ -425,7 +425,7 @@ export default function OBSPage() {
               </li>
               <li className="flex gap-3">
                 <span className="font-semibold text-purple-600">3.</span>
-                <span>Name it "StreamerChatAI Overlay"</span>
+                <span>Name it "StreamerChat.gg Overlay"</span>
               </li>
               <li className="flex gap-3">
                 <span className="font-semibold text-purple-600">4.</span>

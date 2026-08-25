@@ -31,7 +31,7 @@ function OverlayContent() {
   // Listen for messages from simulator via localStorage or BroadcastChannel
   useEffect(() => {
     // Use BroadcastChannel for cross-tab communication
-    const channel = new BroadcastChannel("streamerchatai_overlay");
+    const channel = new BroadcastChannel("streamerchat-gg:overlay");
 
     channel.onmessage = (event) => {
       if (event.data.type === "chat_message") {

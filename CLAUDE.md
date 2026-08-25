@@ -1,4 +1,4 @@
-# CLAUDE.md — Engineering rules for StreamerChat
+# CLAUDE.md — Engineering rules for StreamerChat.gg
 
 ## What this is
 

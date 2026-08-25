@@ -1,726 +1,187 @@
-# **add report a bug page**
-# 🎮 StreamerChatAI
+# StreamerChat.gg
 
-**Practice makes perfect streaming.** StreamerChatAI is an AI-powered chat simulator that helps streamers practice engaging with their audience before going live. Train your chat interaction skills with realistic, emotion-based chat messages powered by AI.
+A simulated live chat for streams that are quiet.
 
-![Next.js](https://img.shields.io/badge/Next.js-16.0.0-black)
-![React](https://img.shields.io/badge/React-19.2.0-blue)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4.18-38bdf8)
-![License](https://img.shields.io/badge/License-MIT-green)
+You talk. A simulated audience reacts — in real time, with recurring names,
+personalities, side conversations, and the occasional stretch of boredom when
+you stop talking. It's built for practicing audience interaction, making a low
+viewer-count stream feel less empty, and generating clip material.
 
----
-
-## 📋 Table of Contents
-
-- [Features](#-features)
-- [Quick Start](#-quick-start)
-- [Environment Setup](#-environment-setup)
-- [Project Structure](#-project-structure)
-- [Architecture](#-architecture)
-- [API Integration](#-api-integration)
-- [Adding Custom Emotes](#-adding-custom-emotes)
-- [Deployment](#-deployment)
-- [Acceptance Tests](#-acceptance-tests)
-- [Contributing](#-contributing)
-- [License](#-license)
+**Status: in active development.** The simulation engine works and is tested.
+The microphone pipeline and the rebuilt UI are being wired up next. See
+[Roadmap](#roadmap).
 
 ---
 
-## ✨ Features
+## How it works
 
-### Core Functionality
+The design principle is that **AI is a component inside the system, not the
+system itself**:
 
-- **🤖 AI-Powered Chat Simulation**: Realistic chat messages with emotion-based responses
-- **🎙️ Voice Recognition**: Practice responding to chat while talking (Whisper integration ready)
-- **📊 Advanced Analytics**: Track sessions, engagement rates, and improvement over time
-- **🎨 OBS Integration**: Browser source overlay for practicing with your actual stream setup
-- **⚙️ Customizable Settings**: Chat speed, message length, emote frequency, profanity filters
-- **😴 Bored Mode**: Simulates real viewer behavior when you go silent
-- **🛡️ Profanity Filter**: Multi-level content moderation (off/replace/filter)
-
-### User Experience
-
-- **🌓 Dark Mode**: Full dark/light/system theme support
-- **💾 Settings Persistence**: Save and load custom presets
-- **📈 Session Analytics**: Detailed charts and CSV export
-- **📱 Responsive Design**: Works on desktop, tablet, and mobile
-
-### Pages & Routes
-
-- **Marketing**: Landing, Features, Pricing, About, Contact
-- **Authentication**: Login, Signup (JWT-based)
-- **Dashboard**: Simulator, Analytics, OBS Integration
-- **Settings**: Theme, Simulation, Preset Management
-- **Help**: Help Center, FAQ, Privacy Policy, Terms of Service
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Node.js** 18+ and npm
-- **Git**
-
-### Installation
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/DeandrexChandler/streamer-chat-ai.git
-   ```
-
-2. **Install dependencies**
-
-   ```bash
-   npm install
-   ```
-
-3. **Set up environment variables**
-
-   ```bash
-   cp .env.example .env.local
-   ```
-
-   Edit `.env.local` with your configuration (see [Environment Setup](#-environment-setup))
-
-4. **Run the development server**
-
-   ```bash
-   npm run dev
-   ```
-
-5. **Open your browser**
-   ```
-   http://localhost:3000
-   ```
-
----
-
-## 🔐 Environment Setup
-
-Create a `.env.local` file in the root directory:
-
-```env
-# JWT Authentication
-JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-
-# OpenAI API (Optional - for AI-powered chat generation)
-OPENAI_API_KEY=sk-your-openai-api-key-here
-
-# Whisper API (Optional - for voice recognition)
-WHISPER_API_KEY=your-whisper-api-key-here
-
-# Database (Optional - for production persistence)
-DATABASE_URL=postgresql://user:password@localhost:5432/streamerchatai
-
-# Next.js
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
+Microphone → Transcription → Classifier → Director → Scheduler → Chat
+                                              ↑
+                              pools · templates · AI (~5%)
 ```
 
-### Required Environment Variables
+Deterministic code owns everything it reasonably can — timing, message
+frequency, usernames, colors, emote choice, personalities, idle behaviour,
+scheduling, rate limiting. A language model is used only where language
+generation genuinely helps: novel phrasing for unusual statements, and topping
+up variety when the classifier is unsure.
 
-| Variable          | Description                             | Required                                    |
-| ----------------- | --------------------------------------- | ------------------------------------------- |
-| `JWT_SECRET`      | Secret key for JWT token signing        | ✅ Yes                                      |
-| `OPENAI_API_KEY`  | OpenAI API key for AI chat generation   | ⚠️ Optional (uses mock data if not set)     |
-| `WHISPER_API_KEY` | Whisper API key for voice transcription | ⚠️ Optional (mic input disabled if not set) |
-| `DATABASE_URL`    | PostgreSQL connection string            | ⚠️ Optional (uses localStorage if not set)  |
+This is not an aesthetic preference. It makes the app cheaper, faster, more
+predictable, easier to debug, and — most importantly — **fully functional with
+no API keys and no network**.
 
-### Generating JWT Secret
+### Why not just send everything to a model?
+
+Because "streamer said something → model writes 12 comments → all 12 appear at
+once" does not look like chat. It looks like a chatbot filling a box.
+
+Real chat has structure the model isn't well suited to reproducing on its own:
+
+- **The same people keep talking.** A persistent audience of ~45 viewers is
+  created per session, each with a stable name, color, personality, and
+  activity level, weighted heavily toward lurkers. A fresh random username on
+  every line is the single loudest tell of a fake chat.
+- **Reactions arrive in clumps, not evenly.** Two people hit enter within
+  200ms, then nothing for four seconds, then a straggler. Gaps are drawn from
+  a mixture distribution, because an even spread reads as machine-generated
+  regardless of how good the text is.
+- **People talk to each other**, not just to the streamer.
+- **Chat gets bored** in escalating stages, and eventually gives up on you and
+  starts entertaining itself.
+
+The `director` decides what a moment is worth; the `scheduler` decides when
+each message lands. Keeping those separate is what prevents the dump-everything
+failure mode.
+
+---
+
+## Quick start
+
+Requires Node 20+.
 
 ```bash
-# Generate a secure random string
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+npm install
+npm run dev
 ```
 
----
+Open <http://localhost:3000>. **No API keys required** — the simulation runs
+entirely offline.
 
-## 📁 Project Structure
+### See it without a browser
 
-```
-streamer-chat-ai/
-├── app/                          # Next.js App Router
-│   ├── page.tsx                  # Landing page
-│   ├── layout.tsx                # Root layout
-│   ├── globals.css               # Global styles
-│   │
-│   ├── login/                    # Authentication
-│   │   └── page.tsx
-│   ├── signup/
-│   │   └── page.tsx
-│   │
-│   ├── pricing/                  # Marketing pages
-│   │   └── page.tsx
-│   ├── features/
-│   │   └── page.tsx
-│   ├── about/
-│   │   └── page.tsx
-│   ├── contact/
-│   │   └── page.tsx
-│   │
-│   ├── dashboard/                # Protected dashboard
-│   │   ├── layout.tsx            # Dashboard layout with sidebar
-│   │   ├── simulator/            # Main chat simulator
-│   │   │   └── page.tsx
-│   │   ├── analytics/            # Analytics & charts
-│   │   │   └── page.tsx
-│   │   ├── obs/                  # OBS integration
-│   │   │   └── page.tsx
-│   │   ├── settings/             # Settings pages
-│   │   │   ├── theme/
-│   │   │   ├── simulation/
-│   │   │   └── more/
-│   │   ├── help/                 # Help center
-│   │   │   └── page.tsx
-│   │   ├── faq/
-│   │   │   └── page.tsx
-│   │   ├── privacy/
-│   │   │   └── page.tsx
-│   │   └── terms/
-│   │       └── page.tsx
-│   │
-│   ├── overlay/                  # OBS overlay endpoint
-│   │   └── page.tsx
-│   │
-│   └── api/                      # API routes
-│       ├── auth/
-│       │   ├── login/
-│       │   └── signup/
-│       ├── generate/             # AI chat generation
-│       ├── transcribe/           # Voice transcription
-│       ├── emotes/               # Emote management
-│       └── analytics/            # Analytics data
-│
-├── lib/                          # Utility libraries
-│   ├── emotes.ts                 # Emote cache & utilities
-│   ├── chatGenerator.ts          # Chat message generator
-│   ├── profanityFilter.ts        # Content moderation
-│   ├── settings.ts               # Settings persistence
-│   └── auth.ts                   # JWT authentication
-│
-├── components/                   # React components
-│   ├── DashboardLayout.tsx       # Dashboard wrapper
-│   ├── ChatFeed.tsx              # Chat message display
-│   ├── MicInput.tsx              # Microphone controls
-│   ├── SettingsPanel.tsx         # Settings sidebar
-│   └── SimulatorInterface.tsx    # Main simulator UI
-│
-├── .emote_cache.json             # Emote definitions
-├── package.json                  # Dependencies
-├── tsconfig.json                 # TypeScript config
-├── tailwind.config.ts            # Tailwind CSS config
-├── next.config.ts                # Next.js config
-└── README.md                     # This file
-```
-
-
-
----
-
-## 🏗️ Architecture
-
-### Frontend Architecture
-
-- **Framework**: Next.js 16 with App Router
-- **UI Library**: React 19 with Server & Client Components
-- **Styling**: Tailwind CSS v3 with custom theme
-- **State Management**: React hooks + localStorage
-- **Icons**: Lucide React
-- **Charts**: Recharts
-- **Notifications**: Sonner (toast notifications)
-
-### Backend Architecture
-
-- **API**: Next.js API Routes (REST)
-- **Authentication**: JWT with jose library
-- **Password Hashing**: bcryptjs
-- **Data Storage**:
-  - Development: localStorage
-  - Production: PostgreSQL (ready for Prisma)
-
-### Key Utilities
-
-#### Chat Generator (`lib/chatGenerator.ts`)
-
-Generates realistic chat messages with:
-
-- Random usernames from pool
-- Emotion-based message selection
-- Emote integration based on emotion
-- Message length variation (1-20 words)
-- Bored mode (idle detection)
-
-#### Profanity Filter (`lib/profanityFilter.ts`)
-
-Three-level filtering system:
-
-- **Off**: No filtering
-- **Replace**: Replace bad words with asterisks
-- **Filter**: Remove messages entirely
-
-#### Settings Manager (`lib/settings.ts`)
-
-Handles:
-
-- Theme preferences (dark/light/system)
-- Simulation settings (speed, emotes, filters)
-- Preset save/load/delete
-- Import/export settings as JSON
-
----
-
-## 🔌 API Integration
-
-### Integrating OpenAI for Chat Generation
-
-Replace the mock chat generator with real AI:
-
-1. **Install OpenAI SDK**
-
-   ```bash
-   npm install openai
-   ```
-
-2. **Update `app/api/generate/route.ts`**
-
-   ```typescript
-   import OpenAI from "openai";
-
-   const openai = new OpenAI({
-     apiKey: process.env.OPENAI_API_KEY,
-   });
-
-   export async function POST(request: Request) {
-     const { emotion, context } = await request.json();
-
-     const completion = await openai.chat.completions.create({
-       model: "gpt-4",
-       messages: [
-         {
-           role: "system",
-           content: `You are a Twitch chat viewer. Generate short, casual chat messages with ${emotion} emotion.`,
-         },
-         {
-           role: "user",
-           content: context || "Generate a chat message",
-         },
-       ],
-       max_tokens: 50,
-     });
-
-     return Response.json({
-       message: completion.choices[0].message.content,
-     });
-   }
-   ```
-
-3. **Update Chat Generator**
-   In `lib/chatGenerator.ts`, replace mock logic with API call:
-   ```typescript
-   const response = await fetch("/api/generate", {
-     method: "POST",
-     headers: { "Content-Type": "application/json" },
-     body: JSON.stringify({ emotion, context }),
-   });
-   const data = await response.json();
-   return data.message;
-   ```
-
-### Integrating Whisper for Voice Recognition
-
-1. **Install Dependencies**
-
-   ```bash
-   npm install @whisper/sdk
-   ```
-
-2. **Update `app/api/transcribe/route.ts`**
-
-   ```typescript
-   import { Whisper } from "@whisper/sdk";
-
-   const whisper = new Whisper({
-     apiKey: process.env.WHISPER_API_KEY,
-   });
-
-   export async function POST(request: Request) {
-     const formData = await request.formData();
-     const audioFile = formData.get("audio") as File;
-
-     const transcription = await whisper.transcribe(audioFile);
-
-     return Response.json({
-       text: transcription.text,
-       confidence: transcription.confidence,
-     });
-   }
-   ```
-
-3. **Update Mic Input Component**
-   In `components/MicInput.tsx`, send audio to API:
-   ```typescript
-   const sendAudioToAPI = async (audioBlob: Blob) => {
-     const formData = new FormData();
-     formData.append("audio", audioBlob);
-
-     const response = await fetch("/api/transcribe", {
-       method: "POST",
-       body: formData,
-     });
-     const data = await response.json();
-     handleTranscription(data.text);
-   };
-   ```
-
----
-
-## 🎭 Adding Custom Emotes
-
-Emotes are stored in `.emote_cache.json` with emotion tags.
-
-### Emote Structure
-
-```json
-{
-  "emotes": [
-    {
-      "code": "PogChamp",
-      "url": "https://static-cdn.jtvnw.net/emoticons/v2/305954156/default/dark/1.0",
-      "emotions": ["happy", "excited"]
-    },
-    {
-      "code": "Sadge",
-      "url": "https://cdn.7tv.app/emote/61c8be38e96a69bcf8d86e58/1x.webp",
-      "emotions": ["sad"]
-    }
-  ]
-}
-```
-
-### Adding New Emotes
-
-1. **Open `.emote_cache.json`**
-
-2. **Add emote object**
-
-   ```json
-   {
-     "code": "YourEmote",
-     "url": "https://your-cdn.com/emote.png",
-     "emotions": ["happy", "toxic", "neutral"]
-   }
-   ```
-
-3. **Available Emotions**
-   - `happy` - Positive, excited messages
-   - `sad` - Disappointed, upset messages
-   - `toxic` - Aggressive, negative messages
-   - `thinking` - Confused, questioning messages
-   - `neutral` - Generic, casual messages
-
-### Emote Sources
-
-- **Twitch**: https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/default/dark/1.0
-- **7TV**: https://cdn.7tv.app/emote/{emote_id}/1x.webp
-- **BTTV**: https://cdn.betterttv.net/emote/{emote_id}/1x
-- **FFZ**: https://cdn.frankerfacez.com/emote/{emote_id}/1
-
----
-
-## 🚢 Deployment
-
-### Vercel (Recommended)
-
-1. **Push to GitHub**
-
-   ```bash
-   git add .
-   git commit -m "Ready for deployment"
-   git push origin main
-   ```
-
-2. **Import to Vercel**
-
-   - Go to [vercel.com](https://vercel.com)
-   - Click "New Project"
-   - Import your GitHub repository
-   - Add environment variables
-   - Click "Deploy"
-
-3. **Environment Variables in Vercel**
-   - Go to Project Settings → Environment Variables
-   - Add all variables from `.env.local`
-
-### Netlify
-
-1. **Build Settings**
-
-   - Build command: `npm run build`
-   - Publish directory: `.next`
-
-2. **Deploy**
-   ```bash
-   npm install -g netlify-cli
-   netlify deploy --prod
-   ```
-
-### Docker
-
-```dockerfile
-FROM node:18-alpine
-
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm ci --only=production
-
-COPY . .
-RUN npm run build
-
-EXPOSE 3000
-
-CMD ["npm", "start"]
-```
-
-Build and run:
+The fastest way to judge pacing and message quality is the headless harness. It
+runs a scripted stream session against a virtual clock and prints the chat log,
+no microphone involved:
 
 ```bash
-docker build -t streamerchatai .
-docker run -p 3000:3000 --env-file .env.local streamerchatai
+npm run simulate            # random seed
+npm run simulate -- 12345   # fixed seed, reproducible
+```
+
+```
+00:16 STREAMER: chat what do you think, should I do the roof first or the walls?
+      -> question_to_chat | energy 0.27 | conf 1.00 | kw [first, walls, roof]
+
+00:16 biscuit_: i think so? ICANT
+00:17 wobblyclover: @biscuit_ LOL Thonk
+00:17 yuki90: i wasn't listening sorry
+00:19 kira97: honestly yeah Thonk
+00:21 sasha253: roof obviously
+00:30 sasha253: @snug_heather you're so right
 ```
 
 ---
 
-## ✅ Acceptance Tests
+## Configuration
 
-Run through these tests before deploying:
+Everything is optional. Copy `.env.example` to `.env.local` if you want either
+of the extras:
 
-### Authentication
+| Variable | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | Whisper transcription fallback, for browsers without the Web Speech API |
+| `GOOGLE_API_KEY` | The AI generation tier (~5% of messages) |
 
-- [ ] Sign up with new account
-- [ ] Log in with existing account
-- [ ] JWT token persists in localStorage
-- [ ] Protected routes redirect to login
-- [ ] Logout clears token
-
-### Simulator
-
-- [ ] Chat messages generate at configured speed
-- [ ] Pause/resume controls work
-- [ ] Manual "Send Message" input works
-- [ ] Emotes render correctly in messages
-- [ ] Bored mode triggers after silence
-- [ ] Auto-scroll keeps latest messages visible
-
-### Settings
-
-- [ ] Theme changes (light/dark/system) apply immediately
-- [ ] Chat speed slider updates simulation
-- [ ] Profanity filter blocks/replaces bad words
-- [ ] Settings persist after page reload
-- [ ] Presets save and load correctly
-- [ ] Export settings downloads JSON
-- [ ] Import settings loads from file
-
-### Analytics
-
-- [ ] Charts display mock data correctly
-- [ ] Bar chart shows 7-day usage
-- [ ] Line chart shows message trends
-- [ ] CSV export downloads data
-- [ ] Stats cards show correct metrics
-
-### OBS Integration
-
-- [ ] Overlay settings update preview in real-time
-- [ ] Browser source URL copies to clipboard
-- [ ] Overlay page displays at /overlay with URL params
-- [ ] CSS download generates valid stylesheet
-- [ ] Setup instructions are clear
-
-### Responsiveness
-
-- [ ] Works on mobile (375px width)
-- [ ] Works on tablet (768px width)
-- [ ] Works on desktop (1920px width)
-- [ ] Sidebar collapses on mobile
-- [ ] All buttons are clickable on touch devices
+**Never prefix either with `NEXT_PUBLIC_`.** That inlines the value into the
+client bundle and ships your key to every visitor.
 
 ---
 
-## 🤝 Contributing
+## Scripts
 
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Development Guidelines
-
-- Use TypeScript for all new code
-- Follow existing code style (Prettier + ESLint)
-- Add comments for complex logic
-- Test on multiple browsers
-- Ensure mobile responsiveness
+| Command | Does |
+|---|---|
+| `npm run dev` | Development server |
+| `npm run build` | Production build |
+| `npm test` | Test suite |
+| `npm run simulate` | Headless chat simulation |
+| `npm run typecheck` | TypeScript, no emit |
 
 ---
 
-## 📄 License
+## Layout
 
-This project is licensed under the MIT License. See `LICENSE` file for details.
+```
+app/
+  (shell)/         pages with app chrome — simulator, obs
+  overlay/         OBS browser source; no chrome, deliberately outside (shell)
+  api/             server routes
+lib/
+  engine/          classifier, director, scheduler, population, rng, filter
+  engine/generators/  pool + template + AI tiers
+  data/            response pools, personalities, usernames, emotes
+  config/          zod-validated settings + storage adapter
+  audio/           mic, VAD, utterance batching (plain classes, no React)
+scripts/
+  simulate.ts      headless harness
+```
 
----
-
-## 🙏 Acknowledgments
-
-- **OpenAI** - GPT models for chat generation
-- **Whisper** - Voice recognition technology
-- **Twitch** - Inspiration and emote sources
-- **Vercel** - Hosting and deployment platform
-- **Streaming Community** - Feedback and feature ideas
-
----
-
-## 📞 Support
-
-- **Email**: support@streamerchatai.com
-- **Discord**: [Join our community](#)
-- **GitHub Issues**: [Report bugs](https://github.com/DeandrexChandler/streamer-chat-ai/issues)
-- **Documentation**: [Help Center](/dashboard/help)
-
----
-
-**Built with ❤️ by streamers, for streamers.**
-
-Practice makes perfect. Start training today! 🎮
-├── Footer.tsx
-├── Navigation.tsx
-└── ui/
-├── Button.tsx
-├── Card.tsx
-└── Modal.tsx
-
-- random questions for engagement
-- mic sensitivity, threshold bar for loudness detection (4 uppercase in chat; like screaming)
-- ignore words filter (n*er, f*g, etc)
-- backgroun noise suprresion (advanced settings for premium)
-- 2 emotes modes for now (W community, Poggers community)
-- 7tv emotes on/off, emote only mode (need to add personality to emotes for proper usage)
-- mic transcription to include slang (bruh, SAJ, KEKW, etc.)
-- if nothing said: initiate "bored" mode where ai makes random comments/questions to streamer to keep engagement
-- ai mood settings (happy, serious, funny, sarcastic, clipfarming, etc.)
-
-
-ToDo
-- add white/black bg grey emote outline as simulator background. 
-
-Below is a clean README-style summary you can paste and reference later (not in my system tone).
+Chat *behaviour* lives in `lib/data/` as weighted pools and personality
+profiles. Adding new reactions is usually a data edit, not a code change —
+the goal is to avoid both "everything goes to a model" and "ten thousand
+hardcoded strings".
 
 ---
 
-## 🎯 AI Stream Chat Optimization Notes
+## Testing
 
-To keep costs low and performance high, the system uses smarter processing instead of constant polling.
+```bash
+npm test
+```
 
-### 🧠 Smarter Triggers
+127 tests covering classifier intents, scheduler timing and rate limits,
+weighted distributions, profanity modes, population dynamics, and end-to-end
+determinism.
 
-Instead of running the AI every 5 seconds, only run it when **meaningful speech or events occur**, like:
+Randomness runs through a seeded RNG rather than `Math.random()`, so a session
+is reproducible from its seed — which makes distributions assertable and lets
+a weird-looking chat log be replayed exactly.
 
-* New topic or hype moment
-* Emotional change (excited, tilted, surprised)
-* Gameplay events (kill, death, clutch, loss)
-
-Silence, filler (“uhh”, “hold on”), or small chatter is ignored.
-
-### ⏱️ Batch Processing (20–30 Seconds)
-
-The system collects ~20–30 seconds of audio and then:
-
-1️⃣ Transcribes it
-2️⃣ Summarizes key moments
-3️⃣ Generates 1 short chat-style response
-
-✅ **One API call instead of many**
-✅ Much cheaper than firing every 5 seconds
-
-### 🤫 Silence Detection
-
-Only send to the model when the streamer is actively talking or reacting.
-No speech = no cost.
-
-### 📦 Example Subscription Tiers (Hours-Based)
-
-| Tier       | Monthly Hours  | Notes                |
-| ---------- | -------------- | -------------------- |
-| Starter    | 30 hrs         | Casual streamers     |
-| Pro        | 120 hrs        | Regular streamers    |
-| Unlimited* | Fair-use based | Auto-throttles abuse |
-
-*Unlimited ≠ infinite; fair-use rules protect system cost
-
-### 💵 Cost Efficiency
-
-| Method             | API Calls / Hour | Cost Impact      |
-| ------------------ | ---------------- | ---------------- |
-| Every 5 seconds    | ~720             | ❌ Very expensive |
-| 20–30 sec batching | ~120–180         | ✅ ~80% cheaper   |
-| Batch + triggers   | ~60–100          | ⭐ Best balance   |
+Realism regressions are treated as real bugs and get real tests. "Chat repeated
+itself three times in six seconds" and "a viewer replied to themselves" are
+both covered.
 
 ---
 
-### ✅ TL;DR
+## Roadmap
 
-* Only respond when something meaningful happens
-* Batch 20–30s of speech before AI call
-* Summarize AND generate comments in one request
-* Silence filter on
-* Limit hours per month by subscription tier
+- [x] Simulation engine — population, classifier, director, scheduler, filter
+- [x] Headless harness and test suite
+- [ ] Microphone pipeline (Web Speech API, Whisper fallback)
+- [ ] Rebuilt simulator UI
+- [ ] Settings page
+- [ ] AI generation tier (Google Gemini)
+- [ ] OBS overlay transport
 
-**Result:** ✨ “Real-time feel” without burning API $$$
+Deliberately deferred until the product works end to end: accounts, database,
+analytics, and any marketing surface.
 
 ---
 
-Say when you want a diagram version or code sample to drop in your repo.
+## License
 
-⚡ Real-Time Chat Without High API Cost
-
-To simulate fast chat (1–2 messages per second) without expensive, constant model calls, the system uses a buffered chat strategy:
-
-How it works:
-
-Collect ~20–30 seconds of streamer audio
-
-Transcribe and summarize it once
-
-Ask the AI for 10–20 viewer-style reactions based on that segment
-
-Store them in a buffer
-
-Automatically drip messages out every 1–2 seconds
-
-Why this works:
-
-Only 1 model call every 20–30 seconds
-
-Chat still looks fast and alive
-
-Dramatically reduces token usage
-
-Hype moments:
-If a big reaction happens (kill, death, clutch, scream), the system can immediately request a new batch and flush the buffer to keep reactions fresh.
-
-Outcome:
-✅ Real-time feel
-✅ Low cost
-✅ Event-reactive chat
-✅ Not a dead “bot chat”
-
-This method keeps API usage extremely low while maintaining a lively, fast chat stream
-
-# CHAT KEYWORD TO ACTIVATE!! IT'LL REDUCE API CALLS AND ALLOW STREAMER TO READ CHAT WITHOUT GETTING IT TRANSCRIBED. 5-8 SECONDS BUFFER BETWEEN EACH ACTIVATION. DRIP CHAT 10-20 MESSAGES OUT AT .5-2 SECONDS APART FROM BUFFERED RESPONSES. create filler messages during silent periods based on the tone of the previous api call.
-
+MIT — see [LICENSE](LICENSE).

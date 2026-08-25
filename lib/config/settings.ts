@@ -55,7 +55,7 @@ export type SimulationSettings = z.infer<typeof SimulationSettingsSchema>;
 export const DEFAULT_SETTINGS: SimulationSettings =
   SimulationSettingsSchema.parse({});
 
-const STORAGE_KEY = "streamerchat:settings:v2";
+const STORAGE_KEY = "streamerchat-gg:settings:v2";
 
 /**
  * Storage is behind this interface so swapping localStorage for a database
