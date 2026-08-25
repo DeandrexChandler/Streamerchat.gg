@@ -2,23 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
-/*
- * The old rule pinned `html, body { overflow: hidden; height: 100vh }` globally,
- * which broke every scrollable page. Scroll containment is now the shell
- * layout's job (h-dvh + overflow-hidden), so ordinary pages scroll normally.
- */
-
 @layer base {
-  :root {
-    color-scheme: dark;
+  html, body {
+    @apply overflow-hidden h-screen;
   }
 }
 
-/* Animated "..." used by the simulator's playing indicator. */
-@keyframes dot-wave {
-  0%,
-  60%,
-  100% {
+/* Dots wave animation */
+@keyframes wave {
+  0%, 60%, 100% {
     transform: translateY(0);
   }
   30% {
@@ -27,14 +19,146 @@
 }
 
 .dot-wave span {
-  animation: dot-wave 1.4s ease-in-out infinite;
+  animation: wave 1.4s ease-in-out infinite;
 }
+
 .dot-wave span:nth-child(2) {
   animation-delay: 0.2s;
 }
+
 .dot-wave span:nth-child(3) {
   animation-delay: 0.4s;
 }
+
+/* Toggle Switch */
+.toggle {
+  appearance: none;
+  width: 2.5rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border-width: 2px;
+}
+
+.toggle::before {
+  content: '';
+  position: absolute;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 9999px;
+  background-color: white;
+  top: 50%;
+  left: 0.125rem;
+  transform: translateY(-50%);
+  transition: all 0.3s ease;
+}
+
+.toggle:checked::before {
+  left: calc(100% - 0.875rem);
+}
+
+/* Swap toggle animation */
+.swap {
+  position: relative;
+  display: inline-grid;
+  user-select: none;
+  place-content: center;
+  cursor: pointer;
+}
+
+.swap > * {
+  grid-column-start: 1;
+  grid-row-start: 1;
+  transition: all 0.3s ease-in-out;
+}
+
+.swap input {
+  appearance: none;
+}
+
+.swap .swap-on,
+.swap .swap-indeterminate,
+.swap input:indeterminate ~ .swap-on {
+  opacity: 0;
+}
+
+.swap input:checked ~ .swap-off,
+.swap.swap-active .swap-off,
+.swap input:indeterminate ~ .swap-off {
+  opacity: 0;
+}
+
+.swap input:checked ~ .swap-on,
+.swap.swap-active .swap-on,
+.swap input:indeterminate ~ .swap-indeterminate {
+  opacity: 1;
+}
+
+/* Swap rotate */
+.swap-rotate .swap-on,
+.swap-rotate .swap-indeterminate,
+.swap-rotate input:indeterminate ~ .swap-on {
+  transform: rotate(45deg);
+}
+
+.swap-rotate input:checked ~ .swap-off,
+.swap-rotate.swap-active .swap-off,
+.swap-rotate input:indeterminate ~ .swap-off {
+  transform: rotate(-45deg);
+}
+
+.swap-rotate input:checked ~ .swap-on,
+.swap-rotate.swap-active .swap-on,
+.swap-rotate input:indeterminate ~ .swap-indeterminate {
+  transform: rotate(0deg);
+}
+
+/* Custom animations */
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.delay-1000 {
+  animation-delay: 1s;
+}
+
+/* Custom Scrollbar Styles */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #9ca3af;
+  border-radius: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
+
+.dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #374151;
+}
+
 
 /* Chat message entry animation, shared by the simulator and the OBS overlay. */
 @keyframes chat-message-in {
@@ -54,7 +178,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .dot-wave span,
-  .chat-message-in {
+  .chat-message-in,
+  .animate-pulse-slow {
     animation: none;
   }
 }

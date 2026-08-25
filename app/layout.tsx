@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { Toaster } from "sonner";
 import "./globals.css";
+import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
   title: "StreamerChat.gg",
@@ -9,12 +9,18 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{ children: React.ReactNode }>) {
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html lang="en" className="dark">
-      <body className="bg-zinc-950 text-zinc-100 antialiased">
+    // No `dark` class here on purpose. The app chrome is light, which is what
+    // gives the dark #18181b chat column its edges — forcing dark mode made
+    // the chat background and the page background nearly identical and the
+    // chat pane visually bled across the whole screen.
+    <html lang="en">
+      <body>
         {children}
-        <Toaster position="bottom-right" theme="dark" richColors />
+        <Toaster position="bottom-right" richColors />
       </body>
     </html>
   );

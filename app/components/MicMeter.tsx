@@ -56,13 +56,13 @@ export function MicMeter({ subscribe, active, label }: MicMeterProps) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between text-xs">
-        <span className="text-zinc-400">Microphone</span>
-        <span ref={peakRef} className="tabular-nums text-zinc-500">
+        <span className="text-gray-500 dark:text-gray-400">Microphone</span>
+        <span ref={peakRef} className="tabular-nums text-gray-400 dark:text-gray-500">
           0%
         </span>
       </div>
 
-      <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
         <div
           ref={fillRef}
           className="h-full origin-left rounded-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-[width] duration-75 ease-out"
@@ -71,7 +71,7 @@ export function MicMeter({ subscribe, active, label }: MicMeterProps) {
       </div>
 
       {label && (
-        <p className="truncate text-[11px] text-zinc-500" title={label}>
+        <p className="truncate text-[11px] text-gray-400 dark:text-gray-500" title={label}>
           {label}
         </p>
       )}
