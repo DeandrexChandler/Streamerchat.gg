@@ -70,6 +70,13 @@ describe("SimulationEngine", () => {
     expect(times.size).toBeGreaterThan(2);
   });
 
+  it("reports whether it reacted to an utterance", () => {
+    const engine = make({ idleEnabled: false });
+    const outcome = engine.handleTranscript("chat what do you think", 1000);
+    expect(outcome?.reacted).toBe(true);
+    expect(outcome?.queued).toBeGreaterThan(0);
+  });
+
   it("ignores transcripts that are too short to be speech", () => {
     const engine = make();
     expect(engine.handleTranscript("a", 1000)).toBeNull();
@@ -206,18 +213,26 @@ describe("SimulationEngine", () => {
 
   it("does not want an AI refill when the tier is disabled", () => {
     const engine = make({ aiShare: 0 });
-    const classification = engine.handleTranscript("something vague", 1000);
-    expect(engine.wantsAiRefill(classification)).toBe(false);
+    const outcome = engine.handleTranscript("something vague", 1000);
+    expect(engine.wantsAiRefill(outcome)).toBe(false);
   });
 
-  it("wants an AI refill when the classifier is unsure", () => {
+  it("wants an AI refill on a high-energy moment", () => {
     const engine = make({ aiShare: 0.1 });
-    const classification = engine.handleTranscript(
-      "okay so we're gonna do the base",
+    const outcome = engine.handleTranscript(
+      "LET'S GO THAT WAS ABSOLUTELY INSANE AMAZING!!!",
       1000,
+      0.95,
     );
-    expect(classification!.confidence).toBeLessThan(0.55);
-    expect(engine.wantsAiRefill(classification)).toBe(true);
+    expect(outcome!.classification.energy).toBeGreaterThan(0.6);
+    expect(engine.wantsAiRefill(outcome)).toBe(true);
+  });
+
+  it("never spends an AI call on an utterance chat ignored", () => {
+    // No point generating a novel line for something nobody responded to.
+    const engine = make({ aiShare: 0.2 });
+    const ignored = { classification: { intent: "mundane" as const, sentiment: "neutral" as const, energy: 0.1, keywords: [], confidence: 0.15 }, reacted: false, queued: 0 };
+    expect(engine.wantsAiRefill(ignored)).toBe(false);
   });
 
   it("flush() clears queued messages", () => {

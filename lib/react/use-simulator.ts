@@ -5,7 +5,11 @@ import { MicSession } from "../audio/mic-session";
 import { DEFAULT_SETTINGS, localSettingsStore } from "../config/settings";
 import type { SimulationSettings } from "../config/settings";
 import { DEFAULT_EMOTES } from "../data/emotes";
-import { SimulationEngine, type EngineStats } from "../engine/engine";
+import {
+  SimulationEngine,
+  type EngineStats,
+  type TranscriptOutcome,
+} from "../engine/engine";
 import type { ChatMessage } from "../engine/types";
 import { createProvider, type ProviderId } from "../transcription";
 import type { TranscriptionProvider } from "../transcription/provider";
@@ -33,11 +37,21 @@ export type SimulatorStatus =
 /** How often the engine is advanced. Chat does not need frame-rate updates. */
 const TICK_MS = 200;
 
+/** One thing the streamer said, and what the engine made of it. */
+export interface HeardUtterance {
+  id: string;
+  text: string;
+  at: number;
+  outcome: TranscriptOutcome;
+}
+
 export interface UseSimulatorResult {
   status: SimulatorStatus;
   messages: ChatMessage[];
   /** In-progress speech, for display only. Never fed to the engine. */
   interim: string;
+  /** Recent utterances with their classification. Newest last. */
+  heard: HeardUtterance[];
   error: string | null;
   micLabel: string;
   stats: EngineStats;
@@ -57,9 +71,14 @@ export interface UseSimulatorResult {
 export function useSimulator(
   providerId: ProviderId = "web-speech",
 ): UseSimulatorResult {
+  // Demo mode replays a scripted session and skips microphone capture
+  // entirely, so the whole pipeline can be seen working with no mic, no
+  // permission prompt, and no Chrome requirement.
+  const isDemo = providerId === "mock";
   const [status, setStatus] = useState<SimulatorStatus>("idle");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [interim, setInterim] = useState("");
+  const [heard, setHeard] = useState<HeardUtterance[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [micLabel, setMicLabel] = useState("");
   const [stats, setStats] = useState<EngineStats>({
@@ -143,23 +162,27 @@ export function useSimulator(
     const engine = ensureEngine();
     engine.markActivity(Date.now());
 
-    // Mic capture and speech recognition are independent: recognition opens
-    // its own capture internally, while MicSession exists for the level meter
-    // and the loudness signal the classifier uses.
-    const mic = new MicSession();
-    micRef.current = mic;
+    if (isDemo) {
+      setMicLabel("Demo mode — no microphone");
+    } else {
+      // Mic capture and speech recognition are independent: recognition opens
+      // its own capture internally, while MicSession exists for the level
+      // meter and the loudness signal the classifier uses.
+      const mic = new MicSession();
+      micRef.current = mic;
 
-    mic.events.on("level", (level) => {
-      for (const handler of levelSubscribers.current) handler(level);
-    });
-    mic.events.on("error", ({ message }) => {
-      setError(message);
-      setStatus("error");
-    });
+      mic.events.on("level", (level) => {
+        for (const handler of levelSubscribers.current) handler(level);
+      });
+      mic.events.on("error", ({ message }) => {
+        setError(message);
+        setStatus("error");
+      });
 
-    const micOk = await mic.start();
-    if (!micOk) return;
-    setMicLabel(mic.label);
+      const micOk = await mic.start();
+      if (!micOk) return;
+      setMicLabel(mic.label);
+    }
 
     const provider = createProvider(providerId);
     providerRef.current = provider;
@@ -169,7 +192,14 @@ export function useSimulator(
       // Loudness at the moment of speech sharpens the classifier: the same
       // words shouted and muttered should not produce the same reaction.
       const energy = micRef.current?.recentEnergy() ?? undefined;
-      engineRef.current?.handleTranscript(text, Date.now(), energy);
+      const at = Date.now();
+      const outcome = engineRef.current?.handleTranscript(text, at, energy);
+      if (!outcome) return;
+
+      setHeard((previous) => {
+        const next = [...previous, { id: `${at}-${text.length}`, text, at, outcome }];
+        return next.length > 30 ? next.slice(-30) : next;
+      });
     });
 
     provider.events.on("interim", ({ text }) => setInterim(text));
@@ -181,7 +211,7 @@ export function useSimulator(
 
     await provider.start();
 
-    if (provider.name === "mock" && providerId === "web-speech") {
+    if (provider.name === "mock" && !isDemo) {
       setError(
         "Speech recognition is unavailable in this browser — running a scripted demo instead. Chrome or Edge is required.",
       );
@@ -190,7 +220,7 @@ export function useSimulator(
     pausedRef.current = false;
     startTicking();
     setStatus("running");
-  }, [status, providerId, ensureEngine, startTicking]);
+  }, [status, providerId, isDemo, ensureEngine, startTicking]);
 
   const stop = useCallback(() => {
     stopTicking();
@@ -223,7 +253,10 @@ export function useSimulator(
     setStatus("running");
   }, [status]);
 
-  const clear = useCallback(() => setMessages([]), []);
+  const clear = useCallback(() => {
+    setMessages([]);
+    setHeard([]);
+  }, []);
 
   const updateSettings = useCallback((patch: Partial<SimulationSettings>) => {
     const next = { ...settingsRef.current, ...patch };
@@ -247,6 +280,7 @@ export function useSimulator(
     status,
     messages,
     interim,
+    heard,
     error,
     micLabel,
     stats,

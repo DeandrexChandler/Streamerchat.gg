@@ -27,6 +27,15 @@ export interface EngineOptions {
   now?: number;
 }
 
+/** What the engine made of one utterance. Surfaced for the transcript panel. */
+export interface TranscriptOutcome {
+  classification: Classification;
+  /** False when the attention gate deliberately let it pass without reply. */
+  reacted: boolean;
+  /** Messages the director queued for it. */
+  queued: number;
+}
+
 export interface EngineStats {
   audience: number;
   pending: number;
@@ -106,7 +115,7 @@ export class SimulationEngine {
     transcript: string,
     now: number,
     audioEnergy?: number,
-  ): Classification | null {
+  ): TranscriptOutcome | null {
     const text = transcript.trim();
     if (text.length < 2) return null;
 
@@ -136,7 +145,7 @@ export class SimulationEngine {
       )
     ) {
       this.ignoredCount++;
-      return classification;
+      return { classification, reacted: false, queued: 0 };
     }
 
     const { messages, templates } = directReaction({
@@ -152,7 +161,7 @@ export class SimulationEngine {
 
     for (const template of templates) this.rememberText(template);
     this.scheduler.enqueueBurst(messages, now);
-    return classification;
+    return { classification, reacted: messages.length > 0, queued: messages.length };
   }
 
   /**
@@ -186,10 +195,11 @@ export class SimulationEngine {
   }
 
   /** True when the moment is worth spending an AI call on. */
-  wantsAiRefill(classification: Classification | null): boolean {
+  wantsAiRefill(outcome: TranscriptOutcome | null): boolean {
     if (this.settings.aiShare <= 0) return false;
     if (this.aiCandidates.length > 6) return false;
-    if (!classification) return false;
+    if (!outcome || !outcome.reacted) return false;
+    const { classification } = outcome;
     // Low classifier confidence is exactly where templates sound generic.
     return classification.confidence < 0.55 || classification.energy > 0.6;
   }

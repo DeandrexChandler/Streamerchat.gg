@@ -65,13 +65,15 @@ for (let now = 0; now <= DURATION_S * 1000; now += STEP_MS) {
     SCRIPT[scriptIndex][0] * 1000 <= now
   ) {
     const [, text, energy] = SCRIPT[scriptIndex++];
-    const classification = engine.handleTranscript(text, now, energy);
+    const outcome = engine.handleTranscript(text, now, energy);
+    const c = outcome?.classification;
     console.log(
       `\n${DIM}${clock(now)}${RESET} ${BOLD}STREAMER:${RESET} ${text}` +
-        `\n${DIM}          -> ${classification?.intent} / ${classification?.sentiment} ` +
-        `| energy ${classification?.energy.toFixed(2)} ` +
-        `| conf ${classification?.confidence.toFixed(2)} ` +
-        `| kw [${classification?.keywords.slice(0, 3).join(", ")}]${RESET}\n`,
+        `\n${DIM}          -> ${c?.intent} / ${c?.sentiment} ` +
+        `| energy ${c?.energy.toFixed(2)} ` +
+        `| conf ${c?.confidence.toFixed(2)} ` +
+        `| kw [${c?.keywords.slice(0, 3).join(", ")}]` +
+        `${outcome?.reacted ? "" : "  \u2014 IGNORED"}${RESET}\n`,
     );
   }
 
