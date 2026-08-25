@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { Suspense, useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 
 interface ChatMessage {
@@ -11,7 +11,7 @@ interface ChatMessage {
   color?: string;
 }
 
-export default function OverlayPage() {
+function OverlayContent() {
   const searchParams = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -150,5 +150,13 @@ export default function OverlayPage() {
         }
       `}</style>
     </div>
+  );
+}
+
+export default function OverlayPage() {
+  return (
+    <Suspense fallback={null}>
+      <OverlayContent />
+    </Suspense>
   );
 }
