@@ -10,7 +10,7 @@ import { z } from "zod";
  */
 export const SimulationSettingsSchema = z.object({
   /** Approximate concurrent viewers. Drives population size and volume. */
-  audienceSize: z.number().int().min(5).max(400).default(45),
+  audienceSize: z.number().int().min(5).max(400).default(50),
 
   /** Global message-rate multiplier. 1 = tuned default. */
   chatSpeed: z.number().min(0.25).max(3).default(1),
@@ -24,7 +24,7 @@ export const SimulationSettingsSchema = z.object({
   idleAfterSeconds: z.number().min(5).max(120).default(14),
 
   /** Probability that a message replies to another viewer instead of the streamer. */
-  sideConversationChance: z.number().min(0).max(0.6).default(0.22),
+  sideConversationChance: z.number().min(0).max(0.6).default(0.2),
 
   emotesEnabled: z.boolean().default(true),
 

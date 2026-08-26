@@ -7,27 +7,40 @@ import { ChatList } from "@/app/components/chat/ChatList";
 import { DEFAULT_EMOTES } from "@/lib/data/emotes";
 import { useSimulator } from "@/lib/react/use-simulator";
 import { ControlPanel } from "./ControlPanel";
+import { TranscriptPanel } from "./TranscriptPanel";
 
 /**
  * The simulator.
  *
- * The chat is a fixed-width vertical column, not a fluid pane. That shape is
- * the point of the product — it's what a Twitch chat looks like, it's what
- * goes into OBS, and stretching it to fill the viewport makes it read as a
- * generic web app instead of a chat. Controls sit beside it in a panel rather
- * than being hidden in a dropdown over the chat.
+ * Three columns: settings, chat, transcription.
+ *
+ * The chat is a fixed-width vertical column and must stay one. That shape is
+ * the product — it is what a Twitch chat looks like, it is what goes into OBS,
+ * and stretching it to fill the viewport makes it read as a generic web app
+ * rather than as a chat. Do not change `w-96` to `flex-1`.
  */
 function Simulator() {
   const params = useSearchParams();
-  // ?demo=1 replays a scripted session with no microphone — useful for seeing
-  // the whole thing work before dealing with permissions.
+  // ?demo=1 replays a scripted session with no microphone.
   const simulator = useSimulator(params.get("demo") ? "mock" : "web-speech");
   const { status, messages, settings } = simulator;
 
   const live = status === "running";
+  const started = live || status === "paused";
 
   return (
-    <div className="h-[calc(100%+3rem)] -my-6 flex justify-center gap-4 overflow-hidden py-6">
+    <div className="-my-6 flex h-[calc(100%+3rem)] justify-center gap-4 overflow-hidden py-6">
+      <ControlPanel
+        status={status}
+        stats={simulator.stats}
+        settings={settings}
+        micLabel={simulator.micLabel}
+        subscribeLevel={simulator.subscribeLevel}
+        onStop={simulator.stop}
+        onClear={simulator.clear}
+        onChange={simulator.updateSettings}
+      />
+
       {/* Chat column — deliberately a fixed 384px, never flex-1. */}
       <div className="flex h-full w-96 flex-col overflow-hidden rounded-lg border border-gray-300 bg-[#18181b] shadow-sm dark:border-gray-700">
         <header className="flex flex-shrink-0 items-center justify-between border-b border-gray-700 bg-[#1f1f23] p-3">
@@ -42,8 +55,7 @@ function Simulator() {
           </div>
         )}
 
-        {/* The same component the OBS overlay renders — what you tune here is
-            literally what goes on stream. */}
+        {/* The same component the OBS overlay renders. */}
         <ChatList
           messages={messages}
           emotes={DEFAULT_EMOTES}
@@ -52,50 +64,72 @@ function Simulator() {
             <div className="flex h-full items-start justify-center pt-16">
               <div className="max-w-xs space-y-3 px-4 text-center text-sm text-gray-400">
                 <div className="text-lg">🎙️</div>
-                <p className="font-semibold text-gray-300">
-                  {live ? "Listening" : "Getting started"}
-                </p>
-                <p className="text-xs leading-relaxed text-gray-500">
-                  {live
-                    ? "Talk normally. Chat reacts to what you say, and fills the silence when you stop."
-                    : "Press Start to turn on your microphone. Add ?demo=1 to the URL to watch a scripted session with no microphone."}
+                <div className="space-y-1">
+                  <p className="font-semibold text-gray-300">Getting Started</p>
+                  <p>1. Connect your microphone</p>
+                  <p>2. Press play to begin</p>
+                  <p>3. Speak and watch messages appear</p>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Enable Idle chatter in settings for automatic chat simulation
                 </p>
               </div>
             </div>
           }
         />
 
-        {/* Transcript sits inline above the input, as it did originally —
-            a separate column for it was what made the layout feel wide. */}
+        {/* Input row. The Play control sits where a real chat's send button
+            does — the original layout, and the one place a streamer's hand
+            already expects to go. */}
         <div className="flex-shrink-0 border-t border-gray-700 bg-[#1f1f23] p-3">
-          {live && (
-            <p className="mb-2 truncate text-xs text-blue-400">
-              {simulator.interim ||
-                simulator.heard.at(-1)?.text ||
-                "[listening…]"}
-            </p>
-          )}
-          <input
-            type="text"
-            placeholder={live ? "Chat is live…" : "Press Start and begin speaking…"}
-            className="w-full rounded bg-[#464649] px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-            disabled
-          />
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Press Play and start speaking..."
+              className="min-w-0 flex-1 rounded bg-[#464649] px-3 py-2 text-sm text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              disabled
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (!started) void simulator.start();
+                else if (live) simulator.pause();
+                else simulator.resume();
+              }}
+              disabled={status === "starting"}
+              className={`min-w-[100px] rounded border-2 px-4 py-2 text-sm transition-colors disabled:opacity-60 ${
+                !started
+                  ? "border-purple-500 bg-purple-500 text-white hover:bg-purple-600"
+                  : live
+                    ? "border-green-500 bg-green-500 text-white hover:bg-green-600"
+                    : "border-orange-500 bg-transparent text-orange-500 hover:bg-orange-500/10"
+              }`}
+            >
+              {status === "starting" ? (
+                "Starting"
+              ) : !started ? (
+                "Play"
+              ) : live ? (
+                <span className="flex items-center justify-center gap-1">
+                  Playing
+                  <span className="dot-wave inline-flex gap-0.5">
+                    <span>.</span>
+                    <span>.</span>
+                    <span>.</span>
+                  </span>
+                </span>
+              ) : (
+                "Paused"
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
-      <ControlPanel
-        status={status}
-        stats={simulator.stats}
-        settings={settings}
-        micLabel={simulator.micLabel}
-        subscribeLevel={simulator.subscribeLevel}
-        onStart={() => void simulator.start()}
-        onStop={simulator.stop}
-        onPause={simulator.pause}
-        onResume={simulator.resume}
-        onClear={simulator.clear}
-        onChange={simulator.updateSettings}
+      <TranscriptPanel
+        heard={simulator.heard}
+        interim={simulator.interim}
+        listening={live}
       />
     </div>
   );
@@ -122,7 +156,7 @@ function StatusPill({ status }: { status: keyof typeof STATUS_STYLES }) {
   const pulsing = status === "running" || status === "starting";
 
   return (
-    <div className="flex itemseming-center gap-2 text-xs">
+    <div className="flex items-center gap-2 text-xs">
       <div className="inline-grid *:[grid-area:1/1]">
         {pulsing && (
           <div className={`h-2 w-2 animate-ping rounded-full ${style.dot}`} />

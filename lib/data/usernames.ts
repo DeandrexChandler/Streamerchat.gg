@@ -210,12 +210,27 @@ export function generateUsername(
 }
 
 /**
- * Twitch's default username palette, filtered to colors that stay readable on
- * a dark background. The stock palette includes a near-black blue that is
- * genuinely unreadable, which is why this isn't just a copy of it.
+ * Username colour palette.
+ *
+ * This is the original palette, restored verbatim. An earlier version swapped
+ * it for "more readable" variants, which changed the look of the product — the
+ * whole point is that it reads as a real Twitch chat, and these are the colours
+ * Twitch actually assigns. Do not "improve" these.
  */
 export const USERNAME_COLORS = [
-  "#FF4A4A", "#FF7F50", "#FF69B4", "#FFAA00", "#F0C674",
-  "#9ACD32", "#5CD65C", "#2ED9A0", "#5F9EA0", "#4FC3F7",
-  "#5B8DFF", "#B39DFF", "#D291FF", "#FF8FD6", "#E8A87C",
+  "#FF0000", // Red
+  "#3333FF", // Blue
+  "#00FF00", // Green (Lime)
+  "#B22222", // FireBrick
+  "#FF7F50", // Coral
+  "#9ACD32", // YellowGreen
+  "#FF4500", // OrangeRed
+  "#2E8B57", // SeaGreen
+  "#DAA520", // GoldenRod
+  "#D2691E", // Chocolate
+  "#5F9EA0", // CadetBlue
+  "#1E90FF", // DodgerBlue
+  "#FF69B4", // HotPink
+  "#8A2BE2", // BlueViolet
+  "#00FF7F", // SpringGreen
 ] as const;
