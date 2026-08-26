@@ -10,6 +10,7 @@ import type { SimulationSettings } from "../config/settings";
 import { pickDepth, type Depth } from "./attention";
 import {
   decorateWithEmotes,
+  emoteSpamCount,
   generateFromPool,
   measureLength,
   pickEmote,
@@ -165,8 +166,9 @@ function maybeEmoteOnly(
   );
   if (!emote) return null;
 
-  // Real emote spam repeats one emote rather than mixing three.
-  const count = rng.chance(0.28) ? rng.int(2, 3) : 1;
+  // Repeats one emote rather than mixing several — "KEKW KEKW KEKW", not
+  // three different emotes in a row.
+  const count = emoteSpamCount(rng);
   return Array.from({ length: count }, () => emote.name).join(" ");
 }
 

@@ -253,10 +253,30 @@ export function useSimulator(
     setStatus("running");
   }, [status]);
 
+  /**
+   * Wipes the session and returns to the idle state.
+   *
+   * This absorbs what used to be a separate Stop button. A Stop control next
+   * to Play/Pause is two ways of saying "not running"; folding it into Clear
+   * leaves exactly one way to start over, and keeps the microphone from
+   * staying live after you have cleared everything.
+   */
   const clear = useCallback(() => {
+    stopTicking();
+    providerRef.current?.stop();
+    providerRef.current = null;
+    micRef.current?.stop();
+    micRef.current = null;
+    engineRef.current?.flush();
+    pausedRef.current = false;
+
     setMessages([]);
     setHeard([]);
-  }, []);
+    setInterim("");
+    setError(null);
+    setMicLabel("");
+    setStatus("idle");
+  }, [stopTicking]);
 
   const updateSettings = useCallback((patch: Partial<SimulationSettings>) => {
     const next = { ...settingsRef.current, ...patch };

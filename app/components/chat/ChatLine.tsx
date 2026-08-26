@@ -45,11 +45,11 @@ function ChatLineImpl({
 
   return (
     <div
-      className="chat-message-in px-2 py-[3px] leading-snug break-words"
+      className="chat-message-in px-2 py-[3px] leading-snug break-words text-gray-200"
       style={{ fontSize }}
     >
       {showTimestamp && (
-        <span className="mr-1.5 text-[0.8em] tabular-nums opacity-45">
+        <span className="mr-1.5 text-[0.8em] tabular-nums text-gray-500">
           {new Date(message.at).toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
@@ -60,13 +60,13 @@ function ChatLineImpl({
       <span className="font-bold" style={{ color: message.color }}>
         {message.username}
       </span>
-      <span className="opacity-60">: </span>
+      <span className="text-gray-400">: </span>
 
       {segments.map((segment, i) =>
         segment.type === "emote" ? (
           <EmoteToken key={i} emote={segment.emote} fontSize={fontSize} />
         ) : (
-          <span key={i} className="opacity-95">
+          <span key={i} className="text-gray-200">
             {i > 0 ? " " : ""}
             {segment.value}
           </span>

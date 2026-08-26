@@ -81,3 +81,20 @@ export function segmentMessage(
   flush();
   return segments;
 }
+
+/**
+ * True when every token is an emote.
+ *
+ * Needed because word count alone misreads emote spam: "KEKW KEKW KEKW KEKW
+ * KEKW" is eight tokens but is not an eight-word message — it's the shortest
+ * thing chat does. Any length measurement that ignores this reports a chat
+ * full of long messages when the opposite is true.
+ */
+export function isEmoteOnly(
+  text: string,
+  index: ReadonlyMap<string, Emote>,
+): boolean {
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  return tokens.every((token) => index.has(token.toLowerCase()));
+}

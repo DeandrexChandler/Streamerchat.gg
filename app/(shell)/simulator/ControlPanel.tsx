@@ -1,6 +1,6 @@
 "use client";
 
-import { Square, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { MicMeter } from "@/app/components/MicMeter";
 import type { SimulationSettings } from "@/lib/config/settings";
 import type { EngineStats } from "@/lib/engine/engine";
@@ -12,6 +12,11 @@ import type { SimulatorStatus } from "@/lib/react/use-simulator";
  * Start/pause deliberately does NOT live here — it sits next to the chat input
  * where a real chat's send button is, which is where a streamer's hand already
  * goes. This panel is for things you set, not things you do mid-sentence.
+ *
+ * There is no separate Stop control either. A Stop button sitting beside a
+ * Play/Pause button is two ways to say "not running", which is just confusing.
+ * Clear does the job: it wipes the log, releases the microphone, and returns
+ * the button to Play — one obvious "start over".
  *
  * Every slider snaps to a named step rather than sweeping a continuous range.
  * A continuous "1.37× speed" is not a meaningful setting — it invites
@@ -35,7 +40,7 @@ export interface ControlPanelProps {
   settings: SimulationSettings;
   micLabel: string;
   subscribeLevel: (handler: (level: number) => void) => () => void;
-  onStop: () => void;
+  /** Wipes the log and resets the session back to Play. */
   onClear: () => void;
   onChange: (patch: Partial<SimulationSettings>) => void;
 }
@@ -46,12 +51,9 @@ export function ControlPanel({
   settings,
   micLabel,
   subscribeLevel,
-  onStop,
   onClear,
   onChange,
 }: ControlPanelProps) {
-  const started = status === "running" || status === "paused";
-
   return (
     <aside className="flex h-full w-56 flex-col gap-4 overflow-y-auto rounded-lg border border-gray-300 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
       <MicMeter
@@ -133,26 +135,15 @@ export function ControlPanel({
         <Stat label="Messages" value={stats.released} />
         <Stat label="Ignored" value={stats.ignored} />
 
-        <div className="flex gap-1.5 pt-1.5">
-          <button
-            type="button"
-            onClick={onClear}
-            className="flex flex-1 items-center justify-center gap-1 rounded border border-gray-300 py-1.5 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700"
-          >
-            <Trash2 size={12} />
-            Clear
-          </button>
-          {started && (
-            <button
-              type="button"
-              onClick={onStop}
-              title="Stop and release the microphone"
-              className="flex items-center justify-center rounded border border-gray-300 px-2 py-1.5 transition-colors hover:bg-gray-100 hover:text-red-500 dark:border-gray-600 dark:hover:bg-gray-700"
-            >
-              <Square size={12} />
-            </button>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={onClear}
+          title="Wipe the chat, release the microphone, and reset to Play"
+          className="mt-1.5 flex w-full items-center justify-center gap-1 rounded border border-gray-300 py-1.5 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700"
+        >
+          <Trash2 size={12} />
+          Clear chat
+        </button>
       </div>
     </aside>
   );

@@ -10,7 +10,11 @@
  */
 
 import { SimulationEngine } from "../lib/engine/engine";
-import { DEFAULT_EMOTES } from "../lib/data/emotes";
+import {
+  DEFAULT_EMOTES,
+  buildEmoteIndex,
+  isEmoteOnly,
+} from "../lib/data/emotes";
 
 /** [secondsIntoStream, whatTheStreamerSaid, micEnergy 0..1] */
 const SCRIPT: Array<[number, string, number]> = [
@@ -119,9 +123,11 @@ console.log(`by source:      ${JSON.stringify(stats.bySource)}`);
 // dominated by emotes and one-word reactions; a wall of 4-6 word statements
 // reads as everyone competing to say something clever.
 const lengths = { "emote/1 word": 0, "2-3 words": 0, "4-6 words": 0, "7-9 words": 0, "10+ words": 0 };
+const emoteIndex = buildEmoteIndex(DEFAULT_EMOTES);
 for (const text of emitted) {
   const n = text.trim().split(/\s+/).length;
-  if (n <= 1) lengths["emote/1 word"]++;
+  // Emote spam is the shortest kind of message, however many tokens it has.
+  if (n <= 1 || isEmoteOnly(text, emoteIndex)) lengths["emote/1 word"]++;
   else if (n <= 3) lengths["2-3 words"]++;
   else if (n <= 6) lengths["4-6 words"]++;
   else if (n <= 9) lengths["7-9 words"]++;

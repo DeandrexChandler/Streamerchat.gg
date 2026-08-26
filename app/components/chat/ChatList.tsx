@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowDown } from "lucide-react";
+import { Pause } from "lucide-react";
 import { buildEmoteIndex } from "@/lib/data/emotes";
 import type { ChatMessage, Emote } from "@/lib/engine/types";
 import { ChatLine } from "./ChatLine";
@@ -131,17 +131,25 @@ export function ChatList({
         )}
       </div>
 
+      {/* Twitch's scroll-paused indicator: a compact dark pill centred at the
+          bottom, with the pause glyph in its own segment. Deliberately hugs
+          its content — a full-width bar covers the chat and reads as an alert
+          rather than as a status. */}
       {!pinned && (
-        <button
-          type="button"
-          onClick={jumpToLive}
-          className="absolute inset-x-2 bottom-2 flex items-center justify-center gap-2 rounded-md bg-purple-600 px-3 py-1.5 text-xs font-medium text-white shadow-lg transition-colors hover:bg-purple-500"
-        >
-          <ArrowDown size={14} />
-          {missed > 0
-            ? `${missed} new message${missed === 1 ? "" : "s"}`
-            : "Jump to live"}
-        </button>
+        <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
+          <button
+            type="button"
+            onClick={jumpToLive}
+            className="pointer-events-auto flex items-center gap-2 rounded-[4px] bg-[#2f2f35] py-1 pr-3 pl-2 text-[13px] font-semibold text-white shadow-lg transition-colors hover:bg-[#3a3a42]"
+          >
+            <Pause size={13} fill="currentColor" strokeWidth={0} />
+            <span className="whitespace-nowrap">
+              {missed > 0
+                ? `${missed} new message${missed === 1 ? "" : "s"}`
+                : "Chat paused"}
+            </span>
+          </button>
+        </div>
       )}
     </div>
   );

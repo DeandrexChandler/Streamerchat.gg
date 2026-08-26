@@ -36,7 +36,6 @@ function Simulator() {
         settings={settings}
         micLabel={simulator.micLabel}
         subscribeLevel={simulator.subscribeLevel}
-        onStop={simulator.stop}
         onClear={simulator.clear}
         onChange={simulator.updateSettings}
       />

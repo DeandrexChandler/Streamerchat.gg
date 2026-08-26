@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { SimulationEngine } from "../engine";
-import { DEFAULT_EMOTES } from "../../data/emotes";
+import {
+  DEFAULT_EMOTES,
+  buildEmoteIndex,
+  isEmoteOnly,
+} from "../../data/emotes";
+
+const emoteIndex = buildEmoteIndex(DEFAULT_EMOTES);
 import type { ChatMessage } from "../types";
 import type { SimulationSettings } from "../../config/settings";
 
@@ -375,7 +381,9 @@ describe("SimulationEngine message shape", () => {
       for (const m of messages) {
         const words = m.text.trim().split(/\s+/).filter(Boolean).length;
         counts.total++;
-        if (words <= 1) counts.one++;
+        // Emote spam counts as the shortest kind of message regardless of
+        // token count — see isEmoteOnly().
+        if (words <= 1 || isEmoteOnly(m.text, emoteIndex)) counts.one++;
         else if (words <= 3) counts.few++;
         else if (words <= 6) counts.medium++;
         else counts.long++;

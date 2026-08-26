@@ -134,6 +134,23 @@ export function generateFromPool(
   return { text: fill(entry, context, rng), template: entry.text };
 }
 
+/**
+ * How many copies of an emote go in one message.
+ *
+ * Real chat almost never posts a single emote. Looking at an actual Twitch
+ * chat: three laughing emotes, four in a row, five identical, and one viewer
+ * posting a twelve-emote block. A lone emote is the exception, not the rule,
+ * and generating one every time was a big part of why the output read as
+ * synthetic.
+ */
+export function emoteSpamCount(rng: Rng): number {
+  const roll = rng.next();
+  if (roll < 0.12) return 1;          // rare — a single, deliberate emote
+  if (roll < 0.38) return rng.int(2, 3);
+  if (roll < 0.78) return rng.int(4, 6);  // the common case
+  return rng.int(7, 12);              // someone going all in
+}
+
 /** Picks an emote matching the moment's mood, falling back to any emote. */
 export function pickEmote(
   emotes: readonly Emote[],
@@ -181,7 +198,7 @@ export function decorateWithEmotes(
 
   // Low-verbosity, high-affinity viewers sometimes skip words altogether.
   if (viewer.verbosity < 0.15 && rng.chance(viewer.emoteAffinity * 0.5)) {
-    const count = rng.chance(0.3) ? rng.int(2, 3) : 1;
+    const count = emoteSpamCount(rng);
     return Array.from({ length: count }, () => emote.name).join(" ");
   }
 
