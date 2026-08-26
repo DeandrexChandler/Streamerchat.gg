@@ -248,10 +248,20 @@ export class SimulationEngine {
       this.scheduler.enqueueAt(idle.message, now + this.rng.int(0, 900));
     }
 
-    // Slow audience churn — people arrive and leave over a stream.
-    if (this.rng.chance(0.04)) {
+    // Resize toward the configured audience whenever it doesn't match.
+    if (
+      this.population.size !== this.settings.audienceSize &&
+      this.rng.chance(0.4)
+    ) {
       this.population.driftToward(this.settings.audienceSize);
+      return;
     }
+
+    // At target, turn the roster over at a rate proportional to its size.
+    // A 10-viewer stream swaps someone every several minutes; a 200-viewer
+    // one every twenty seconds or so. This is checked about once a second.
+    const churnChance = Math.min(0.05, this.settings.audienceSize / 4000);
+    if (this.rng.chance(churnChance)) this.population.churn();
   }
 
   /** Clears queued messages — used when the user pauses. */

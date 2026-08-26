@@ -208,18 +208,29 @@ describe("SimulationEngine", () => {
     expect(sawAi).toBe(true);
   });
 
-  it("never spends an AI call on a one-word reaction", () => {
-    // Generating "W" through a language model is pure waste.
-    const engine = make({ aiShare: 0.4 });
-    engine.supplyAiCandidates(Array.from({ length: 40 }, () => "x"));
-    const messages = run(engine, 300_000, [
+  it("spends AI on only a small slice of traffic", () => {
+    // AI fills "engaged"/"invested" messages only — generating "W" or an
+    // emote through a language model would be waste. So even at a high
+    // aiShare, AI lines should stay a small fraction of everything emitted.
+    //
+    // Note this asserts on *how often* AI is used, not on how long its output
+    // is: the text is whatever the caller supplied, so asserting on length
+    // would only be testing the fixture.
+    const engine = make({ aiShare: 0.4 }, 246);
+    engine.supplyAiCandidates(
+      Array.from({ length: 200 }, (_, i) => `a written out candidate line ${i}`),
+    );
+    const messages = run(engine, 400_000, [
       [1_000, "chat what do you think about the roof"],
-      [60_000, "look at this"],
-      [140_000, "so yesterday something funny happened"],
+      [60_000, "look at this, check out how it turned out"],
+      [140_000, "so yesterday something really funny happened"],
+      [240_000, "come on, this is so annoying, not again"],
+      [320_000, "chat should I keep going or call it here"],
     ]);
-    for (const m of messages.filter((x) => x.source === "ai")) {
-      expect(m.text.trim().split(/\s+/).length).toBeGreaterThan(1);
-    }
+
+    const ai = messages.filter((m) => m.source === "ai").length;
+    expect(messages.length).toBeGreaterThan(30);
+    expect(ai / messages.length).toBeLessThan(0.2);
   });
 
   it("does not want an AI refill when the tier is disabled", () => {
@@ -450,3 +461,59 @@ describe("SimulationEngine message shape", () => {
     }
   });
 })
+
+describe("SimulationEngine audience size", () => {
+  /** Distinct usernames seen over a long idle session. */
+  function distinctNames(audienceSize: number, seed: number): number {
+    const engine = make({ audienceSize, idleAfterSeconds: 10 }, seed);
+    const messages = run(engine, 600_000);
+    return new Set(messages.map((m) => m.username)).size;
+  }
+
+  it("keeps a small audience to a consistent roster", () => {
+    // A small stream should feel like the same handful of people. Churn is
+    // deliberately slow at this size so you learn who the regulars are.
+    const engine = make({ audienceSize: 10, idleAfterSeconds: 10 }, 606);
+    const messages = run(engine, 600_000);
+    const names = new Set(messages.map((m) => m.username));
+    expect(messages.length).toBeGreaterThan(50);
+    expect(names.size).toBeLessThan(22);
+  });
+
+  it("shows more unique names as the audience grows", () => {
+    const seeds = [3, 14, 15];
+    const small = seeds.map((s) => distinctNames(10, s));
+    const large = seeds.map((s) => distinctNames(200, s));
+    const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    expect(avg(large)).toBeGreaterThan(avg(small) * 2);
+  });
+
+  it("grows the population toward a raised audience setting", () => {
+    const engine = make({ audienceSize: 10, idleAfterSeconds: 10 }, 77);
+    run(engine, 30_000);
+    engine.updateSettings({ audienceSize: 60 });
+    run(engine, 400_000);
+    expect(engine.stats().audience).toBeGreaterThan(40);
+  });
+
+  it("shrinks the population toward a lowered audience setting", () => {
+    const engine = make({ audienceSize: 120, idleAfterSeconds: 10 }, 78);
+    run(engine, 30_000);
+    engine.updateSettings({ audienceSize: 15 });
+    run(engine, 400_000);
+    expect(engine.stats().audience).toBeLessThan(60);
+  });
+
+  it("keeps every username unique through churn", () => {
+    // Churn frees a departed viewer's vocabulary for reuse; that must never
+    // produce two live viewers sharing a name.
+    const engine = make({ audienceSize: 150, idleAfterSeconds: 10 }, 99);
+    const messages = run(engine, 500_000);
+    const byName = new Map<string, string>();
+    for (const m of messages) {
+      const existing = byName.get(m.username);
+      if (existing) expect(existing).toBe(m.viewerId);
+      byName.set(m.username, m.viewerId);
+    }
+  });
+});

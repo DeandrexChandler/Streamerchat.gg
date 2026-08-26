@@ -59,8 +59,8 @@ function Simulator() {
           messages={messages}
           emotes={DEFAULT_EMOTES}
           showTimestamps={settings.showTimestamps}
-          empty={
-            <div className="flex h-full items-start justify-center pt-16">
+          intro={
+            <div className="flex items-start justify-center pt-16 pb-10">
               <div className="max-w-xs space-y-3 px-4 text-center text-sm text-gray-400">
                 <div className="text-lg">🎙️</div>
                 <div className="space-y-1">

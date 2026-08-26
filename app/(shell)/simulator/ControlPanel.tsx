@@ -24,15 +24,24 @@ import type { SimulatorStatus } from "@/lib/react/use-simulator";
  * sessions impossible to compare.
  */
 
-/** Discrete stops. Index into these rather than exposing a raw range. */
+/**
+ * Discrete stops. The range input walks indices, so every position is a
+ * deliberate setting rather than an arbitrary point on a continuum.
+ *
+ * Speed is labelled in messages per minute rather than as a multiplier or a
+ * mood word. "1.5x" and "Busy" both require you to run the simulator to find
+ * out what they mean; "~40/min" tells you before you commit. Per-minute rather
+ * than per-second because the real rate is well under one a second, and
+ * "0.7/sec" reads as noise.
+ *
+ * The rates come from measuring the engine at each multiplier, so they will
+ * drift if the director's burst sizes are retuned — treat them as the label
+ * for a measured value, not as a target the engine enforces.
+ */
 const SPEED_STEPS = [0.5, 0.75, 1, 1.5, 2, 3] as const;
-const SPEED_LABELS = ["Slow", "Relaxed", "Normal", "Busy", "Fast", "Chaos"];
+const SPEED_LABELS = ["~13/min", "~20/min", "~27/min", "~40/min", "~55/min", "CHAOS"];
 
 const AUDIENCE_STEPS = [10, 25, 50, 100, 200] as const;
-const AUDIENCE_LABELS = ["Tiny", "Small", "Medium", "Big", "Huge"];
-
-const SIDE_STEPS = [0, 0.1, 0.2, 0.35, 0.5] as const;
-const SIDE_LABELS = ["None", "Rare", "Some", "Chatty", "Constant"];
 
 export interface ControlPanelProps {
   status: SimulatorStatus;
@@ -73,18 +82,9 @@ export function ControlPanel({
         <StepSlider
           label="Audience"
           steps={AUDIENCE_STEPS}
-          labels={AUDIENCE_LABELS}
+          labels={AUDIENCE_STEPS.map((n) => `${n}`)}
           value={settings.audienceSize}
           onChange={(audienceSize) => onChange({ audienceSize })}
-        />
-        <StepSlider
-          label="Side chatter"
-          steps={SIDE_STEPS}
-          labels={SIDE_LABELS}
-          value={settings.sideConversationChance}
-          onChange={(sideConversationChance) =>
-            onChange({ sideConversationChance })
-          }
         />
       </div>
 
@@ -194,7 +194,13 @@ function StepSlider({
     <label className="block space-y-1.5">
       <span className="flex items-baseline justify-between text-xs">
         <span className="text-gray-600 dark:text-gray-400">{label}</span>
-        <span className="font-medium text-gray-900 dark:text-gray-100">
+        <span
+          className={
+            labels[index] === "CHAOS"
+              ? "animate-pulse font-bold tracking-wide text-red-500"
+              : "font-medium text-gray-900 dark:text-gray-100"
+          }
+        >
           {labels[index]}
         </span>
       </span>

@@ -81,10 +81,40 @@ export class Population {
     return victim;
   }
 
-  /** Grows or shrinks the audience toward `target`, one step at a time. */
+  /**
+   * Swaps one viewer for a new one, keeping the audience the same size.
+   *
+   * This is what makes audience size mean something beyond a headcount. A
+   * small stream has the same handful of names every session — you learn who
+   * they are. A big one has a roster that turns over, so new names keep
+   * appearing. Without churn, a 200-viewer audience is just a 200-name list
+   * that never changes, which reads as static in a different way.
+   */
+  churn(): void {
+    if (this.size === 0) return;
+    this.remove();
+    this.add();
+  }
+
+  /**
+   * Moves the audience toward `target`.
+   *
+   * Steps proportionally to the gap rather than one viewer at a time: someone
+   * dragging the audience slider from 200 to 10 should see it settle in
+   * seconds, not minutes. Always moves at least one so it can't stall short of
+   * the target.
+   */
   driftToward(target: number): void {
-    if (this.size < target) this.add();
-    else if (this.size > target) this.remove();
+    const gap = target - this.size;
+    if (gap === 0) return;
+
+    const step = Math.max(1, Math.ceil(Math.abs(gap) * 0.2));
+    const count = Math.min(step, Math.abs(gap));
+
+    for (let i = 0; i < count; i++) {
+      if (gap > 0) this.add();
+      else this.remove();
+    }
   }
 
   /**

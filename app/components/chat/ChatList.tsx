@@ -34,8 +34,15 @@ export interface ChatListProps {
   emotes: readonly Emote[];
   showTimestamps?: boolean;
   fontSize?: number;
-  /** Rendered when there are no messages yet. */
-  empty?: React.ReactNode;
+  /**
+   * Persistent header content, rendered above the first message.
+   *
+   * Not an empty state — it stays mounted and gets pushed up and off screen
+   * as chat fills in, the way the original build behaved. Vanishing the
+   * instant the first message lands is jarring and loses the instructions
+   * before anyone has read them.
+   */
+  intro?: React.ReactNode;
   className?: string;
 }
 
@@ -44,7 +51,7 @@ export function ChatList({
   emotes,
   showTimestamps = false,
   fontSize = 14,
-  empty,
+  intro,
   className = "",
 }: ChatListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -112,12 +119,13 @@ export function ChatList({
         onScroll={handleScroll}
         className="h-full overflow-x-hidden overflow-y-auto overscroll-contain"
       >
-        {messages.length === 0 && empty ? (
-          empty
-        ) : (
-          // mt-auto in a flex column keeps a short log pinned to the bottom,
-          // the way a real chat pane fills upward rather than downward.
-          <div className="flex min-h-full flex-col justify-end py-1">
+        {/* min-h-full + mt-auto on the messages keeps a short log pinned to
+            the bottom, the way a real chat pane fills upward. The intro sits
+            above it and scrolls away naturally once there's enough traffic. */}
+        <div className="flex min-h-full flex-col py-1">
+          {intro && <div className="flex-shrink-0">{intro}</div>}
+
+          <div className="mt-auto">
             {messages.map((message) => (
               <ChatLine
                 key={message.id}
@@ -128,7 +136,7 @@ export function ChatList({
               />
             ))}
           </div>
-        )}
+        </div>
       </div>
 
       {/* Twitch's scroll-paused indicator: a compact dark pill centred at the
