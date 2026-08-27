@@ -39,6 +39,15 @@ export type SimulatorStatus =
 /** How often the engine is advanced. Chat does not need frame-rate updates. */
 const TICK_MS = 200;
 
+/**
+ * Hard ceiling on rendered messages, whatever the buffer setting works out to.
+ *
+ * Every message is a DOM node, and at the top speed setting the list turns
+ * over fast enough that an unbounded buffer would keep growing the tree for
+ * history nobody scrolls back to.
+ */
+const MAX_RENDERED_MESSAGES = 500;
+
 /** One thing the streamer said, and what the engine made of it. */
 export interface HeardUtterance {
   id: string;
@@ -148,7 +157,20 @@ export function useSimulator(
 
       const released = engine.tick(Date.now());
       if (released.length > 0) {
-        const cap = settingsRef.current.messageBufferSize;
+        /**
+         * The buffer is sized in messages but read as time.
+         *
+         * A flat 150 is a couple of minutes of history at the default speed
+         * and about twenty seconds at the top one, so turning chat speed up
+         * made messages vanish almost as fast as they arrived. Scaling by the
+         * square root keeps roughly comparable history without letting the
+         * node count grow linearly with speed.
+         */
+        const { messageBufferSize, chatSpeed } = settingsRef.current;
+        const cap = Math.min(
+          MAX_RENDERED_MESSAGES,
+          Math.round(messageBufferSize * Math.sqrt(Math.max(1, chatSpeed))),
+        );
         setMessages((previous) => {
           const next = [...previous, ...released];
           return next.length > cap ? next.slice(-cap) : next;

@@ -45,6 +45,8 @@ function ChatLineImpl({
 
   return (
     <div
+      // Used by the list to keep the reader's place when the buffer trims.
+      data-message-id={message.id}
       className="chat-message-in px-2 py-[3px] leading-snug break-words text-gray-200"
       style={{ fontSize }}
     >

@@ -60,6 +60,23 @@ export function ChatList({
   const [pinned, setPinned] = useState(true);
   const [missed, setMissed] = useState(0);
 
+  /**
+   * Id of the newest message we've already reacted to.
+   *
+   * Deliberately not `messages.length`. Once the buffer saturates, every tick
+   * appends and trims by the same amount, so the length stops changing
+   * entirely — an effect keyed on it silently stops firing and both
+   * auto-scroll and the unread counter die. That happens precisely during
+   * heavy spam, which is when they matter most.
+   */
+  const lastSeenId = useRef<string | null>(null);
+
+  /**
+   * What the reader is looking at while scrolled up, so trimming the top of
+   * the buffer doesn't yank the content out from under them.
+   */
+  const anchor = useRef<{ id: string; offset: number } | null>(null);
+
   const scrollToBottom = useCallback((smooth = false) => {
     const el = containerRef.current;
     if (!el) return;
@@ -67,6 +84,23 @@ export function ChatList({
       top: el.scrollHeight,
       behavior: smooth ? "smooth" : "auto",
     });
+  }, []);
+
+  /** Records the topmost visible message so we can restore the view later. */
+  const captureAnchor = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    for (const node of el.querySelectorAll<HTMLElement>("[data-message-id]")) {
+      if (node.offsetTop + node.offsetHeight > el.scrollTop) {
+        anchor.current = {
+          id: node.dataset.messageId!,
+          offset: node.offsetTop - el.scrollTop,
+        };
+        return;
+      }
+    }
+    anchor.current = null;
   }, []);
 
   const handleScroll = useCallback(() => {
@@ -77,21 +111,49 @@ export function ChatList({
     const atBottom = distance <= PIN_THRESHOLD;
 
     setPinned(atBottom);
-    if (atBottom) setMissed(0);
-  }, []);
+    if (atBottom) {
+      setMissed(0);
+      anchor.current = null;
+    } else {
+      captureAnchor();
+    }
+  }, [captureAnchor]);
 
   // useLayoutEffect, not useEffect: scrolling must happen in the same frame
   // the new message paints, otherwise the list visibly jumps.
   useLayoutEffect(() => {
+    const newestId = messages.at(-1)?.id ?? null;
+    if (newestId === lastSeenId.current) return;
+
+    const previousId = lastSeenId.current;
+    lastSeenId.current = newestId;
+
     if (pinned) {
       scrollToBottom();
-    } else {
-      setMissed((n) => n + 1);
+      return;
     }
-    // Intentionally keyed on length only — messages are immutable, and
-    // depending on the array identity would re-run on every parent render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length]);
+
+    // Count what actually arrived. Several messages land per tick at high
+    // speed, so incrementing by one badly undercounts. If the previously-seen
+    // message has already been trimmed away, everything on screen is new.
+    const previousIndex = previousId
+      ? messages.findIndex((m) => m.id === previousId)
+      : -1;
+    const added =
+      previousIndex >= 0 ? messages.length - 1 - previousIndex : messages.length;
+    if (added > 0) setMissed((n) => n + added);
+
+    // Trimming removes messages above the viewport, which shifts everything
+    // up under the reader. Put their anchor back where it was.
+    const el = containerRef.current;
+    const held = anchor.current;
+    if (el && held) {
+      const node = el.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(held.id)}"]`,
+      );
+      if (node) el.scrollTop = node.offsetTop - held.offset;
+    }
+  });
 
   // A resized window (or an OBS source resize) changes what "at the bottom"
   // means; re-pin so the view doesn't silently detach.
@@ -109,7 +171,10 @@ export function ChatList({
   const jumpToLive = useCallback(() => {
     setPinned(true);
     setMissed(0);
-    scrollToBottom(true);
+    anchor.current = null;
+    // Instant, not smooth: at high message rates a smooth scroll never
+    // catches the bottom, because more content arrives while it animates.
+    scrollToBottom(false);
   }, [scrollToBottom]);
 
   return (

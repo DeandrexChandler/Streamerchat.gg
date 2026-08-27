@@ -658,3 +658,73 @@ describe("SimulationEngine AI spend", () => {
     expect(stats.estimatedTokens).toBeGreaterThan(0);
   });
 });
+
+describe("SimulationEngine repeat cap", () => {
+  /** Highest number of times any single text appears in a sliding window. */
+  function worstRepeat(messages: ChatMessage[], window = 60): number {
+    let worst = 0;
+    for (let i = 0; i < messages.length; i++) {
+      const slice = messages.slice(Math.max(0, i - window + 1), i + 1);
+      const counts = new Map<string, number>();
+      for (const m of slice) {
+        const n = (counts.get(m.text) ?? 0) + 1;
+        counts.set(m.text, n);
+        if (n > worst) worst = n;
+      }
+    }
+    return worst;
+  }
+
+  it("never repeats one message more than three times in a window", () => {
+    const messages = run(make({ idleAfterSeconds: 10 }, 555), 400_000, [
+      [1_000, "hey everyone welcome in"],
+      [60_000, "LET'S GO that was insane!"],
+      [140_000, "chat what do you think"],
+    ]);
+    expect(messages.length).toBeGreaterThan(80);
+    expect(worstRepeat(messages)).toBeLessThanOrEqual(3);
+  });
+
+  it("holds the cap at the highest chat speed", () => {
+    // Emote-only messages never go through a pool template, so they were
+    // invisible to the template memory and could repeat without limit —
+    // which is exactly what "KEKW KEKW KEKW" spam is.
+    const messages = run(make({ chatSpeed: 12, idleAfterSeconds: 10 }, 556), 200_000, [
+      [1_000, "LET'S GO that was absolutely insane!"],
+    ]);
+    expect(messages.length).toBeGreaterThan(300);
+    expect(worstRepeat(messages)).toBeLessThanOrEqual(3);
+  });
+
+  it("caps emote spam specifically", () => {
+    // Measured against the live stream, not against a filtered list: the cap
+    // is a window over everything emitted, so filtering first would stretch
+    // the same window across several times as much real chat and count
+    // repeats the engine never claimed to prevent.
+    const messages = run(make({ chatSpeed: 12, idleAfterSeconds: 10 }, 557), 200_000);
+    const emoteTexts = new Set(
+      messages.filter((m) => isEmoteOnly(m.text, emoteIndex)).map((m) => m.text),
+    );
+    expect(emoteTexts.size).toBeGreaterThan(10);
+
+    let worst = 0;
+    for (let i = 0; i < messages.length; i++) {
+      const slice = messages.slice(Math.max(0, i - 59), i + 1);
+      const counts = new Map<string, number>();
+      for (const m of slice) {
+        if (!emoteTexts.has(m.text)) continue;
+        const n = (counts.get(m.text) ?? 0) + 1;
+        counts.set(m.text, n);
+        if (n > worst) worst = n;
+      }
+    }
+    expect(worst).toBeLessThanOrEqual(3);
+  });
+
+  it("still emits plenty of messages despite the cap", () => {
+    // The cap drops offenders rather than regenerating them, so it must not
+    // quietly starve the chat.
+    const messages = run(make({ chatSpeed: 12, idleAfterSeconds: 10 }, 558), 120_000);
+    expect(messages.length / 2).toBeGreaterThan(150);
+  });
+});
