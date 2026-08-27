@@ -660,71 +660,221 @@ describe("SimulationEngine AI spend", () => {
 });
 
 describe("SimulationEngine repeat cap", () => {
-  /** Highest number of times any single text appears in a sliding window. */
-  function worstRepeat(messages: ChatMessage[], window = 60): number {
+  /**
+   * Most times any single viewer repeated one exact text inside the engine's
+   * lookback window.
+   *
+   * Windowed, because the cap is windowed: over a long session a viewer may
+   * legitimately reach the limit, have it age out, and reach it again. A
+   * lifetime count would be asserting a guarantee the engine never made.
+   */
+  function worstPerViewer(messages: ChatMessage[], window = 250): number {
     let worst = 0;
     for (let i = 0; i < messages.length; i++) {
       const slice = messages.slice(Math.max(0, i - window + 1), i + 1);
       const counts = new Map<string, number>();
       for (const m of slice) {
-        const n = (counts.get(m.text) ?? 0) + 1;
-        counts.set(m.text, n);
+        const key = `${m.viewerId}\u0000${m.text}`;
+        const n = (counts.get(key) ?? 0) + 1;
+        counts.set(key, n);
         if (n > worst) worst = n;
       }
     }
     return worst;
   }
 
-  it("never repeats one message more than three times in a window", () => {
+  it("never lets one viewer repeat a message more than three times", () => {
     const messages = run(make({ idleAfterSeconds: 10 }, 555), 400_000, [
       [1_000, "hey everyone welcome in"],
       [60_000, "LET'S GO that was insane!"],
       [140_000, "chat what do you think"],
     ]);
     expect(messages.length).toBeGreaterThan(80);
-    expect(worstRepeat(messages)).toBeLessThanOrEqual(3);
+    expect(worstPerViewer(messages)).toBeLessThanOrEqual(3);
   });
 
-  it("holds the cap at the highest chat speed", () => {
-    // Emote-only messages never go through a pool template, so they were
-    // invisible to the template memory and could repeat without limit —
-    // which is exactly what "KEKW KEKW KEKW" spam is.
+  it("holds the per-viewer cap at the highest chat speed", () => {
     const messages = run(make({ chatSpeed: 12, idleAfterSeconds: 10 }, 556), 200_000, [
       [1_000, "LET'S GO that was absolutely insane!"],
     ]);
     expect(messages.length).toBeGreaterThan(300);
-    expect(worstRepeat(messages)).toBeLessThanOrEqual(3);
+    expect(worstPerViewer(messages)).toBeLessThanOrEqual(3);
   });
 
-  it("caps emote spam specifically", () => {
-    // Measured against the live stream, not against a filtered list: the cap
-    // is a window over everything emitted, so filtering first would stretch
-    // the same window across several times as much real chat and count
-    // repeats the engine never claimed to prevent.
+  it("DOES let a crowd pile onto the same reaction", () => {
+    // The whole point of making the cap per-viewer. Many different people
+    // posting "W" at the same moment is real chat, and capping it globally
+    // made hype moments feel damped.
     const messages = run(make({ chatSpeed: 12, idleAfterSeconds: 10 }, 557), 200_000);
-    const emoteTexts = new Set(
-      messages.filter((m) => isEmoteOnly(m.text, emoteIndex)).map((m) => m.text),
-    );
-    expect(emoteTexts.size).toBeGreaterThan(10);
 
-    let worst = 0;
-    for (let i = 0; i < messages.length; i++) {
-      const slice = messages.slice(Math.max(0, i - 59), i + 1);
-      const counts = new Map<string, number>();
-      for (const m of slice) {
-        if (!emoteTexts.has(m.text)) continue;
-        const n = (counts.get(m.text) ?? 0) + 1;
-        counts.set(m.text, n);
-        if (n > worst) worst = n;
-      }
+    const byText = new Map<string, Set<string>>();
+    for (const m of messages) {
+      const viewers = byText.get(m.text) ?? new Set<string>();
+      viewers.add(m.viewerId);
+      byText.set(m.text, viewers);
     }
-    expect(worst).toBeLessThanOrEqual(3);
+
+    const widest = Math.max(...[...byText.values()].map((v) => v.size));
+    expect(widest).toBeGreaterThan(3);
+  });
+
+  it("keeps emote spam inside one message untouched", () => {
+    // Repeated emotes within a single line are encouraged, not capped — that
+    // is what real emote spam looks like.
+    const messages = run(make({ chatSpeed: 12, idleAfterSeconds: 10 }, 558), 200_000);
+    const spammed = messages.filter(
+      (m) => isEmoteOnly(m.text, emoteIndex) && m.text.split(/\s+/).length >= 4,
+    );
+    expect(spammed.length).toBeGreaterThan(5);
   });
 
   it("still emits plenty of messages despite the cap", () => {
-    // The cap drops offenders rather than regenerating them, so it must not
-    // quietly starve the chat.
-    const messages = run(make({ chatSpeed: 12, idleAfterSeconds: 10 }, 558), 120_000);
+    const messages = run(make({ chatSpeed: 12, idleAfterSeconds: 10 }, 559), 120_000);
     expect(messages.length / 2).toBeGreaterThan(150);
   });
+
+  it("lets a viewer fire off several different lines in a row, rarely", () => {
+    const messages = run(make({ idleAfterSeconds: 10 }, 560), 500_000, [
+      [1_000, "hey everyone welcome in"],
+      [80_000, "LET'S GO that was insane!"],
+      [200_000, "chat what do you think about this"],
+      [320_000, "look at this, check it out"],
+    ]);
+
+    let runs = 0;
+    for (let i = 1; i < messages.length; i++) {
+      if (messages[i].viewerId === messages[i - 1].viewerId) runs++;
+    }
+
+    expect(runs).toBeGreaterThan(0);
+    // Rare: this should read as someone typing fast, not as a tiny audience.
+    expect(runs / messages.length).toBeLessThan(0.15);
+  });
 });
+
+describe("SimulationEngine viewer count", () => {
+  /** Viewer counts sampled across a session. */
+  function samples(target: number, seed: number): number[] {
+    const engine = make({ audienceSize: target, idleAfterSeconds: 10 }, seed);
+    const out: number[] = [];
+    for (let t = 0; t <= 180_000; t += 250) {
+      engine.tick(t);
+      if (t % 3000 === 0) out.push(engine.stats().audience);
+    }
+    return out;
+  }
+
+  it("stays near the configured audience", () => {
+    for (const target of [25, 500, 8000]) {
+      const values = samples(target, 11);
+      const mean = values.reduce((a, b) => a + b, 0) / values.length;
+      expect(Math.abs(mean - target) / target).toBeLessThan(0.15);
+    }
+  });
+
+  it("keeps moving rather than settling on a number", () => {
+    // A viewer count frozen on a number reads as the setting echoed back, not
+    // as an audience. The property that matters is that it changes between
+    // samples — a bounded random walk naturally revisits values, so counting
+    // distinct ones would be asserting the wrong thing.
+    const values = samples(500, 12);
+    let unchanged = 0;
+    for (let i = 1; i < values.length; i++) {
+      if (values[i] === values[i - 1]) unchanged++;
+    }
+    expect(unchanged / values.length).toBeLessThan(0.1);
+  });
+
+  it("rarely lands exactly on the configured number", () => {
+    const values = samples(500, 13);
+    const exact = values.filter((v) => v === 500).length;
+    expect(exact / values.length).toBeLessThan(0.05);
+  });
+
+  it("scales its wobble with audience size", () => {
+    // Counting noise grows with the square root of the count: a 10-viewer
+    // stream moves by ones, a 10,000-viewer stream by tens.
+    const spread = (target: number) => {
+      const values = samples(target, 14);
+      return Math.max(...values) - Math.min(...values);
+    };
+    expect(spread(8000)).toBeGreaterThan(spread(25) * 5);
+  });
+
+  it("tracks a changed audience setting", () => {
+    const engine = make({ audienceSize: 50, idleAfterSeconds: 10 }, 15);
+    run(engine, 30_000);
+    engine.updateSettings({ audienceSize: 3000 });
+    run(engine, 200_000);
+    const value = engine.stats().audience;
+    expect(value).toBeGreaterThan(2500);
+    expect(value).toBeLessThan(3500);
+  });
+
+  it("never reports fewer than one viewer", () => {
+    const engine = make({ audienceSize: 5, idleAfterSeconds: 10 }, 16);
+    for (let t = 0; t <= 120_000; t += 250) {
+      engine.tick(t);
+      expect(engine.stats().audience).toBeGreaterThanOrEqual(1);
+    }
+  });
+});
+
+describe("SimulationEngine AI spend", () => {
+  it("does not spend more on AI just because chat is faster", () => {
+    // The whole point of the budget: turning chat speed up 10x emits ~13x the
+    // messages, but the streamer is saying exactly the same things, so the
+    // number of refills worth making has not changed. Tying spend to message
+    // volume would multiply the bill for no extra value.
+    const refillsAt = (chatSpeed: number) => {
+      const engine = make({ aiShare: 0.2, chatSpeed }, 909);
+      let refills = 0;
+      let next = 0;
+      const script: Array<[number, string]> = Array.from(
+        { length: 40 },
+        (_, i) => [i * 15_000, "okay so anyway I think we should try this next"],
+      );
+      for (let t = 0; t <= 600_000; t += 250) {
+        while (next < script.length && script[next][0] <= t) {
+          const outcome = engine.handleTranscript(script[next++][1], t);
+          if (engine.wantsAiRefill(outcome, t)) {
+            engine.recordAiCall(t);
+            refills++;
+          }
+        }
+        engine.tick(t);
+      }
+      return refills;
+    };
+
+    const slow = refillsAt(1);
+    const fast = refillsAt(12);
+    expect(fast).toBeLessThanOrEqual(slow + 1);
+  });
+
+  it("stops asking for refills once the budget is exhausted", () => {
+    const engine = make({ aiShare: 0.3 }, 42);
+    for (let i = 0; i < 30; i++) engine.recordAiCall(i * 30_000);
+
+    const outcome = engine.handleTranscript("something quite ambiguous here", 1_000_000);
+    // Far inside the minimum interval since the last recorded call.
+    expect(engine.wantsAiRefill(outcome, 30 * 30_000 + 1000)).toBe(false);
+  });
+
+  it("stops asking for refills while backing off from a failure", () => {
+    const engine = make({ aiShare: 0.3 }, 43);
+    engine.recordAiFailure(0);
+    const outcome = engine.handleTranscript("something quite ambiguous here", 5_000);
+    expect(engine.wantsAiRefill(outcome, 5_000)).toBe(false);
+  });
+
+  it("reports what the AI tier has cost so far", () => {
+    const engine = make({ aiShare: 0.3 }, 44);
+    engine.recordAiCall(0);
+    engine.recordAiCall(30_000);
+    const stats = engine.aiBudgetStats(60_000);
+    expect(stats.calls).toBe(2);
+    expect(stats.estimatedTokens).toBeGreaterThan(0);
+  });
+});
+

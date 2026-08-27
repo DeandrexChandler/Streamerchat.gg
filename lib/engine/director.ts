@@ -36,6 +36,15 @@ import type {
  * never touches the clock; it only produces offsets.
  */
 
+/**
+ * Chance that a message continues from the previous speaker rather than
+ * picking someone new.
+ *
+ * Low on purpose: this should read as someone typing fast, not as a small
+ * audience where the same handful of names dominate.
+ */
+const RAPID_FIRE_CHANCE = 0.09;
+
 /** How many messages a burst is worth, before the speed multiplier. */
 function burstSize(classification: Classification, rng: Rng): number {
   const { intent, energy } = classification;
@@ -244,7 +253,24 @@ export function directReaction(options: DirectOptions): DirectResult {
   };
 
   for (let i = 0; i < count; i++) {
-    const speaker = population.pickSpeaker(now, used);
+    /**
+     * Occasionally the previous speaker keeps typing.
+     *
+     * pickSpeaker damps anyone who just spoke down to ~8% weight, which is
+     * right most of the time but means one person firing off two or three
+     * quick lines — "WAIT" / "no way" / "did that just work" — essentially
+     * never happened. This carves out that case explicitly.
+     *
+     * The text still passes through the same dedup, so a rapid-fire run is
+     * always different lines rather than a repeat.
+     */
+    const previous = messages.at(-1);
+    const continuing =
+      previous !== undefined && i > 0 && rng.chance(RAPID_FIRE_CHANCE)
+        ? population.get(previous.viewerId)
+        : undefined;
+
+    const speaker = continuing ?? population.pickSpeaker(now, used);
     if (!speaker) break;
     used.add(speaker.id);
 
