@@ -154,12 +154,27 @@ describe("SimulationEngine", () => {
   });
 
   it("respects the per-minute rate limit", () => {
-    const messages = run(make({ maxMessagesPerMinute: 10, chatSpeed: 3 }), 60_000, [
+    const messages = run(make({ maxMessagesPerMinute: 10, chatSpeed: 1 }), 60_000, [
       [1000, "LET'S GO INSANE AMAZING!!!"],
       [5000, "chat what do you think"],
       [9000, "look at this"],
     ]);
     expect(messages.length).toBeLessThanOrEqual(11);
+  });
+
+  it("scales the rate cap with chat speed", () => {
+    // maxMessagesPerMinute is a safety valve against a runaway director, not a
+    // pacing control. Holding it fixed clamped the top speed setting straight
+    // back down to a readable trickle, which is what made "CHAOS" feel tame.
+    const script: Array<[number, string]> = [
+      [1000, "LET'S GO INSANE AMAZING!!!"],
+      [5000, "chat what do you think"],
+      [9000, "look at this"],
+    ];
+    const slow = run(make({ maxMessagesPerMinute: 10, chatSpeed: 1 }, 5), 60_000, script);
+    const fast = run(make({ maxMessagesPerMinute: 10, chatSpeed: 6 }, 5), 60_000, script);
+    expect(fast.length).toBeGreaterThan(slow.length);
+    expect(fast.length).toBeLessThanOrEqual(61);
   });
 
   it("produces more messages at higher chatSpeed", () => {
@@ -515,5 +530,131 @@ describe("SimulationEngine audience size", () => {
       if (existing) expect(existing).toBe(m.viewerId);
       byName.set(m.username, m.viewerId);
     }
+  });
+});
+
+describe("SimulationEngine viewer count", () => {
+  /** Viewer counts sampled across a session. */
+  function samples(target: number, seed: number): number[] {
+    const engine = make({ audienceSize: target, idleAfterSeconds: 10 }, seed);
+    const out: number[] = [];
+    for (let t = 0; t <= 180_000; t += 250) {
+      engine.tick(t);
+      if (t % 3000 === 0) out.push(engine.stats().audience);
+    }
+    return out;
+  }
+
+  it("stays near the configured audience", () => {
+    for (const target of [25, 500, 8000]) {
+      const values = samples(target, 11);
+      const mean = values.reduce((a, b) => a + b, 0) / values.length;
+      expect(Math.abs(mean - target) / target).toBeLessThan(0.15);
+    }
+  });
+
+  it("keeps moving rather than settling on a number", () => {
+    // A viewer count frozen on a number reads as the setting echoed back, not
+    // as an audience. The property that matters is that it changes between
+    // samples — a bounded random walk naturally revisits values, so counting
+    // distinct ones would be asserting the wrong thing.
+    const values = samples(500, 12);
+    let unchanged = 0;
+    for (let i = 1; i < values.length; i++) {
+      if (values[i] === values[i - 1]) unchanged++;
+    }
+    expect(unchanged / values.length).toBeLessThan(0.1);
+  });
+
+  it("rarely lands exactly on the configured number", () => {
+    const values = samples(500, 13);
+    const exact = values.filter((v) => v === 500).length;
+    expect(exact / values.length).toBeLessThan(0.05);
+  });
+
+  it("scales its wobble with audience size", () => {
+    // Counting noise grows with the square root of the count: a 10-viewer
+    // stream moves by ones, a 10,000-viewer stream by tens.
+    const spread = (target: number) => {
+      const values = samples(target, 14);
+      return Math.max(...values) - Math.min(...values);
+    };
+    expect(spread(8000)).toBeGreaterThan(spread(25) * 5);
+  });
+
+  it("tracks a changed audience setting", () => {
+    const engine = make({ audienceSize: 50, idleAfterSeconds: 10 }, 15);
+    run(engine, 30_000);
+    engine.updateSettings({ audienceSize: 3000 });
+    run(engine, 200_000);
+    const value = engine.stats().audience;
+    expect(value).toBeGreaterThan(2500);
+    expect(value).toBeLessThan(3500);
+  });
+
+  it("never reports fewer than one viewer", () => {
+    const engine = make({ audienceSize: 5, idleAfterSeconds: 10 }, 16);
+    for (let t = 0; t <= 120_000; t += 250) {
+      engine.tick(t);
+      expect(engine.stats().audience).toBeGreaterThanOrEqual(1);
+    }
+  });
+});
+
+describe("SimulationEngine AI spend", () => {
+  it("does not spend more on AI just because chat is faster", () => {
+    // The whole point of the budget: turning chat speed up 10x emits ~13x the
+    // messages, but the streamer is saying exactly the same things, so the
+    // number of refills worth making has not changed. Tying spend to message
+    // volume would multiply the bill for no extra value.
+    const refillsAt = (chatSpeed: number) => {
+      const engine = make({ aiShare: 0.2, chatSpeed }, 909);
+      let refills = 0;
+      let next = 0;
+      const script: Array<[number, string]> = Array.from(
+        { length: 40 },
+        (_, i) => [i * 15_000, "okay so anyway I think we should try this next"],
+      );
+      for (let t = 0; t <= 600_000; t += 250) {
+        while (next < script.length && script[next][0] <= t) {
+          const outcome = engine.handleTranscript(script[next++][1], t);
+          if (engine.wantsAiRefill(outcome, t)) {
+            engine.recordAiCall(t);
+            refills++;
+          }
+        }
+        engine.tick(t);
+      }
+      return refills;
+    };
+
+    const slow = refillsAt(1);
+    const fast = refillsAt(12);
+    expect(fast).toBeLessThanOrEqual(slow + 1);
+  });
+
+  it("stops asking for refills once the budget is exhausted", () => {
+    const engine = make({ aiShare: 0.3 }, 42);
+    for (let i = 0; i < 30; i++) engine.recordAiCall(i * 30_000);
+
+    const outcome = engine.handleTranscript("something quite ambiguous here", 1_000_000);
+    // Far inside the minimum interval since the last recorded call.
+    expect(engine.wantsAiRefill(outcome, 30 * 30_000 + 1000)).toBe(false);
+  });
+
+  it("stops asking for refills while backing off from a failure", () => {
+    const engine = make({ aiShare: 0.3 }, 43);
+    engine.recordAiFailure(0);
+    const outcome = engine.handleTranscript("something quite ambiguous here", 5_000);
+    expect(engine.wantsAiRefill(outcome, 5_000)).toBe(false);
+  });
+
+  it("reports what the AI tier has cost so far", () => {
+    const engine = make({ aiShare: 0.3 }, 44);
+    engine.recordAiCall(0);
+    engine.recordAiCall(30_000);
+    const stats = engine.aiBudgetStats(60_000);
+    expect(stats.calls).toBe(2);
+    expect(stats.estimatedTokens).toBeGreaterThan(0);
   });
 });

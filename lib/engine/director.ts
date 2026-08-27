@@ -81,13 +81,31 @@ function burstSize(classification: Classification, rng: Rng): number {
  * moment produces more pile-ons and fewer stragglers, which is what makes a
  * hype spike feel different from idle conversation.
  */
-function burstOffsets(count: number, energy: number, rng: Rng): number[] {
+function burstOffsets(
+  count: number,
+  energy: number,
+  speed: number,
+  rng: Rng,
+): number[] {
   // Weights shift toward simultaneity as energy rises.
   const pileOn = 0.22 + 0.34 * energy;
   const straggler = 0.28 - 0.16 * energy;
 
+  /**
+   * Speed compresses the gaps, not just the message count.
+   *
+   * Multiplying burst size alone was the bug behind "chaos doesn't feel like
+   * chaos": more messages were generated but still spaced a second apart, so
+   * they simply queued and hit the rate limiter. A busy chat isn't a calm
+   * chat with more people — the gaps themselves collapse.
+   *
+   * Sub-linear (^0.75) so the low end stays gentle while the top end is
+   * genuinely unreadable.
+   */
+  const compress = 1 / Math.pow(Math.max(0.1, speed), 0.75);
+
   // The first reaction lands fast when something exciting just happened.
-  let cursor = rng.float(250, 900) * (1.3 - 0.6 * energy);
+  let cursor = rng.float(250, 900) * (1.3 - 0.6 * energy) * compress;
   const offsets: number[] = [Math.round(cursor)];
 
   for (let i = 1; i < count; i++) {
@@ -102,7 +120,7 @@ function burstOffsets(count: number, energy: number, rng: Rng): number[] {
       gap = rng.float(500, 1700);
     }
 
-    cursor += gap;
+    cursor += gap * compress;
     offsets.push(Math.round(cursor));
   }
 
@@ -205,7 +223,12 @@ export function directReaction(options: DirectOptions): DirectResult {
     1,
     Math.round(burstSize(classification, rng) * settings.chatSpeed),
   );
-  const offsets = burstOffsets(count, classification.energy, rng);
+  const offsets = burstOffsets(
+    count,
+    classification.energy,
+    settings.chatSpeed,
+    rng,
+  );
 
   const messages: PendingMessage[] = [];
   const templates: string[] = [];

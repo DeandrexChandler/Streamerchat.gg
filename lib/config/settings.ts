@@ -21,7 +21,7 @@ export const SimulationSettingsSchema = z.object({
   audienceSize: z.number().int().min(5).max(10_000).default(50),
 
   /** Global message-rate multiplier. 1 = tuned default. */
-  chatSpeed: z.number().min(0.25).max(3).default(1),
+  chatSpeed: z.number().min(0.25).max(12).default(1.2),
 
   /** Hard ceiling so a hype spike can't flood the renderer. */
   maxMessagesPerMinute: z.number().int().min(5).max(400).default(90),

@@ -75,8 +75,14 @@ export class Population {
     if (all.length === 0) return undefined;
     const victim = this.rng.pick(all);
     this.viewers.delete(victim.id);
-    this.takenNames.delete(victim.name.toLowerCase());
-    // Return the vocabulary to the pool so long sessions don't starve it.
+
+    // The NAME is deliberately not released. Usernames are globally unique on
+    // every real platform, so the same handle always means the same person —
+    // letting a departed viewer's name be reissued to someone new means chat
+    // ends up with two different "marcus" identities in one session.
+    //
+    // The vocabulary that built it does go back, so those words can recombine
+    // into different names and long sessions don't starve the generator.
     for (const word of victim.nameWords) this.usedWords.delete(word);
     return victim;
   }

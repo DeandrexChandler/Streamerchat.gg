@@ -38,8 +38,15 @@ import type { SimulatorStatus } from "@/lib/react/use-simulator";
  * drift if the director's burst sizes are retuned — treat them as the label
  * for a measured value, not as a target the engine enforces.
  */
-const SPEED_STEPS = [0.5, 0.75, 1, 1.5, 2, 3] as const;
-const SPEED_LABELS = ["~13/min", "~20/min", "~27/min", "~40/min", "~55/min", "CHAOS"];
+const SPEED_STEPS = [0.5, 0.8, 1.2, 2, 3.5, 12] as const;
+const SPEED_LABELS = [
+  "~15/min",
+  "~20/min",
+  "~30/min",
+  "~70/min",
+  "~130/min",
+  "CHAOS",
+] as const;
 
 
 export interface ControlPanelProps {
