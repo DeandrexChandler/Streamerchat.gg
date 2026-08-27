@@ -3,149 +3,151 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard,
-  Tv,
-  Menu,
-  X,
-  User,
-} from "lucide-react";
+import { Menu, MessagesSquare, Radio, Tv, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 /**
- * App chrome — the original dashboard shell.
+ * App chrome.
  *
- * Light page, white sidebar. That contrast is load-bearing: the simulator's
- * chat column is #18181b, and it only reads as a distinct panel because the
- * surface behind it is light. A previous rebuild made the whole app dark and
- * the chat pane lost its edges entirely.
+ * Two constraints shape this, and both come from the simulator that renders
+ * inside it:
  *
- * Living in a route group means pages stay at /simulator and /obs while
- * inheriting this. /overlay is deliberately outside it — that route renders
- * into an OBS browser source and must have no chrome at all.
+ *  1. The page surface stays light. The chat column is #18181b and only reads
+ *     as a distinct panel because the surface behind it is lighter. A previous
+ *     rebuild made the whole app dark and the chat pane lost its edges.
+ *  2. Typography is opted into, not inherited. `dashboard-surface` applies the
+ *     Geist stack to chrome only — the chat's own type is part of what goes
+ *     out on stream and is not ours to restyle from here.
+ *
+ * /overlay is deliberately outside this route group: it renders into an OBS
+ * browser source and must have no chrome at all.
  */
 
-interface NavItem {
-  label: string;
-  href: string;
-  icon: React.ElementType;
-}
-
-interface NavSection {
-  title: string;
-  items: NavItem[];
-}
-
-const navSections: NavSection[] = [
+const NAV = [
   {
-    title: "GENERAL",
-    items: [
-      { label: "Simulator", href: "/simulator", icon: LayoutDashboard },
-      { label: "OBS Integration", href: "/obs", icon: Tv },
-    ],
+    label: "Simulator",
+    href: "/simulator",
+    icon: MessagesSquare,
+    hint: "Run the chat",
   },
-];
+  {
+    label: "OBS Integration",
+    href: "/obs",
+    icon: Tv,
+    hint: "Add it to your stream",
+  },
+] as const;
 
 export default function ShellLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
 
+  const current = NAV.find(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+  );
+
   return (
-    <div className="h-screen bg-gray-50 dark:bg-gray-900 overflow-hidden">
-      {/* Mobile Menu Button */}
-      <button
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="fixed top-4 left-4 z-50 lg:hidden p-2 rounded-lg bg-white dark:bg-gray-800 shadow-lg"
+    <div className="dashboard-surface h-screen overflow-hidden">
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={() => setMobileOpen((open) => !open)}
+        aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+        className="fixed top-4 left-4 z-50 lg:hidden"
       >
-        {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
-      </button>
+        {mobileOpen ? <Menu className="size-4" /> : <X className="size-4" />}
+      </Button>
 
-      {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 z-40 h-screen w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transition-transform ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        } lg:translate-x-0`}
+        className={cn(
+          "fixed top-0 left-0 z-40 flex h-screen w-64 flex-col border-r border-border bg-sidebar transition-transform",
+          mobileOpen ? "translate-x-0" : "-translate-x-full",
+          "lg:translate-x-0",
+        )}
       >
-        <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-            <Link href="/simulator" className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-lg">S</span>
-              </div>
-              <span className="font-bold text-xl">StreamerChat.gg</span>
-            </Link>
-          </div>
+        <div className="p-5">
+          <Link href="/simulator" className="flex items-center gap-2.5">
+            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
+              S
+            </span>
+            <span className="text-[15px] font-semibold tracking-tight">
+              StreamerChat<span className="text-muted-foreground">.gg</span>
+            </span>
+          </Link>
+        </div>
 
-          {/* Navigation */}
-          <nav className="flex-1 overflow-y-auto p-4 space-y-6">
-            {navSections.map((section) => (
-              <div key={section.title}>
-                <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3">
-                  {section.title}
-                </h3>
-                <div className="space-y-1">
-                  {section.items.map((item) => {
-                    const Icon = item.icon;
-                    const isActive = pathname === item.href;
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        onClick={() => setSidebarOpen(false)}
-                        className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-                          isActive
-                            ? "bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400"
-                            : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                        }`}
-                      >
-                        <Icon size={20} />
-                        <span className="font-medium">{item.label}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </nav>
+        <Separator />
+
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+          {NAV.map((item) => {
+            const Icon = item.icon;
+            const active = item === current;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMobileOpen(false)}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex items-start gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                  active
+                    ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                    : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
+                )}
+              >
+                <Icon className="mt-0.5 size-4 shrink-0" />
+                <span className="flex flex-col leading-tight">
+                  <span>{item.label}</span>
+                  <span className="text-[11px] font-normal text-muted-foreground">
+                    {item.hint}
+                  </span>
+                </span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Honest status, not a fake account widget. Accounts are deliberately
+            deferred until the product works end to end. */}
+        <div className="p-3">
+          <Separator className="mb-3" />
+          <div className="flex items-start gap-2.5 rounded-md px-3 py-2 text-[11px] text-muted-foreground">
+            <Radio className="mt-0.5 size-3.5 shrink-0" />
+            <span className="leading-snug">
+              Running locally. No account needed — settings live in this
+              browser.
+            </span>
+          </div>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <div className="lg:ml-64 h-screen flex flex-col overflow-hidden">
-        {/* Top Bar */}
-        <header className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-5 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1 lg:ml-0 ml-12">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-                {(() => {
-                  const segment = pathname.split("/").pop();
-                  if (!segment) return "Simulator";
-                  return segment.charAt(0).toUpperCase() + segment.slice(1);
-                })()}
-              </h1>
-            </div>
-
-            <div className="flex items-center gap-3 px-4 py-2 rounded-lg">
-              <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
-                <User size={18} className="text-white" />
-              </div>
-            </div>
+      <div className="flex h-screen flex-col overflow-hidden lg:ml-64">
+        <header className="flex shrink-0 items-center border-b border-border px-6 py-3.5">
+          <div className="ml-12 lg:ml-0">
+            <h1 className="text-lg font-semibold tracking-tight">
+              {current?.label ?? "StreamerChat.gg"}
+            </h1>
+            {current && (
+              <p className="text-xs text-muted-foreground">{current.hint}</p>
+            )}
           </div>
         </header>
 
-        {/* Page Content */}
         <main className="flex-1 overflow-hidden p-6">{children}</main>
       </div>
 
-      {/* Mobile Sidebar Overlay */}
-      {sidebarOpen && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 bg-black/50 z-30 lg:hidden"
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          onClick={() => setMobileOpen(false)}
+          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
         />
       )}
     </div>

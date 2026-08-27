@@ -1,469 +1,258 @@
 "use client";
 
-import { useState } from "react";
-import { Copy, Check, Monitor, Settings2, Download } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { Check, Copy, ExternalLink, Info, Monitor } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 
-export default function OBSPage() {
+/**
+ * OBS setup.
+ *
+ * Builds the browser-source URL and explains how to add it. Only exposes the
+ * parameters /overlay actually reads — the previous version emitted width,
+ * height, fontFamily and color as well, none of which the overlay has ever
+ * looked at. OBS sizes the browser source itself, so width and height in the
+ * URL were always meaningless.
+ */
+
+const DEFAULTS = { fontSize: 16, maxMessages: 50, timestamps: false };
+
+export default function ObsPage() {
+  const [fontSize, setFontSize] = useState(DEFAULTS.fontSize);
+  const [maxMessages, setMaxMessages] = useState(DEFAULTS.maxMessages);
+  const [timestamps, setTimestamps] = useState(DEFAULTS.timestamps);
   const [copied, setCopied] = useState(false);
-  const [overlaySettings, setOverlaySettings] = useState({
-    width: 400,
-    height: 600,
-    fontSize: 16,
-    fontFamily: "Inter, system-ui, sans-serif",
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
-    textColor: "#ffffff",
-    showTimestamps: true,
-    showEmotes: true,
-    maxMessages: 50,
-  });
 
-  // Generate browser source URL
-  const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
-  const overlayUrl =
-    `${baseUrl}/overlay?` +
-    new URLSearchParams({
-      width: overlaySettings.width.toString(),
-      height: overlaySettings.height.toString(),
-      fontSize: overlaySettings.fontSize.toString(),
-      fontFamily: overlaySettings.fontFamily,
-      bg: overlaySettings.backgroundColor,
-      color: overlaySettings.textColor,
-      timestamps: overlaySettings.showTimestamps.toString(),
-      emotes: overlaySettings.showEmotes.toString(),
-      max: overlaySettings.maxMessages.toString(),
-    }).toString();
+  const overlayUrl = useMemo(() => {
+    const origin =
+      typeof window === "undefined" ? "http://localhost:3000" : window.location.origin;
+    const params = new URLSearchParams({
+      fontSize: String(fontSize),
+      max: String(maxMessages),
+      timestamps: String(timestamps),
+    });
+    return `${origin}/overlay?${params}`;
+  }, [fontSize, maxMessages, timestamps]);
 
-  const handleCopyUrl = () => {
-    navigator.clipboard.writeText(overlayUrl);
-    setCopied(true);
-    toast.success("Browser source URL copied!");
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleDownloadCSS = () => {
-    const css = `/* StreamerChat.gg Custom Overlay Styles */
-.chat-overlay {
-  width: ${overlaySettings.width}px;
-  height: ${overlaySettings.height}px;
-  background: ${overlaySettings.backgroundColor};
-  font-family: ${overlaySettings.fontFamily};
-  font-size: ${overlaySettings.fontSize}px;
-  color: ${overlaySettings.textColor};
-  overflow-y: auto;
-  padding: 1rem;
-}
-
-.chat-message {
-  margin-bottom: 0.75rem;
-  animation: slideIn 0.3s ease-out;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.username {
-  font-weight: 600;
-  margin-right: 0.5rem;
-}
-
-.timestamp {
-  font-size: 0.75em;
-  opacity: 0.6;
-  margin-right: 0.5rem;
-}
-
-.emote {
-  height: ${overlaySettings.fontSize * 1.5}px;
-  vertical-align: middle;
-  margin: 0 2px;
-}`;
-
-    const blob = new Blob([css], { type: "text/css" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "streamerchat-gg-overlay.css";
-    a.click();
-    toast.success("CSS file downloaded");
-  };
+  const copyUrl = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(overlayUrl);
+      setCopied(true);
+      toast.success("Browser source URL copied");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Couldn't copy — select the URL and copy it manually.");
+    }
+  }, [overlayUrl]);
 
   return (
-    <div className="p-8 max-w-6xl">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">OBS Integration</h1>
-        <p className="text-gray-600 dark:text-gray-400">
-          Set up your chat overlay for OBS Studio with a browser source
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Settings Panel */}
-        <div className="space-y-6">
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-            <div className="flex items-center gap-2 mb-6">
-              <Settings2 className="w-5 h-5 text-purple-600" />
-              <h2 className="text-xl font-semibold">Overlay Settings</h2>
-            </div>
-
-            {/* Dimensions */}
-            <div className="space-y-4 mb-6">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Width (px)
-                </label>
-                <input
-                  type="number"
-                  value={overlaySettings.width}
-                  onChange={(e) =>
-                    setOverlaySettings({
-                      ...overlaySettings,
-                      width: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
-                  min="200"
-                  max="1920"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Height (px)
-                </label>
-                <input
-                  type="number"
-                  value={overlaySettings.height}
-                  onChange={(e) =>
-                    setOverlaySettings({
-                      ...overlaySettings,
-                      height: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
-                  min="200"
-                  max="1080"
-                />
-              </div>
-            </div>
-
-            {/* Font Settings */}
-            <div className="space-y-4 mb-6">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Font Size (px)
-                </label>
-                <input
-                  type="number"
-                  value={overlaySettings.fontSize}
-                  onChange={(e) =>
-                    setOverlaySettings({
-                      ...overlaySettings,
-                      fontSize: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
-                  min="10"
-                  max="32"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Font Family
-                </label>
-                <select
-                  value={overlaySettings.fontFamily}
-                  onChange={(e) =>
-                    setOverlaySettings({
-                      ...overlaySettings,
-                      fontFamily: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
-                >
-                  <option value="Inter, system-ui, sans-serif">Inter</option>
-                  <option value="'Roboto', sans-serif">Roboto</option>
-                  <option value="'Arial', sans-serif">Arial</option>
-                  <option value="'Courier New', monospace">Courier New</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Colors */}
-            <div className="space-y-4 mb-6">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Background Color
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={overlaySettings.backgroundColor}
-                    onChange={(e) =>
-                      setOverlaySettings({
-                        ...overlaySettings,
-                        backgroundColor: e.target.value,
-                      })
-                    }
-                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 font-mono text-sm"
-                    placeholder="rgba(0, 0, 0, 0.7)"
-                  />
-                  <input
-                    type="color"
-                    value="#000000"
-                    onChange={(e) =>
-                      setOverlaySettings({
-                        ...overlaySettings,
-                        backgroundColor: e.target.value,
-                      })
-                    }
-                    className="w-12 h-10 rounded border border-gray-300 dark:border-gray-600"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Text Color
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={overlaySettings.textColor}
-                    onChange={(e) =>
-                      setOverlaySettings({
-                        ...overlaySettings,
-                        textColor: e.target.value,
-                      })
-                    }
-                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 font-mono text-sm"
-                    placeholder="#ffffff"
-                  />
-                  <input
-                    type="color"
-                    value={overlaySettings.textColor}
-                    onChange={(e) =>
-                      setOverlaySettings({
-                        ...overlaySettings,
-                        textColor: e.target.value,
-                      })
-                    }
-                    className="w-12 h-10 rounded border border-gray-300 dark:border-gray-600"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Toggles */}
-            <div className="space-y-3 mb-6">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={overlaySettings.showTimestamps}
-                  onChange={(e) =>
-                    setOverlaySettings({
-                      ...overlaySettings,
-                      showTimestamps: e.target.checked,
-                    })
-                  }
-                  className="w-4 h-4 rounded"
-                />
-                <span className="text-sm">Show Timestamps</span>
-              </label>
-
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={overlaySettings.showEmotes}
-                  onChange={(e) =>
-                    setOverlaySettings({
-                      ...overlaySettings,
-                      showEmotes: e.target.checked,
-                    })
-                  }
-                  className="w-4 h-4 rounded"
-                />
-                <span className="text-sm">Show Emotes</span>
-              </label>
-            </div>
-
-            {/* Max Messages */}
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Max Messages
-              </label>
-              <input
-                type="number"
-                value={overlaySettings.maxMessages}
-                onChange={(e) =>
-                  setOverlaySettings({
-                    ...overlaySettings,
-                    maxMessages: parseInt(e.target.value),
-                  })
-                }
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
-                min="10"
-                max="100"
-              />
-            </div>
-          </div>
-
-          {/* Download CSS */}
-          <button
-            onClick={handleDownloadCSS}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
-          >
-            <Download className="w-5 h-5" />
-            Download Custom CSS
-          </button>
-        </div>
-
-        {/* Preview & Setup */}
-        <div className="space-y-6">
-          {/* Preview */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Monitor className="w-5 h-5 text-purple-600" />
-              <h2 className="text-xl font-semibold">Preview</h2>
-            </div>
-
-            <div
-              className="rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600"
-              style={{
-                width: "100%",
-                height: "400px",
-                background: overlaySettings.backgroundColor,
-                fontFamily: overlaySettings.fontFamily,
-                fontSize: `${overlaySettings.fontSize}px`,
-                color: overlaySettings.textColor,
-                padding: "1rem",
-                overflowY: "auto",
-              }}
-            >
-              {/* Sample Messages */}
-              <div className="space-y-3">
-                {overlaySettings.showTimestamps && (
-                  <span style={{ fontSize: "0.75em", opacity: 0.6 }}>
-                    12:34:56
-                  </span>
-                )}{" "}
-                <span style={{ fontWeight: 600 }}>StreamerBot:</span> Welcome to
-                the stream!
-              </div>
-              <div className="space-y-3 mt-3">
-                {overlaySettings.showTimestamps && (
-                  <span style={{ fontSize: "0.75em", opacity: 0.6 }}>
-                    12:35:12
-                  </span>
-                )}{" "}
-                <span style={{ fontWeight: 600, color: "#9147ff" }}>
-                  Viewer123:
-                </span>{" "}
-                Poggers {overlaySettings.showEmotes && <span>🎉</span>}
-              </div>
-              <div className="space-y-3 mt-3">
-                {overlaySettings.showTimestamps && (
-                  <span style={{ fontSize: "0.75em", opacity: 0.6 }}>
-                    12:35:45
-                  </span>
-                )}{" "}
-                <span style={{ fontWeight: 600, color: "#ff6b6b" }}>
-                  ChatMaster:
-                </span>{" "}
-                This is awesome! {overlaySettings.showEmotes && <span>❤️</span>}
-              </div>
-            </div>
-          </div>
-
-          {/* Browser Source URL */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-            <h3 className="font-semibold mb-3">Browser Source URL</h3>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={overlayUrl}
-                readOnly
-                className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg font-mono text-sm overflow-x-auto"
-              />
-              <button
-                onClick={handleCopyUrl}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors flex items-center gap-2"
-              >
-                {copied ? (
-                  <Check className="w-4 h-4" />
-                ) : (
-                  <Copy className="w-4 h-4" />
-                )}
-                {copied ? "Copied!" : "Copy"}
-              </button>
-            </div>
-          </div>
-
-          {/* Setup Instructions */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-            <h3 className="font-semibold mb-3">Setup Instructions</h3>
-            <ol className="space-y-3 text-sm text-gray-600 dark:text-gray-400">
-              <li className="flex gap-3">
-                <span className="font-semibold text-purple-600">1.</span>
-                <span>Open OBS Studio and select your scene</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-semibold text-purple-600">2.</span>
-                <span>
-                  Click the <strong>+</strong> button in Sources and select{" "}
-                  <strong>Browser</strong>
-                </span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-semibold text-purple-600">3.</span>
-                <span>Name it "StreamerChat.gg Overlay"</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-semibold text-purple-600">4.</span>
-                <span>
-                  Paste the browser source URL above into the{" "}
-                  <strong>URL</strong> field
-                </span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-semibold text-purple-600">5.</span>
-                <span>Set Width and Height to match your overlay settings</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-semibold text-purple-600">6.</span>
-                <span>
-                  Enable <strong>Shutdown source when not visible</strong> to
-                  save resources
-                </span>
-              </li>
-              <li className="flex gap-3">
-                <span className="font-semibold text-purple-600">7.</span>
-                <span>
-                  Click <strong>OK</strong> and position the overlay in your
-                  scene
-                </span>
-              </li>
-            </ol>
-
-            <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-              <p className="text-sm text-blue-800 dark:text-blue-200">
-                <strong>💡 Pro Tip:</strong> Keep the simulator running in your
-                browser while streaming. The overlay will automatically sync
-                with your chat messages!
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-3xl space-y-5 pb-10">
+        {/* The transport genuinely does not work yet. Saying so here is better
+            than letting someone spend twenty minutes on OBS settings first. */}
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="flex gap-3 pt-1">
+            <Info className="mt-0.5 size-4 shrink-0 text-amber-600" />
+            <div className="space-y-1 text-sm">
+              <p className="font-medium">Not connected yet</p>
+              <p className="text-muted-foreground">
+                The overlay page renders, but messages don&apos;t reach it from
+                the simulator yet. OBS runs its own browser process, so the two
+                can&apos;t share a channel directly — that transport is the next
+                thing being built. You can set the URL up now; it will start
+                filling in once it lands.
               </p>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Monitor className="size-4" />
+              Browser source URL
+            </CardTitle>
+            <CardDescription>
+              Paste this into OBS as a Browser source.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex gap-2">
+              <Input
+                readOnly
+                value={overlayUrl}
+                onFocus={(e) => e.currentTarget.select()}
+                className="font-mono text-xs"
+              />
+              <Button onClick={copyUrl} className="shrink-0">
+                {copied ? (
+                  <Check className="size-4" />
+                ) : (
+                  <Copy className="size-4" />
+                )}
+                {copied ? "Copied" : "Copy"}
+              </Button>
+            </div>
+
+            {/* Base UI's Button has no asChild (that's a Radix API), so the
+                link takes the variant classes directly. */}
+            <a
+              href={overlayUrl}
+              target="_blank"
+              rel="noreferrer"
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              <ExternalLink className="size-4" />
+              Preview in a new tab
+            </a>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Appearance</CardTitle>
+            <CardDescription>
+              These are the only settings the overlay reads. Size and position
+              are handled by OBS itself.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <Field
+              id="font-size"
+              label="Font size"
+              hint="Bigger text is easier to read on a stream than in a browser."
+              suffix="px"
+            >
+              <Input
+                id="font-size"
+                type="number"
+                min={10}
+                max={48}
+                value={fontSize}
+                onChange={(e) =>
+                  setFontSize(clamp(Number(e.target.value), 10, 48, DEFAULTS.fontSize))
+                }
+              />
+            </Field>
+
+            <Separator />
+
+            <Field
+              id="max-messages"
+              label="Messages kept on screen"
+              hint="Older messages scroll away once this many are showing."
+            >
+              <Input
+                id="max-messages"
+                type="number"
+                min={5}
+                max={300}
+                value={maxMessages}
+                onChange={(e) =>
+                  setMaxMessages(
+                    clamp(Number(e.target.value), 5, 300, DEFAULTS.maxMessages),
+                  )
+                }
+              />
+            </Field>
+
+            <Separator />
+
+            <label
+              htmlFor="timestamps"
+              className="flex cursor-pointer items-start justify-between gap-4"
+            >
+              <span className="space-y-1">
+                <span className="block text-sm font-medium">Show timestamps</span>
+                <span className="block text-xs text-muted-foreground">
+                  Off by default — most streamers don&apos;t put clocks on chat.
+                </span>
+              </span>
+              <input
+                id="timestamps"
+                type="checkbox"
+                checked={timestamps}
+                onChange={(e) => setTimestamps(e.target.checked)}
+                className="mt-1 size-4 shrink-0 accent-primary"
+              />
+            </label>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Adding it in OBS</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ol className="space-y-3">
+              {[
+                'In Sources, click + and choose "Browser".',
+                'Name it "StreamerChat.gg Overlay" and click OK.',
+                "Paste the URL above into the URL field.",
+                "Set Width and Height to the size you want the chat box to be — 400 × 800 is a good start.",
+                'Tick "Shutdown source when not visible" so it stops when hidden.',
+                "Click OK, then drag it where you want it on your scene.",
+              ].map((step, i) => (
+                <li key={i} className="flex gap-3 text-sm">
+                  <Badge
+                    variant="secondary"
+                    className="size-5 shrink-0 justify-center rounded-full p-0 text-[11px] tabular-nums"
+                  >
+                    {i + 1}
+                  </Badge>
+                  <span className="text-muted-foreground">{step}</span>
+                </li>
+              ))}
+            </ol>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
+}
+
+function Field({
+  id,
+  label,
+  hint,
+  suffix,
+  children,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  suffix?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[1fr_9rem] sm:items-start sm:gap-4">
+      <div className="space-y-1">
+        <Label htmlFor={id}>{label}</Label>
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        {children}
+        {suffix && (
+          <span className="text-xs text-muted-foreground">{suffix}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Keeps a typed value in range, falling back when the field is cleared. */
+function clamp(value: number, min: number, max: number, fallback: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
 }
