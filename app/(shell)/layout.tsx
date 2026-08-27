@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, MessagesSquare, Radio, Tv, X } from "lucide-react";
+import { Menu, MessagesSquare, Radio, Smile, Tv, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -31,6 +31,12 @@ const NAV = [
     href: "/simulator",
     icon: MessagesSquare,
     hint: "Run the chat",
+  },
+  {
+    label: "Emotes",
+    href: "/emotes",
+    icon: Smile,
+    hint: "Import 7TV packs",
   },
   {
     label: "OBS Integration",

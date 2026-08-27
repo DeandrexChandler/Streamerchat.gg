@@ -1,5 +1,5 @@
 import type { SimulationSettings } from "../config/settings";
-import { DEFAULT_SETTINGS } from "../config/settings";
+import { DEFAULT_SETTINGS, MAX_SIMULATED_VIEWERS } from "../config/settings";
 import { shouldReact } from "./attention";
 import { classify } from "./classifier";
 import { directIdle, directReaction } from "./director";
@@ -37,7 +37,10 @@ export interface TranscriptOutcome {
 }
 
 export interface EngineStats {
+  /** Displayed viewer count, as configured. */
   audience: number;
+  /** Viewers actually being simulated. Capped — see MAX_SIMULATED_VIEWERS. */
+  simulated: number;
   pending: number;
   released: number;
   bySource: Record<string, number>;
@@ -81,12 +84,17 @@ export class SimulationEngine {
     this.emotes = options.emotes ?? [];
     this.filter = createFilter(this.settings);
 
-    this.population = new Population(this.rng, this.settings.audienceSize);
+    this.population = new Population(this.rng, this.simulatedViewers());
     this.scheduler = new Scheduler(this.settings.maxMessagesPerMinute);
 
     const now = options.now ?? Date.now();
     this.lastSpeechAt = now;
     this.lastIdleCheckAt = now;
+  }
+
+  /** Actual viewers to simulate — the setting clamped to the real ceiling. */
+  private simulatedViewers(): number {
+    return Math.min(this.settings.audienceSize, MAX_SIMULATED_VIEWERS);
   }
 
   updateSettings(patch: Partial<SimulationSettings>): void {
@@ -155,6 +163,7 @@ export class SimulationEngine {
       emotes: this.emotes,
       aiCandidates: this.aiCandidates,
       recentTexts: new Set(this.recentTexts),
+      lastTemplate: this.recentTexts.at(-1),
       now,
       rng: this.rng,
     });
@@ -238,6 +247,7 @@ export class SimulationEngine {
       emotes: this.emotes,
       recentSpeakers: this.recentSpeakers,
       recentTexts: new Set(this.recentTexts),
+      lastTemplate: this.recentTexts.at(-1),
       now,
       rng: this.rng,
     });
@@ -249,11 +259,9 @@ export class SimulationEngine {
     }
 
     // Resize toward the configured audience whenever it doesn't match.
-    if (
-      this.population.size !== this.settings.audienceSize &&
-      this.rng.chance(0.4)
-    ) {
-      this.population.driftToward(this.settings.audienceSize);
+    const target = this.simulatedViewers();
+    if (this.population.size !== target && this.rng.chance(0.4)) {
+      this.population.driftToward(target);
       return;
     }
 
@@ -275,7 +283,10 @@ export class SimulationEngine {
 
   stats(): EngineStats {
     return {
-      audience: this.population.size,
+      // Reports the configured figure, not the simulated one — this is the
+      // number shown as "viewers".
+      audience: this.settings.audienceSize,
+      simulated: this.population.size,
       pending: this.scheduler.pending,
       released: this.releasedCount,
       ignored: this.ignoredCount,

@@ -80,6 +80,15 @@ export interface FillContext {
    * most obvious tell that messages are being sampled from a list.
    */
   recentTexts?: ReadonlySet<string>;
+  /**
+   * The single most recently used template.
+   *
+   * Excluded even when the pool is exhausted. `recentTexts` alone isn't
+   * enough: a small pool (the idle tiers have ~15 entries against a 40-entry
+   * memory) can have every option marked recent, at which point the fallback
+   * re-allows repeats — including, occasionally, the line that just went out.
+   */
+  lastTemplate?: string;
 }
 
 /** True if every slot in `entry` can actually be filled from `context`. */
@@ -127,8 +136,12 @@ export function generateFromPool(
     : fillable;
 
   // If everything has been used recently the pool is exhausted; allow a repeat
-  // rather than falling silent.
-  const usable = fresh.length > 0 ? fresh : fillable;
+  // rather than falling silent — but never an immediate one.
+  let usable = fresh.length > 0 ? fresh : fillable;
+  if (usable.length > 1 && context.lastTemplate) {
+    const withoutLast = usable.filter((e) => e.text !== context.lastTemplate);
+    if (withoutLast.length > 0) usable = withoutLast;
+  }
 
   const entry = rng.weighted(usable, (e) => scoreEntry(e, viewer, tagBias));
   return { text: fill(entry, context, rng), template: entry.text };
@@ -162,6 +175,12 @@ export function pickEmote(
 
   const preferred = INTENT_MOODS[intent] ?? ["chill"];
   return rng.weighted(emotes, (emote) => {
+    // Unclassifiable emotes are a wildcard: middling weight everywhere rather
+    // than a strong fit anywhere. Sits between an on-mood and an off-mood
+    // emote, so a channel pack stays in rotation without drowning out the
+    // emotes we actually understand.
+    if (emote.mood === "unknown") return 1;
+
     const rank = preferred.indexOf(emote.mood);
     // Strong preference for the best-fitting mood, but never zero — an
     // occasional off-mood emote is what real chat looks like.

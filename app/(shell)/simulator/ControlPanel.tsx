@@ -41,7 +41,6 @@ import type { SimulatorStatus } from "@/lib/react/use-simulator";
 const SPEED_STEPS = [0.5, 0.75, 1, 1.5, 2, 3] as const;
 const SPEED_LABELS = ["~13/min", "~20/min", "~27/min", "~40/min", "~55/min", "CHAOS"];
 
-const AUDIENCE_STEPS = [10, 25, 50, 100, 200] as const;
 
 export interface ControlPanelProps {
   status: SimulatorStatus;
@@ -79,10 +78,7 @@ export function ControlPanel({
           value={settings.chatSpeed}
           onChange={(chatSpeed) => onChange({ chatSpeed })}
         />
-        <StepSlider
-          label="Audience"
-          steps={AUDIENCE_STEPS}
-          labels={AUDIENCE_STEPS.map((n) => `${n}`)}
+        <AudienceSlider
           value={settings.audienceSize}
           onChange={(audienceSize) => onChange({ audienceSize })}
         />
@@ -131,7 +127,7 @@ export function ControlPanel({
       </div>
 
       <div className="mt-auto space-y-1.5 border-t border-gray-200 pt-4 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
-        <Stat label="Viewers" value={stats.audience} />
+        <Stat label="Viewers" value={stats.audience} format={formatCount} />
         <Stat label="Messages" value={stats.released} />
         <Stat label="Ignored" value={stats.ignored} />
 
@@ -149,12 +145,83 @@ export function ControlPanel({
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+const AUDIENCE_MIN = 5;
+const AUDIENCE_MAX = 10_000;
+/** Slider positions. Enough that dragging feels continuous rather than notched. */
+const AUDIENCE_POSITIONS = 400;
+
+/**
+ * Audience size, log-scaled.
+ *
+ * A linear 5-10,000 range makes everything under a few hundred impossible to
+ * hit — the first 3% of the track would cover every realistic small-stream
+ * value. A log curve gives the low hundreds most of the travel, which is where
+ * this is actually used, while still reaching five figures at the far end.
+ */
+function toPosition(value: number): number {
+  const ratio =
+    Math.log(value / AUDIENCE_MIN) / Math.log(AUDIENCE_MAX / AUDIENCE_MIN);
+  return Math.round(ratio * AUDIENCE_POSITIONS);
+}
+
+function fromPosition(position: number): number {
+  const value =
+    AUDIENCE_MIN *
+    Math.pow(AUDIENCE_MAX / AUDIENCE_MIN, position / AUDIENCE_POSITIONS);
+  // Round to something a person would plausibly have typed.
+  if (value < 100) return Math.round(value);
+  if (value < 1000) return Math.round(value / 10) * 10;
+  return Math.round(value / 100) * 100;
+}
+
+function formatCount(value: number): string {
+  if (value < 1000) return `${value}`;
+  const thousands = value / 1000;
+  return `${thousands % 1 === 0 ? thousands : thousands.toFixed(1)}k`;
+}
+
+function AudienceSlider({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block space-y-1.5">
+      <span className="flex items-baseline justify-between text-xs">
+        <span className="text-gray-600 dark:text-gray-400">Audience</span>
+        <span className="font-medium tabular-nums text-gray-900 dark:text-gray-100">
+          {formatCount(value)}
+        </span>
+      </span>
+      <input
+        type="range"
+        min={0}
+        max={AUDIENCE_POSITIONS}
+        step={1}
+        value={toPosition(value)}
+        onChange={(e) => onChange(fromPosition(Number(e.target.value)))}
+        className="w-full accent-purple-500"
+      />
+    </label>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  format,
+}: {
+  label: string;
+  value: number;
+  format?: (value: number) => string;
+}) {
   return (
     <div className="flex justify-between">
       <span>{label}</span>
       <span className="tabular-nums text-gray-700 dark:text-gray-300">
-        {value}
+        {format ? format(value) : value}
       </span>
     </div>
   );

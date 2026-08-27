@@ -181,6 +181,8 @@ export interface DirectOptions {
   aiCandidates?: string[];
   /** Templates used recently, held back to avoid verbatim repeats. */
   recentTexts: ReadonlySet<string>;
+  /** The most recent template, never repeated immediately. */
+  lastTemplate?: string;
   now: number;
   rng: Rng;
 }
@@ -211,6 +213,7 @@ export function directReaction(options: DirectOptions): DirectResult {
   // Seeded from the caller's memory, then extended within this burst so a
   // single burst can't repeat itself either.
   const seen = new Set(options.recentTexts);
+  let lastTemplate = options.lastTemplate;
 
   const decorateContext = {
     intent: classification.intent,
@@ -272,12 +275,14 @@ export function directReaction(options: DirectOptions): DirectResult {
           emotes,
           replyTo: replyTarget?.username,
           recentTexts: seen,
+          lastTemplate,
         },
         rng,
       );
       if (result === null) continue;
       text = result.text;
       seen.add(result.template);
+      lastTemplate = result.template;
       templates.push(result.template);
 
       // Ambient lines are already one word; appending an emote to them turns
@@ -326,6 +331,7 @@ export interface IdleOptions {
   /** Recent speakers, as [viewerId, username], for side replies. */
   recentSpeakers: ReadonlyArray<readonly [string, string]>;
   recentTexts: ReadonlySet<string>;
+  lastTemplate?: string;
   now: number;
   rng: Rng;
 }
@@ -402,7 +408,13 @@ export function directIdle(options: IdleOptions): IdleResult | null {
       entries,
       speaker,
       population.tagBias(speaker),
-      { keywords: [], emotes, replyTo, recentTexts: options.recentTexts },
+      {
+        keywords: [],
+        emotes,
+        replyTo,
+        recentTexts: options.recentTexts,
+        lastTemplate: options.lastTemplate,
+      },
       rng,
     );
     if (result === null) return null;

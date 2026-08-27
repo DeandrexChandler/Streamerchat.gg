@@ -4,7 +4,6 @@ import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 import { ChatList } from "@/app/components/chat/ChatList";
-import { DEFAULT_EMOTES } from "@/lib/data/emotes";
 import { useSimulator } from "@/lib/react/use-simulator";
 import { ControlPanel } from "./ControlPanel";
 import { TranscriptPanel } from "./TranscriptPanel";
@@ -57,7 +56,7 @@ function Simulator() {
         {/* The same component the OBS overlay renders. */}
         <ChatList
           messages={messages}
-          emotes={DEFAULT_EMOTES}
+          emotes={simulator.emotes}
           showTimestamps={settings.showTimestamps}
           intro={
             <div className="flex items-start justify-center pt-16 pb-10">

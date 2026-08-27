@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MicSession } from "../audio/mic-session";
 import { DEFAULT_SETTINGS, localSettingsStore } from "../config/settings";
 import type { SimulationSettings } from "../config/settings";
+import { localEmotePackStore, mergeEmotes } from "../config/emote-store";
 import { DEFAULT_EMOTES } from "../data/emotes";
+import type { Emote } from "../engine/types";
 import {
   SimulationEngine,
   type EngineStats,
@@ -60,9 +62,12 @@ export interface UseSimulatorResult {
   start: () => Promise<void>;
   stop: () => void;
   pause: () => void;
-  resume: () => void;
+  resume: () => void | Promise<void>;
   clear: () => void;
   updateSettings: (patch: Partial<SimulationSettings>) => void;
+
+  /** Built-in emotes plus every imported pack. Feed this to the renderer. */
+  emotes: Emote[];
 
   /** Subscribe to mic level (0..1). Returns an unsubscribe function. */
   subscribeLevel: (handler: (level: number) => void) => () => void;
@@ -83,30 +88,38 @@ export function useSimulator(
   const [micLabel, setMicLabel] = useState("");
   const [stats, setStats] = useState<EngineStats>({
     audience: 0,
+    simulated: 0,
     pending: 0,
     released: 0,
     ignored: 0,
     bySource: {},
   });
   const [settings, setSettings] = useState<SimulationSettings>(DEFAULT_SETTINGS);
+  const [emotes, setEmotes] = useState<Emote[]>(() => [...DEFAULT_EMOTES]);
 
   const engineRef = useRef<SimulationEngine | null>(null);
   const micRef = useRef<MicSession | null>(null);
   const providerRef = useRef<TranscriptionProvider | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const settingsRef = useRef<SimulationSettings>(DEFAULT_SETTINGS);
+  const emotesRef = useRef<Emote[]>([...DEFAULT_EMOTES]);
   const pausedRef = useRef(false);
 
   /** Level subscribers, kept outside React entirely. */
   const levelSubscribers = useRef(new Set<(level: number) => void>());
 
-  // Settings are read from localStorage after mount, not during render, so
-  // server and client markup agree.
+  // Settings and emote packs are read from localStorage after mount, not
+  // during render, so server and client markup agree.
   useEffect(() => {
     const loaded = localSettingsStore.load();
     settingsRef.current = loaded;
     setSettings(loaded);
     engineRef.current?.updateSettings(loaded);
+
+    const merged = mergeEmotes(DEFAULT_EMOTES, localEmotePackStore.load());
+    emotesRef.current = merged;
+    setEmotes(merged);
+    engineRef.current?.setEmotes(merged);
   }, []);
 
   const subscribeLevel = useCallback((handler: (level: number) => void) => {
@@ -120,7 +133,7 @@ export function useSimulator(
     if (!engineRef.current) {
       engineRef.current = new SimulationEngine({
         settings: settingsRef.current,
-        emotes: DEFAULT_EMOTES,
+        emotes: emotesRef.current,
       });
     }
     return engineRef.current;
@@ -234,24 +247,55 @@ export function useSimulator(
     setStatus("idle");
   }, [stopTicking]);
 
+  /**
+   * Pausing releases the microphone entirely, not just the recogniser.
+   *
+   * Keeping the MediaStream open left the browser's recording indicator lit
+   * while the UI said "Paused". Whatever the code is actually doing, a user
+   * seeing that has every reason to think they're still being recorded — so
+   * pause tears the capture down and resume asks for it again.
+   */
   const pause = useCallback(() => {
     if (status !== "running") return;
     pausedRef.current = true;
+
     providerRef.current?.stop();
+    micRef.current?.stop();
+    micRef.current = null;
+
     // Drop queued messages: resuming later and dumping stale reactions to
     // something said minutes ago is worse than losing them.
     engineRef.current?.flush();
     setInterim("");
+    setMicLabel("");
     setStatus("paused");
   }, [status]);
 
-  const resume = useCallback(() => {
+  const resume = useCallback(async () => {
     if (status !== "paused") return;
+
+    if (!isDemo) {
+      const mic = new MicSession();
+      micRef.current = mic;
+      mic.events.on("level", (level) => {
+        for (const handler of levelSubscribers.current) handler(level);
+      });
+      mic.events.on("error", ({ message }) => {
+        setError(message);
+        setStatus("error");
+      });
+
+      // Permission is already granted at this point, so this does not
+      // re-prompt — it just reopens the stream.
+      if (!(await mic.start())) return;
+      setMicLabel(mic.label);
+    }
+
     pausedRef.current = false;
     engineRef.current?.markActivity(Date.now());
     void providerRef.current?.start();
     setStatus("running");
-  }, [status]);
+  }, [status, isDemo]);
 
   /**
    * Wipes the session and returns to the idle state.
@@ -305,6 +349,7 @@ export function useSimulator(
     micLabel,
     stats,
     settings,
+    emotes,
     start,
     stop,
     pause,

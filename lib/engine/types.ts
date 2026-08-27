@@ -134,7 +134,17 @@ export type EmoteMood =
   | "hype"
   | "sad"
   | "confused"
-  | "chill";
+  | "chill"
+  /**
+   * Mood could not be determined from the name.
+   *
+   * Imported packs are full of channel-specific names ("xqcWOT", "GAMBA")
+   * that match no keyword. Filing those under a real mood would be a guess
+   * that locks most of a pack to one kind of moment; treating them as a
+   * wildcard lets them appear anywhere at moderate weight, which is both
+   * honest and makes the pack actually usable.
+   */
+  | "unknown";
 
 export interface Emote {
   id: string;

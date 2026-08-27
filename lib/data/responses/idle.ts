@@ -59,21 +59,36 @@ export const IDLE_RESTLESS: readonly ResponseEntry[] = [
 ];
 
 /**
- * Openers for viewer-to-viewer threads. `{user}` is replaced with the username
- * being replied to. These are what create the illusion that chat is a room of
- * people rather than a queue of independent one-liners.
+ * Viewer-to-viewer replies.
+ *
+ * Most are NOT @-prefixed. Real chat replies by context far more often than by
+ * mention — you can see who someone is answering from the message above.
+ * Making every reply an @mention made the log read as a wall of handles, so
+ * `{user}` now appears in a minority of entries and the rest just respond.
  */
 export const SIDE_REPLIES: readonly ResponseEntry[] = [
-  { text: "@{user} same honestly", length: "short", tags: ["conversational"] },
-  { text: "@{user} LOL", length: "tiny", tags: ["short", "joke"] },
-  { text: "@{user} real", length: "tiny", tags: ["short"] },
-  { text: "@{user} you're so right", length: "short", tags: ["warm"] },
-  { text: "@{user} nah", length: "tiny", tags: ["short", "snark"] },
+  // Context replies — no mention needed.
+  { text: "same honestly", weight: 3, length: "short", tags: ["conversational"] },
+  { text: "real", weight: 3, length: "tiny", tags: ["short"] },
+  { text: "LOL", weight: 3, length: "tiny", tags: ["short", "joke"] },
+  { text: "fr", weight: 2, length: "tiny", tags: ["short"] },
+  { text: "nah", weight: 2, length: "tiny", tags: ["short", "snark"] },
+  { text: "this", weight: 2, length: "tiny", tags: ["short"] },
+  { text: "exactly", weight: 2, length: "tiny", tags: ["short"] },
+  { text: "you're so right", weight: 2, length: "short", tags: ["warm"] },
+  { text: "hard disagree", weight: 2, length: "short", tags: ["snark"] },
+  { text: "i was thinking the same thing", length: "medium", tags: ["conversational"] },
+  { text: "finally someone said it", length: "medium", tags: ["conversational"] },
+  { text: "stop you're right", length: "short", tags: ["joke", "warm"] },
+  { text: "what does that even mean", length: "medium", tags: ["joke", "snark"] },
+  { text: "explain", length: "tiny", tags: ["question", "snark"] },
+  { text: "welcome!", length: "tiny", tags: ["warm"] },
+
+  // Mentions — deliberately the minority.
+  { text: "@{user} same", length: "short", tags: ["conversational"] },
+  { text: "@{user} real", length: "short", tags: ["short"] },
+  { text: "@{user} LOL", length: "short", tags: ["joke"] },
+  { text: "@{user} nah", length: "short", tags: ["snark"] },
+  { text: "@{user} you're so right", length: "medium", tags: ["warm"] },
   { text: "@{user} explain", length: "short", tags: ["question", "snark"] },
-  { text: "@{user} i was thinking the same thing", length: "long", tags: ["conversational"] },
-  { text: "@{user} what does that even mean", length: "long", tags: ["joke", "snark", "question"] },
-  { text: "@{user} welcome!", length: "short", tags: ["warm"] },
-  { text: "@{user} finally someone said it", length: "long", tags: ["conversational"] },
-  { text: "@{user} hard disagree", length: "short", tags: ["snark"] },
-  { text: "@{user} stop you're right", length: "short", tags: ["joke", "warm"] },
 ];
