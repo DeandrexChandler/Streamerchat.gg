@@ -199,6 +199,34 @@ function maybeEmoteOnly(
   return Array.from({ length: count }, () => emote.name).join(" ");
 }
 
+/**
+ * Emote-only mode: every message, every speaker, regardless of depth or
+ * emote affinity.
+ *
+ * Returns null when there are no emotes, which callers must treat as "skip
+ * this speaker". A blank message on a live stream is worse than a missing one,
+ * and the UI gate alone cannot be trusted — a stale localStorage blob could
+ * turn this on with an empty pack.
+ */
+function forcedEmoteOnly(
+  emotes: readonly Emote[],
+  classification: Classification,
+  rng: Rng,
+): string | null {
+  if (emotes.length === 0) return null;
+
+  const emote = pickEmote(
+    emotes,
+    classification.intent,
+    classification.sentiment,
+    rng,
+  );
+  if (!emote) return null;
+
+  const count = emoteSpamCount(rng);
+  return Array.from({ length: count }, () => emote.name).join(" ");
+}
+
 export interface DirectOptions {
   classification: Classification;
   population: Population;
@@ -302,6 +330,13 @@ export function directReaction(options: DirectOptions): DirectResult {
     if (wantsAi) {
       text = aiCandidates.shift() ?? null;
       source = "ai";
+    }
+
+    if (settings.emoteOnlyMode) {
+      const only = forcedEmoteOnly(emotes, classification, rng);
+      if (only === null) continue; // no emotes — skip, never emit a blank
+      text = only;
+      source = "pool";
     }
 
     // An emote on its own, which is what a large share of real chat is.
@@ -443,7 +478,11 @@ export function directIdle(options: IdleOptions): IdleResult | null {
   let text: string | null = null;
   let template = "";
 
-  if (!replyTo && depth === "ambient" && settings.emotesEnabled) {
+  if (settings.emoteOnlyMode) {
+    const only = forcedEmoteOnly(emotes, idleClassification, rng);
+    if (only === null) return null; // no emotes — skip, never emit a blank
+    text = only;
+  } else if (!replyTo && depth === "ambient" && settings.emotesEnabled) {
     text = maybeEmoteOnly(speaker, emotes, idleClassification, rng);
   }
 

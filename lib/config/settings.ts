@@ -36,6 +36,13 @@ export const SimulationSettingsSchema = z.object({
 
   emotesEnabled: z.boolean().default(true),
 
+  /**
+   * Every message is emotes and nothing else — what real chat does during a
+   * clutch moment. Requires an imported pack; with no emotes the director
+   * emits nothing rather than blank lines.
+   */
+  emoteOnlyMode: z.boolean().default(false),
+
   /** off = allow everything, replace = censor, filter = drop the message. */
   profanityMode: z.enum(["off", "replace", "filter"]).default("replace"),
   /** Words the user never wants to see, beyond the built-in list. */

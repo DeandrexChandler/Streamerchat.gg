@@ -875,3 +875,50 @@ describe("SimulationEngine AI spend", () => {
   });
 });
 
+
+describe("emote-only mode", () => {
+  const index = buildEmoteIndex(FIXTURE_EMOTES);
+
+  function run(emotes: readonly typeof FIXTURE_EMOTES[number][]): string[] {
+    const engine = new SimulationEngine({
+      seed: 7,
+      now: 0,
+      emotes,
+      settings: { audienceSize: 40, aiShare: 0, emoteOnlyMode: true },
+    });
+    engine.handleTranscript("let's go that was amazing", 0, 0.8);
+
+    const released: string[] = [];
+    for (let t = 0; t <= 60_000; t += 250) {
+      for (const m of engine.tick(t)) released.push(m.text);
+    }
+    return released;
+  }
+
+  it("emits only emote messages", () => {
+    const released = run(FIXTURE_EMOTES);
+    expect(released.length).toBeGreaterThan(0);
+    for (const text of released) {
+      expect(isEmoteOnly(text, index)).toBe(true);
+    }
+  });
+
+  it("emits nothing rather than blanks when there are no emotes", () => {
+    expect(run([])).toHaveLength(0);
+  });
+
+  it("still emits normal text when the mode is off", () => {
+    const engine = new SimulationEngine({
+      seed: 7,
+      now: 0,
+      emotes: FIXTURE_EMOTES,
+      settings: { audienceSize: 40, aiShare: 0, emoteOnlyMode: false },
+    });
+    engine.handleTranscript("let's go that was amazing", 0, 0.8);
+    const released: string[] = [];
+    for (let t = 0; t <= 60_000; t += 250) {
+      for (const m of engine.tick(t)) released.push(m.text);
+    }
+    expect(released.some((t) => !isEmoteOnly(t, index))).toBe(true);
+  });
+});
