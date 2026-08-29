@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MOOD_FLOOR, selectEmotes, type EmoteCandidate } from "../seventv";
+import { MOOD_FLOOR, mapPopularItem, selectEmotes, type EmoteCandidate } from "../seventv";
 import type { Emote } from "../../engine/types";
 
 function make(name: string, mood: Emote["mood"], animated: boolean): EmoteCandidate {
@@ -53,5 +53,37 @@ describe("selectEmotes", () => {
   it("keeps animated unknown emotes, it just never tops them up", () => {
     const input = [make("anim", "unknown", true), make("still", "unknown", false)];
     expect(selectEmotes(input).map((e) => e.name)).toEqual(["anim"]);
+  });
+});
+
+describe("mapPopularItem", () => {
+  const item = {
+    id: "01F61B1440000991F7SWQNMVX7",
+    defaultName: "KEKW",
+    flags: { animated: false },
+    images: [
+      { url: "https://cdn.7tv.app/emote/x/1x.webp", mime: "image/webp", width: 32, height: 32, frameCount: 1 },
+      { url: "https://cdn.7tv.app/emote/x/2x.webp", mime: "image/webp", width: 64, height: 64, frameCount: 1 },
+    ],
+  };
+
+  it("maps a v4 search item to a candidate", () => {
+    const c = mapPopularItem(item)!;
+    expect(c.emote.name).toBe("KEKW");
+    expect(c.emote.mood).toBe("funny");
+    expect(c.animated).toBe(false);
+  });
+
+  it("prefers the 2x image", () => {
+    expect(mapPopularItem(item)!.emote.url).toContain("2x.webp");
+  });
+
+  it("returns null when there is no usable image", () => {
+    expect(mapPopularItem({ ...item, images: [] })).toBeNull();
+  });
+
+  it("reports animated when the flag is set", () => {
+    const c = mapPopularItem({ ...item, flags: { animated: true } })!;
+    expect(c.animated).toBe(true);
   });
 });

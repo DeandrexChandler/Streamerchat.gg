@@ -275,3 +275,103 @@ export async function fetchSetPack(setId: string): Promise<EmotePack> {
   const set = await getJson<SevenTvEmoteSet>(`${API}/emote-sets/${id}`);
   return normalize(set, `set ${id.slice(0, 8)}`);
 }
+
+// ------------------------------------------------------------ popular emotes
+
+interface PopularImage {
+  url: string;
+  mime: string;
+  width: number;
+  height: number;
+  frameCount: number;
+}
+
+interface PopularItem {
+  id: string;
+  defaultName: string;
+  flags?: { animated?: boolean };
+  images?: PopularImage[];
+}
+
+/**
+ * Maps one v4 search result to a candidate.
+ *
+ * 2x for the same reason as pickFile: 1x is soft at twice the font size and
+ * 4x is bytes nobody sees.
+ */
+export function mapPopularItem(item: PopularItem): EmoteCandidate | null {
+  const images = item.images ?? [];
+  const gif = images.filter((i) => i.mime === "image/gif");
+  const webp = images.filter((i) => i.mime === "image/webp");
+  const png = images.filter((i) => i.mime === "image/png");
+  const pool = [...gif, ...webp, ...png];
+  if (pool.length === 0) return null;
+
+  const chosen = pool.find((i) => i.width === 64) ?? pool[0];
+
+  return {
+    animated: item.flags?.animated === true,
+    emote: {
+      id: item.id,
+      name: item.defaultName,
+      mood: classifyEmote(item.defaultName),
+      url: chosen.url,
+      width: chosen.width,
+      height: chosen.height,
+    },
+  };
+}
+
+/**
+ * The most-used emotes on 7TV, which is the vocabulary a real chat speaks.
+ *
+ * Not `/emote-sets/global` — that is 21 legacy entries with no laughter, no
+ * sadness and no confusion, which leaves the director's mood matching almost
+ * nothing to work with.
+ *
+ * One request per 100, and the response carries complete emotes with absolute
+ * CDN urls inline, so there is no per-emote follow-up.
+ */
+export async function fetchPopularPack(limit = 150): Promise<EmotePack> {
+  const perPage = Math.min(100, limit);
+  const pages = Math.ceil(limit / perPage);
+  const items: PopularItem[] = [];
+
+  for (let page = 1; page <= pages; page += 1) {
+    const query = `query{emotes{search(query:"",page:${page},perPage:${perPage},sort:{sortBy:TOP_ALL_TIME,order:DESCENDING}){items{id defaultName flags{animated} images{url mime width height frameCount}}}}}`;
+
+    const res = await fetch(GQL, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ query }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`7TV search returned ${res.status}.`);
+
+    const body = (await res.json()) as {
+      data?: { emotes?: { search?: { items?: PopularItem[] } } };
+    };
+    const pageItems = body.data?.emotes?.search?.items ?? [];
+    if (pageItems.length === 0) break;
+    items.push(...pageItems);
+  }
+
+  const seen = new Set<string>();
+  const candidates: EmoteCandidate[] = [];
+  for (const item of items.slice(0, limit)) {
+    const candidate = mapPopularItem(item);
+    if (!candidate) continue;
+    const key = candidate.emote.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push(candidate);
+  }
+
+  return {
+    id: "7tv-popular",
+    name: "Popular emotes",
+    source: "7TV Popular",
+    emotes: selectEmotes(candidates),
+    importedAt: Date.now(),
+  };
+}

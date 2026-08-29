@@ -3,6 +3,7 @@ import { RateLimiter, clientKey } from "@/lib/http/rate-limit";
 import {
   fetchChannelPack,
   fetchGlobalPack,
+  fetchPopularPack,
   fetchSetPack,
 } from "@/lib/emotes/seventv";
 
@@ -28,13 +29,16 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const channel = searchParams.get("channel");
   const set = searchParams.get("set");
+  const popular = searchParams.get("popular");
 
   try {
-    const pack = channel
-      ? await fetchChannelPack(channel)
-      : set
-        ? await fetchSetPack(set)
-        : await fetchGlobalPack();
+    const pack = popular
+      ? await fetchPopularPack(Math.min(300, Math.max(1, Number(popular) || 150)))
+      : channel
+        ? await fetchChannelPack(channel)
+        : set
+          ? await fetchSetPack(set)
+          : await fetchGlobalPack();
 
     if (pack.emotes.length === 0) {
       return NextResponse.json(
