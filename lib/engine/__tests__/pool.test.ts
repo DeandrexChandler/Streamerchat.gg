@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canFill, decorateWithEmotes, fill, generateFromPool, pickEmote } from "../generators/pool";
 import { createRng } from "../rng";
-import { DEFAULT_EMOTES } from "../../data/emotes";
+import { FIXTURE_EMOTES } from "../../data/__fixtures__/emotes";
 import type { ResponseEntry, Viewer } from "../types";
 
 const viewer = (patch: Partial<Viewer> = {}): Viewer => ({
@@ -140,7 +140,7 @@ describe("pickEmote", () => {
     const rng = createRng(4);
     let onMood = 0;
     for (let i = 0; i < 500; i++) {
-      const emote = pickEmote(DEFAULT_EMOTES, "struggle", "negative", rng)!;
+      const emote = pickEmote(FIXTURE_EMOTES, "struggle", "negative", rng)!;
       if (["sad", "funny", "love"].includes(emote.mood)) onMood++;
     }
     expect(onMood / 500).toBeGreaterThan(0.8);
@@ -150,7 +150,7 @@ describe("pickEmote", () => {
     const rng = createRng(6);
     let hype = 0;
     for (let i = 0; i < 500; i++) {
-      if (pickEmote(DEFAULT_EMOTES, "struggle", "negative", rng)!.mood === "hype") hype++;
+      if (pickEmote(FIXTURE_EMOTES, "struggle", "negative", rng)!.mood === "hype") hype++;
     }
     expect(hype / 500).toBeLessThan(0.05);
   });
@@ -167,7 +167,7 @@ describe("decorateWithEmotes", () => {
     const rng = createRng(2);
     const v = viewer({ emoteAffinity: 0, verbosity: 0.5 });
     for (let i = 0; i < 100; i++) {
-      expect(decorateWithEmotes("hello", v, DEFAULT_EMOTES, context, rng)).toBe("hello");
+      expect(decorateWithEmotes("hello", v, FIXTURE_EMOTES, context, rng)).toBe("hello");
     }
   });
 
@@ -176,7 +176,7 @@ describe("decorateWithEmotes", () => {
     const rng = createRng(8);
     const v = viewer({ verbosity: 0, emoteAffinity: 1 });
     for (let i = 0; i < 200; i++) {
-      const out = decorateWithEmotes("x", v, DEFAULT_EMOTES, context, rng);
+      const out = decorateWithEmotes("x", v, FIXTURE_EMOTES, context, rng);
       const tokens = out.split(" ");
       if (tokens.length > 1 && !tokens.includes("x")) {
         expect(new Set(tokens).size).toBe(1);

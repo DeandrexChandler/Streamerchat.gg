@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { SimulationEngine } from "../engine";
-import {
-  DEFAULT_EMOTES,
-  buildEmoteIndex,
-  isEmoteOnly,
-} from "../../data/emotes";
+import { buildEmoteIndex, isEmoteOnly } from "../../data/emotes";
+import { FIXTURE_EMOTES } from "../../data/__fixtures__/emotes";
 
-const emoteIndex = buildEmoteIndex(DEFAULT_EMOTES);
+const emoteIndex = buildEmoteIndex(FIXTURE_EMOTES);
 import type { ChatMessage } from "../types";
 import type { SimulationSettings } from "../../config/settings";
 
@@ -33,7 +30,7 @@ const make = (settings: Partial<SimulationSettings> = {}, seed = 1234) =>
   new SimulationEngine({
     seed,
     now: 0,
-    emotes: DEFAULT_EMOTES,
+    emotes: FIXTURE_EMOTES,
     settings: { aiShare: 0, ...settings },
   });
 
