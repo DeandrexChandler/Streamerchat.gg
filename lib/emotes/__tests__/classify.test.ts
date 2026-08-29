@@ -36,3 +36,26 @@ describe("classifyEmote", () => {
     }
   });
 });
+
+describe("expanded coverage of popular emotes", () => {
+  it.each([
+    ["COPIUM", "sad"],
+    ["Madge", "sad"],
+    ["RAGEY", "sad"],
+    ["NOOOO", "sad"],
+    ["Prayge", "love"],
+    ["YEP", "hype"],
+    ["LETHIMCOOK", "hype"],
+    ["AINTNOWAY", "confused"],
+    ["Aware", "confused"],
+    ["Okayge", "chill"],
+    ["DIESOFCRINGE", "funny"],
+    ["Pepega", "funny"],
+  ])("classifies %s as %s", (name, mood) => {
+    expect(classifyEmote(name)).toBe(mood);
+  });
+
+  it("still returns unknown for a genuinely novel name", () => {
+    expect(classifyEmote("xqcWOTBLUB")).toBe("unknown");
+  });
+});

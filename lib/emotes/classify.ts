@@ -30,37 +30,37 @@ const RULES: readonly Rule[] = [
   // "peepoSad", "widepeepoSad", "Despair", "PepeCry"…
   {
     mood: "sad",
-    match: ["sad", "cry", "sob", "tear", "despair", "pain", "hurt", "rip", "grief", "cope", "mald"],
+    match: ["sad", "cry", "sob", "tear", "despair", "pain", "hurt", "rip", "grief", "cope", "mald", "copium", "hopium", "madge", "rage", "nooo"],
   },
 
   // Laughter. "KEKW", "OMEGALUL", "ICANT", "PLZ", "xdd", "Joel"…
   {
     mood: "funny",
-    match: ["kek", "lul", "lol", "lmao", "icant", "xdd", "haha", "laugh", "joker", "clown", "kappa", "4head", "plz", "roflan"],
+    match: ["kek", "lul", "lol", "lmao", "icant", "xdd", "haha", "laugh", "joker", "clown", "kappa", "4head", "plz", "roflan", "cringe", "pepega", "bruh", "troll"],
   },
 
   // Warmth. Checked before hype so "peepoHappy" doesn't land as excitement.
   {
     mood: "love",
-    match: ["love", "heart", "hug", "happy", "comfy", "wholesome", "blush", "kiss", "cute", "uwu", "aww", "bless", "peepoye", "hearts", "pet", "pat", "snug", "cuddl", "smile", "wave"],
+    match: ["love", "heart", "hug", "happy", "comfy", "wholesome", "blush", "kiss", "cute", "uwu", "aww", "bless", "peepoye", "hearts", "pet", "pat", "snug", "cuddl", "smile", "wave", "pray", "praise"],
   },
 
   // Excitement.
   {
     mood: "hype",
-    match: ["pog", "hype", "letsgo", "lesgo", "ez", "clap", "gigachad", "chad", "based", "sheesh", "wicked", "fire", "hooray", "cheer", "yay", "win", "goat", "banger", "approve", "yes", "hyper", "raid", "boom", "lit", "rock", "flex", "strong"],
+    match: ["pog", "hype", "letsgo", "lesgo", "ez", "clap", "gigachad", "chad", "based", "sheesh", "wicked", "fire", "hooray", "cheer", "yay", "win", "goat", "banger", "approve", "yes", "hyper", "raid", "boom", "lit", "rock", "flex", "strong", "yep", "cook", "yesyes"],
   },
 
   // Puzzlement. "susge" and "clueless" are suspicion, close enough to fit.
   {
     mood: "confused",
-    match: ["think", "thonk", "hmm", "5head", "galaxybrain", "wut", "what", "huh", "clueless", "susge", "sus", "stare", "erm", "wat", "confus"],
+    match: ["think", "thonk", "hmm", "5head", "galaxybrain", "wut", "what", "huh", "clueless", "susge", "sus", "stare", "erm", "wat", "confus", "aintnoway", "aware"],
   },
 
   // Ambient / vibing. Broad on purpose — this is the fallback flavour.
   {
     mood: "chill",
-    match: ["jam", "vibe", "bop", "dance", "danc", "groove", "nod", "sleep", "bedge", "sleepo", "lurk", "sip", "chill", "cat", "relax", "afk", "wave", "peace", "hi", "bye", "o7"],
+    match: ["jam", "vibe", "bop", "dance", "danc", "groove", "nod", "sleep", "bedge", "sleepo", "lurk", "sip", "chill", "cat", "relax", "afk", "wave", "peace", "hi", "bye", "o7", "okayge", "okay"],
   },
 ];
 
