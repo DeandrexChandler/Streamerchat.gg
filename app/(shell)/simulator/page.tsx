@@ -6,6 +6,7 @@ import { AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
 import { ChatList } from "@/app/components/chat/ChatList";
 import { useSimulator } from "@/lib/react/use-simulator";
 import { ControlPanel } from "./ControlPanel";
+import { EmoteBanner } from "./EmoteBanner";
 import { TranscriptPanel } from "./TranscriptPanel";
 
 /**
@@ -104,6 +105,8 @@ function Simulator() {
             <p>{simulator.error}</p>
           </div>
         )}
+
+        <EmoteBanner emoteCount={simulator.emotes.length} />
 
         {/* The same component the OBS overlay renders. */}
         <ChatList
