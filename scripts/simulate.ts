@@ -10,11 +10,7 @@
  */
 
 import { SimulationEngine } from "../lib/engine/engine";
-import {
-  DEFAULT_EMOTES,
-  buildEmoteIndex,
-  isEmoteOnly,
-} from "../lib/data/emotes";
+import { buildEmoteIndex, isEmoteOnly } from "../lib/data/emotes";
 
 /** [secondsIntoStream, whatTheStreamerSaid, micEnergy 0..1] */
 const SCRIPT: Array<[number, string, number]> = [
@@ -41,7 +37,7 @@ const STEP_MS = 250;
 const engine = new SimulationEngine({
   seed: SEED,
   now: 0,
-  emotes: DEFAULT_EMOTES,
+  emotes: [],
   settings: { audienceSize: 45, aiShare: 0 }, // aiShare 0 = fully offline run
 });
 
@@ -123,7 +119,7 @@ console.log(`by source:      ${JSON.stringify(stats.bySource)}`);
 // dominated by emotes and one-word reactions; a wall of 4-6 word statements
 // reads as everyone competing to say something clever.
 const lengths = { "emote/1 word": 0, "2-3 words": 0, "4-6 words": 0, "7-9 words": 0, "10+ words": 0 };
-const emoteIndex = buildEmoteIndex(DEFAULT_EMOTES);
+const emoteIndex = buildEmoteIndex([]);
 for (const text of emitted) {
   const n = text.trim().split(/\s+/).length;
   // Emote spam is the shortest kind of message, however many tokens it has.

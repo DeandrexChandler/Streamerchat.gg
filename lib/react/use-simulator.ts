@@ -5,7 +5,6 @@ import { MicSession } from "../audio/mic-session";
 import { DEFAULT_SETTINGS, localSettingsStore } from "../config/settings";
 import type { SimulationSettings } from "../config/settings";
 import { localEmotePackStore, mergeEmotes } from "../config/emote-store";
-import { DEFAULT_EMOTES } from "../data/emotes";
 import type { Emote } from "../engine/types";
 import {
   SimulationEngine,
@@ -109,7 +108,7 @@ export function useSimulator(
     bySource: {},
   });
   const [settings, setSettings] = useState<SimulationSettings>(DEFAULT_SETTINGS);
-  const [emotes, setEmotes] = useState<Emote[]>(() => [...DEFAULT_EMOTES]);
+  const [emotes, setEmotes] = useState<Emote[]>(() => []);
   const [overlaySubscribers, setOverlaySubscribers] = useState(0);
 
   const engineRef = useRef<SimulationEngine | null>(null);
@@ -117,7 +116,7 @@ export function useSimulator(
   const providerRef = useRef<TranscriptionProvider | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const settingsRef = useRef<SimulationSettings>(DEFAULT_SETTINGS);
-  const emotesRef = useRef<Emote[]>([...DEFAULT_EMOTES]);
+  const emotesRef = useRef<Emote[]>([]);
   const pausedRef = useRef(false);
   const overlayRef = useRef<OverlayTransport | null>(null);
 
@@ -132,7 +131,7 @@ export function useSimulator(
     setSettings(loaded);
     engineRef.current?.updateSettings(loaded);
 
-    const merged = mergeEmotes(DEFAULT_EMOTES, localEmotePackStore.load());
+    const merged = mergeEmotes(localEmotePackStore.load());
     emotesRef.current = merged;
     setEmotes(merged);
     engineRef.current?.setEmotes(merged);

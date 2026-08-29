@@ -58,9 +58,6 @@ export const SimulationSettingsSchema = z.object({
   streamerName: z.string().max(40).default(""),
   streamTopic: z.string().max(80).default(""),
 
-  /** Twitch channel whose 7TV/BTTV emote set should be imported. */
-  emoteChannel: z.string().max(40).default(""),
-
   showTimestamps: z.boolean().default(false),
   /** Messages retained in the DOM. Beyond this, the oldest are dropped. */
   messageBufferSize: z.number().int().min(50).max(500).default(150),

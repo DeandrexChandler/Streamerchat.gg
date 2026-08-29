@@ -3,8 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ChatList } from "@/app/components/chat/ChatList";
-import { DEFAULT_EMOTES } from "@/lib/data/emotes";
-import type { ChatMessage } from "@/lib/engine/types";
+import type { ChatMessage, Emote } from "@/lib/engine/types";
 
 /**
  * OBS browser source.
@@ -25,6 +24,10 @@ import type { ChatMessage } from "@/lib/engine/types";
  * Nothing is replayed on reconnect by design — chat resumes live rather than
  * dumping a minute of stale reactions onto the stream.
  */
+
+// Emotes reach the browser source in the appearance spec; until then it has
+// no pack, so emote names render as plain text.
+const OVERLAY_EMOTES: readonly Emote[] = [];
 
 function OverlayContent() {
   const params = useSearchParams();
@@ -78,7 +81,7 @@ function OverlayContent() {
       {key ? (
         <ChatList
           messages={messages}
-          emotes={DEFAULT_EMOTES}
+          emotes={OVERLAY_EMOTES}
           showTimestamps={showTimestamps}
           fontSize={fontSize}
         />

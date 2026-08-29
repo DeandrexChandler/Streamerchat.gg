@@ -78,37 +78,19 @@ function ChatLineImpl({
   );
 }
 
-/**
- * Text-only emotes render as a styled token rather than plain text, so they
- * read as emotes rather than as shouting. Image emotes (7TV/BTTV import) take
- * the img path.
- */
+/** Emotes are always images now — the text-token tier is gone. */
 function EmoteToken({ emote, fontSize }: { emote: Emote; fontSize: number }) {
-  if (emote.url) {
-    return (
-      <>
-        {" "}
-        <img
-          src={emote.url}
-          alt={emote.name}
-          title={emote.name}
-          className="inline-block align-middle"
-          style={{ height: fontSize * 2, width: "auto" }}
-          loading="lazy"
-        />
-      </>
-    );
-  }
-
   return (
     <>
       {" "}
-      <span
+      <img
+        src={emote.url}
+        alt={emote.name}
         title={emote.name}
-        className="inline-block rounded-[3px] bg-white/10 px-1 font-semibold tracking-tight text-purple-200 align-baseline"
-      >
-        {emote.name}
-      </span>
+        className="inline-block align-middle"
+        style={{ height: fontSize * 2, width: "auto" }}
+        loading="lazy"
+      />
     </>
   );
 }

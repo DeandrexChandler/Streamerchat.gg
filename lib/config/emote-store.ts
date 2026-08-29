@@ -23,7 +23,16 @@ export interface EmotePackStore {
 function isEmote(value: unknown): value is Emote {
   if (typeof value !== "object" || value === null) return false;
   const e = value as Partial<Emote>;
-  return typeof e.id === "string" && typeof e.name === "string" && !!e.mood;
+  return (
+    typeof e.id === "string" &&
+    typeof e.name === "string" &&
+    // url is required now. A blob written by an older build can still contain
+    // url-less emotes; rejecting them here keeps the failure at the boundary
+    // rather than at render time, on stream.
+    typeof e.url === "string" &&
+    e.url.length > 0 &&
+    !!e.mood
+  );
 }
 
 export const localEmotePackStore: EmotePackStore = {
@@ -71,15 +80,11 @@ export const localEmotePackStore: EmotePackStore = {
  * Flattens packs into one lookup list.
  *
  * Later packs win on name collisions, so a channel's own version of a shared
- * emote beats the global one — which is what a viewer of that channel would
- * actually see.
+ * emote beats an earlier import — which is what a viewer of that channel
+ * would actually see.
  */
-export function mergeEmotes(
-  builtIn: readonly Emote[],
-  packs: readonly EmotePack[],
-): Emote[] {
+export function mergeEmotes(packs: readonly EmotePack[]): Emote[] {
   const byName = new Map<string, Emote>();
-  for (const emote of builtIn) byName.set(emote.name.toLowerCase(), emote);
   for (const pack of packs) {
     for (const emote of pack.emotes) byName.set(emote.name.toLowerCase(), emote);
   }

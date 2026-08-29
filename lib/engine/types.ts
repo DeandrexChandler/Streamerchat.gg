@@ -151,8 +151,8 @@ export interface Emote {
   /** The token as typed in chat, e.g. "KEKW". */
   name: string;
   mood: EmoteMood;
-  /** Image URL, or undefined for a text-only emote. */
-  url?: string;
+  /** Image URL. Required — there is no text-only emote tier. */
+  url: string;
   width?: number;
   height?: number;
 }
