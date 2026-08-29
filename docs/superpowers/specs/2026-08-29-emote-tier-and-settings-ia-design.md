@@ -30,7 +30,8 @@ them: it is a live-tuning strip, not a preferences screen.
 | If that fetch fails | Chat runs emote-free; dismissible banner offers a retry / manual import |
 | Page structure | `/settings` with sub-pages: Chat, Emotes, Appearance, OBS |
 | Simulator page | Keeps a small live strip; everything else moves to settings |
-| "Emote only mode" | Chat sends nothing but emotes; unavailable until a pack is imported |
+| Still images | Prefer animated; top up under-represented moods with stills — see below |
+| "Emote only mode" | Chat sends nothing but emotes; disabled only when the emote list is empty |
 | Fullscreen button | Collapses to the chat column *and* requests the Fullscreen API |
 
 ## Why not the 7TV global set
@@ -66,6 +67,57 @@ Same implementation cost — `lib/emotes/seventv.ts` already posts to
 `https://7tv.io/v4/gql` for username resolution, and the search returns
 complete emotes with absolute CDN URLs inline, so no per-emote follow-up
 requests are needed.
+
+## The animated-only rule conflicts with having a usable lexicon
+
+`lib/emotes/seventv.ts` drops every non-animated emote, on the stated grounds
+that "a chat full of still images reads as a screenshot". Measured against the
+top 150, that rule removes the entire recognizable Twitch vocabulary:
+
+```
+top 150 -> 108 survive the animated filter
+
+funny      2   PepeLaugh xdding
+sad        5   SadgeCry monkaSTEER RIPBOZO monkaChrist TriSad
+confused   6   SUSSY HUH WHAT HACKERMANS
+hype       9   GIGACHAD LETSGO peepoClap Clap
+love       6   catKISS peepoComfy SoCute
+chill     15   catJAM NODDERS pepeJAM VIBE popCat
+unknown   65
+
+dropped as static: KEKW OMEGALUL Sadge Pog POGGERS PogU Clueless Hmm
+                   5Head monkaW Prayge Bedge o7 ICANT Madge YEP Pepega
+```
+
+Two funny emotes out of 108, when laughter is the single most common thing
+real chat does. Emote-only mode on that set has almost no way to laugh.
+
+### The rule: prefer animated, top up thin moods with stills
+
+`normalize()` keeps every animated emote as it does today, then walks the
+stills in popularity order and admits one only when its mood is below a floor.
+
+```
+MOOD_FLOOR = 10
+`unknown` is never topped up — it is already abundant and acts as a wildcard
+```
+
+Applied in `normalize()`, so channel imports get the same benefit rather than
+the pipeline having two behaviours to remember.
+
+Verified against the live top 150:
+
+```
+animated kept: 108
+stills added:   15   OMEGALUL Sadge Clueless xdd KEKW Hmm Pog monkaW Susge
+                     5Head ICANT TrollDespair PepeHands peepoLove widepeepoHappy
+total:         123   (88% animated)
+
+funny 2->6   sad 5->9   confused 6->10   hype 9->10   love 6->8   chill 15
+```
+
+Motion stays dominant at 88%, which honours the original intent, and the
+fifteen stills admitted are precisely the iconic names.
 
 ## Scope discovered during design
 
@@ -145,8 +197,8 @@ known moods. Keeps the suite offline and deterministic.
 carries `id`, `defaultName`, `flags.animated` and a full `images[]` array with
 absolute CDN URLs, so one request yields complete emotes.
 
-The existing still-image rule is unchanged: non-animated emotes are dropped, as
-they are for channel imports. Expect ~108 usable emotes from a 150 request.
+It goes through the same `normalize()` as every other import, so it inherits
+the mood top-up rule above. Expect ~123 usable emotes from a 150 request.
 
 `app/api/emotes/route.ts` gains a `popular` parameter alongside `channel` and
 `set`, so the client keeps going through the same proxy and rate limiter.
@@ -285,7 +337,10 @@ Engine seams, per CLAUDE.md — not React internals.
   deleted `emoteChannel` still parses
 - `mergeEmotes` with its new single-argument signature
 - `isEmote()` rejects a stored emote with no `url`
-- `fetchPopularPack` maps the GraphQL shape to `Emote[]` and drops stills
+- `fetchPopularPack` maps the GraphQL shape to `Emote[]`
+- `normalize()` keeps all animated emotes
+- `normalize()` admits stills only for moods below the floor, in input order
+- `normalize()` never tops up `unknown`
 - Auto-import runs only when the store is empty, and not again after deletion
 - A failed auto-import leaves the simulator startable
 - Added classifier rules assign the expected moods
