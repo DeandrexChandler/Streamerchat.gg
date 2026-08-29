@@ -25,6 +25,8 @@ export const IDLE_SETTLING: readonly ResponseEntry[] = [
 
 /** ~25-60s. Chat has noticed the silence and is poking at it. */
 export const IDLE_NOTICING: readonly ResponseEntry[] = [
+  { text: "{streamer} you still there", length: "short", weight: 3, tags: ["question"] },
+  { text: "anyone else just here for {topic}", length: "medium", weight: 3, tags: ["question"] },
   { text: "streamer locked in", length: "short", tags: ["joke"] },
   { text: "concentration arc", length: "short", tags: ["joke"] },
   { text: "shhh he's focusing", length: "medium", tags: ["joke", "warm"] },

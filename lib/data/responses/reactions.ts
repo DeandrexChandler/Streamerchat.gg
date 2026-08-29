@@ -14,6 +14,10 @@ import type { ResponsePool } from "../../engine/types";
  */
 export const REACTIONS: ResponsePool = {
   greeting: [
+    { text: "yooo {streamer}", length: "tiny", weight: 3, tags: ["warm", "short"] },
+    { text: "hi {streamer} o/", length: "tiny", weight: 3, tags: ["warm", "short"] },
+    { text: "{streamer} hii", length: "tiny", weight: 3, tags: ["warm", "short"] },
+    { text: "is this {topic}?", length: "tiny", weight: 3, tags: ["question"] },
     { text: "hi!", length: "tiny", tags: ["warm", "short"] },
     { text: "heyyy", length: "tiny", tags: ["warm", "short"] },
     { text: "yo", length: "tiny", tags: ["short"] },
@@ -29,6 +33,8 @@ export const REACTIONS: ResponsePool = {
   ],
 
   question_to_chat: [
+    { text: "{streamer} you good?", length: "short", weight: 3, tags: ["warm", "question"] },
+    { text: "wait {streamer} how did you do that", length: "medium", weight: 3, tags: ["question"] },
     { text: "genuinely think you should go with whichever one sounds more fun", length: "long", tags: ["conversational", "warm"] },
     { text: "yes", length: "tiny", tags: ["short"] },
     { text: "no lol", length: "tiny", tags: ["short", "joke"] },
@@ -82,6 +88,8 @@ export const REACTIONS: ResponsePool = {
   ],
 
   achievement: [
+    { text: "{streamer} carrying as always", length: "short", weight: 3, tags: ["warm"] },
+    { text: "LETS GOOO {streamer}", length: "short", weight: 3, tags: ["hype"] },
     { text: "LETS GOOO", length: "short", tags: ["hype", "caps"] },
     { text: "knew you'd get it", length: "medium", tags: ["warm", "familiar"] },
     { text: "GG", length: "tiny", tags: ["short"] },
@@ -124,6 +132,8 @@ export const REACTIONS: ResponsePool = {
   ],
 
   showing: [
+    { text: "first time seeing {topic} like this, this is sick", length: "medium", weight: 3, tags: ["warm"] },
+    { text: "i only clicked for the {topic} ngl", length: "medium", weight: 3, tags: ["joke"] },
     { text: "the amount of effort in that is genuinely kind of insane", length: "long", tags: ["compliment"] },
     { text: "i keep coming back to how well the colours work together there", length: "long", tags: ["compliment", "conversational"] },
     { text: "ooooh", length: "tiny", tags: ["short"] },

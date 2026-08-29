@@ -74,6 +74,10 @@ export interface FillContext {
   emotes: readonly Emote[];
   /** Username to substitute into `{user}` slots. */
   replyTo?: string;
+  /** Streamer's display name, when set. Gates `{streamer}` entries. */
+  streamer?: string;
+  /** What they're doing, when set. Gates `{topic}` entries. */
+  topic?: string;
   /**
    * Template texts used recently. Entries in this set are held back so chat
    * doesn't say "that's so pretty" three times in six seconds — by far the
@@ -95,10 +99,15 @@ export interface FillContext {
 export function canFill(entry: ResponseEntry, context: FillContext): boolean {
   if (entry.text.includes("{kw}") && context.keywords.length === 0) return false;
   if (entry.text.includes("{user}") && !context.replyTo) return false;
+  // Gated rather than substituted-empty: an entry that names the streamer is
+  // simply ineligible when there is no name, so no call site needs to know.
+  // The truthiness check also covers "", which is the schema default.
+  if (entry.text.includes("{streamer}") && !context.streamer) return false;
+  if (entry.text.includes("{topic}") && !context.topic) return false;
   return true;
 }
 
-/** Substitutes `{kw}` and `{user}` slots. Assumes canFill() already passed. */
+/** Substitutes slot placeholders. Assumes canFill() already passed. */
 export function fill(entry: ResponseEntry, context: FillContext, rng: Rng): string {
   let text = entry.text;
   if (text.includes("{kw}")) {
@@ -106,6 +115,12 @@ export function fill(entry: ResponseEntry, context: FillContext, rng: Rng): stri
   }
   if (text.includes("{user}") && context.replyTo) {
     text = text.replace(/\{user\}/g, context.replyTo);
+  }
+  if (text.includes("{streamer}") && context.streamer) {
+    text = text.replace(/\{streamer\}/g, context.streamer);
+  }
+  if (text.includes("{topic}") && context.topic) {
+    text = text.replace(/\{topic\}/g, context.topic);
   }
   return text;
 }

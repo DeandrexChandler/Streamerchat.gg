@@ -184,3 +184,34 @@ describe("decorateWithEmotes", () => {
     }
   });
 });
+
+describe("streamer and topic slots", () => {
+  const entry = { text: "how's it going {streamer}" };
+  const topicEntry = { text: "wait is this {topic}" };
+
+  it("is unfillable when no streamer name is set", () => {
+    expect(canFill(entry, { keywords: [], emotes: [] })).toBe(false);
+  });
+
+  it("is fillable once a streamer name is set", () => {
+    expect(canFill(entry, { keywords: [], emotes: [], streamer: "dre" })).toBe(true);
+  });
+
+  it("substitutes the streamer name", () => {
+    const out = fill(entry, { keywords: [], emotes: [], streamer: "dre" }, createRng(1));
+    expect(out).toBe("how's it going dre");
+  });
+
+  it("is unfillable when no topic is set", () => {
+    expect(canFill(topicEntry, { keywords: [], emotes: [] })).toBe(false);
+  });
+
+  it("substitutes the topic", () => {
+    const out = fill(topicEntry, { keywords: [], emotes: [], topic: "minecraft" }, createRng(1));
+    expect(out).toBe("wait is this minecraft");
+  });
+
+  it("treats an empty string as unset, since that is the schema default", () => {
+    expect(canFill(entry, { keywords: [], emotes: [], streamer: "" })).toBe(false);
+  });
+});

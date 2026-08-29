@@ -323,6 +323,10 @@ export function directReaction(options: DirectOptions): DirectResult {
           keywords: classification.keywords,
           emotes,
           replyTo: replyTarget?.username,
+          // || undefined because the schema defaults these to "", which would
+          // pass canFill's truthiness gate and then substitute nothing.
+          streamer: settings.streamerName || undefined,
+          topic: settings.streamTopic || undefined,
           recentTexts: seen,
           lastTemplate,
         },
@@ -461,6 +465,8 @@ export function directIdle(options: IdleOptions): IdleResult | null {
         keywords: [],
         emotes,
         replyTo,
+        streamer: settings.streamerName || undefined,
+        topic: settings.streamTopic || undefined,
         recentTexts: options.recentTexts,
         lastTemplate: options.lastTemplate,
       },
