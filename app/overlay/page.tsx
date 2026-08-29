@@ -15,39 +15,55 @@ import type { ChatMessage } from "@/lib/engine/types";
  * Renders the exact same <ChatList> the simulator does, so what you tune on
  * the simulator page is what appears on stream.
  *
- * TRANSPORT IS NOT WIRED YET. BroadcastChannel cannot reach OBS — the browser
- * source runs in its own embedded CEF process, entirely separate from the
- * Chrome profile the simulator is open in, so the two share no channel. This
- * still listens on it, which works for a same-browser preview tab and nothing
- * else. Phase 6 replaces it with a server-side session channel over SSE.
+ * Messages arrive over SSE from /api/overlay/stream. BroadcastChannel, which
+ * this used to listen on, cannot work here: OBS runs the browser source in its
+ * own embedded CEF process with no channel back to the Chrome profile the
+ * simulator is open in. The server is the only thing both processes can see.
+ *
+ * `EventSource` handles reconnection itself, including after OBS shuts the
+ * source down on a scene switch, so there is no retry logic in this file.
+ * Nothing is replayed on reconnect by design — chat resumes live rather than
+ * dumping a minute of stale reactions onto the stream.
  */
-
-const CHANNEL = "streamerchat-gg:overlay";
 
 function OverlayContent() {
   const params = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
+  const key = params.get("key") ?? "";
   const fontSize = clampNumber(params.get("fontSize"), 14, 10, 48);
   const maxMessages = clampNumber(params.get("max"), 50, 5, 300);
   const showTimestamps = params.get("timestamps") === "true";
   const background = params.get("bg") ?? "transparent";
 
   useEffect(() => {
-    if (typeof BroadcastChannel === "undefined") return;
+    if (!key || typeof EventSource === "undefined") return;
 
-    const channel = new BroadcastChannel(CHANNEL);
-    channel.onmessage = (event: MessageEvent<{ type?: string; message?: ChatMessage }>) => {
-      if (event.data?.type !== "chat" || !event.data.message) return;
-      const message = event.data.message;
+    const source = new EventSource(
+      `/api/overlay/stream?key=${encodeURIComponent(key)}`,
+    );
+
+    source.addEventListener("chat", (event) => {
+      let incoming: ChatMessage[];
+      try {
+        incoming = (JSON.parse((event as MessageEvent<string>).data) as {
+          messages?: ChatMessage[];
+        }).messages ?? [];
+      } catch {
+        return;
+      }
+      if (incoming.length === 0) return;
+
       setMessages((previous) => {
-        const next = [...previous, message];
+        const next = [...previous, ...incoming];
         return next.length > maxMessages ? next.slice(-maxMessages) : next;
       });
-    };
+    });
 
-    return () => channel.close();
-  }, [maxMessages]);
+    source.addEventListener("clear", () => setMessages([]));
+
+    return () => source.close();
+  }, [key, maxMessages]);
 
   return (
     <div
@@ -59,12 +75,22 @@ function OverlayContent() {
         textShadow: "0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.6)",
       }}
     >
-      <ChatList
-        messages={messages}
-        emotes={DEFAULT_EMOTES}
-        showTimestamps={showTimestamps}
-        fontSize={fontSize}
-      />
+      {key ? (
+        <ChatList
+          messages={messages}
+          emotes={DEFAULT_EMOTES}
+          showTimestamps={showTimestamps}
+          fontSize={fontSize}
+        />
+      ) : (
+        /* Only rendered when the URL is wrong, which means it is only ever on
+           screen when something needs fixing. A silent black rectangle would
+           send the streamer to check their OBS settings instead. */
+        <p className="m-3 rounded bg-red-950/80 px-3 py-2 text-sm">
+          No overlay key in this URL. Copy the browser-source URL again from
+          the OBS page.
+        </p>
+      )}
     </div>
   );
 }

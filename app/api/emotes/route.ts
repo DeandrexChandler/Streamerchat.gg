@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { RateLimiter, clientKey } from "@/lib/http/rate-limit";
 import {
   fetchChannelPack,
   fetchGlobalPack,
@@ -14,29 +15,10 @@ import {
  * outbound requests, so it is rate limited like any other egress route.
  */
 
-const RATE_LIMIT = { windowMs: 60_000, maxRequests: 12 };
-const hits = new Map<string, number[]>();
-
-function rateLimited(key: string): boolean {
-  const now = Date.now();
-  const recent = (hits.get(key) ?? []).filter(
-    (t) => now - t < RATE_LIMIT.windowMs,
-  );
-  recent.push(now);
-  hits.set(key, recent);
-
-  if (hits.size > 256) {
-    for (const [k, times] of hits) {
-      if (times.every((t) => now - t >= RATE_LIMIT.windowMs)) hits.delete(k);
-    }
-  }
-  return recent.length > RATE_LIMIT.maxRequests;
-}
+const limiter = new RateLimiter({ windowMs: 60_000, maxRequests: 12 });
 
 export async function GET(request: NextRequest) {
-  const client =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
-  if (rateLimited(client)) {
+  if (limiter.check(clientKey(request))) {
     return NextResponse.json(
       { error: "Too many imports. Wait a minute and try again." },
       { status: 429 },

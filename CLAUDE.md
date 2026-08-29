@@ -113,10 +113,20 @@ Do not claim something works because it compiles. Run it.
 
 Done: repo audit; marketing/auth/analytics surface removed; routes flattened;
 build green; simulation engine with population, classifier, director,
-scheduler, filter, and pools; 119 tests; headless harness.
+scheduler, filter, and pools; headless harness; audio pipeline (Web Speech
+default, Whisper fallback); simulator UI rebuild with inline settings; 7TV
+emote import; OBS transport.
 
-Next: audio pipeline (Web Speech default, Whisper fallback), simulator UI
-rebuild, settings page, AI tier (Google Gemini), OBS transport via SSE.
+The OBS transport is an SSE relay, because OBS runs its browser source in its
+own CEF process and shares no channel with the browser the simulator is open
+in. The simulator POSTs each tick's released messages to `/api/overlay/publish`
+and the browser source subscribes to `/api/overlay/stream`; they are paired by
+a persisted random key that lives in the browser-source URL. The relay is an
+in-memory hub — deliberately, since this is one process on one machine — and
+publishing stops entirely while no browser source is attached.
+
+Next: AI tier (Google Gemini), behind the `lib/engine/ai-budget.ts` guard and
+draining into the director's existing candidate pool.
 
 Deliberately deferred: accounts and any database. The product has to work
 end-to-end first.

@@ -13,6 +13,8 @@ import {
   type TranscriptOutcome,
 } from "../engine/engine";
 import type { ChatMessage } from "../engine/types";
+import { loadOverlayKey } from "../config/overlay-key";
+import { OverlayTransport } from "../overlay/transport";
 import { createProvider, type ProviderId } from "../transcription";
 import type { TranscriptionProvider } from "../transcription/provider";
 
@@ -80,6 +82,9 @@ export interface UseSimulatorResult {
 
   /** Subscribe to mic level (0..1). Returns an unsubscribe function. */
   subscribeLevel: (handler: (level: number) => void) => () => void;
+
+  /** OBS browser sources currently receiving this session's chat. */
+  overlaySubscribers: number;
 }
 
 export function useSimulator(
@@ -105,6 +110,7 @@ export function useSimulator(
   });
   const [settings, setSettings] = useState<SimulationSettings>(DEFAULT_SETTINGS);
   const [emotes, setEmotes] = useState<Emote[]>(() => [...DEFAULT_EMOTES]);
+  const [overlaySubscribers, setOverlaySubscribers] = useState(0);
 
   const engineRef = useRef<SimulationEngine | null>(null);
   const micRef = useRef<MicSession | null>(null);
@@ -113,6 +119,7 @@ export function useSimulator(
   const settingsRef = useRef<SimulationSettings>(DEFAULT_SETTINGS);
   const emotesRef = useRef<Emote[]>([...DEFAULT_EMOTES]);
   const pausedRef = useRef(false);
+  const overlayRef = useRef<OverlayTransport | null>(null);
 
   /** Level subscribers, kept outside React entirely. */
   const levelSubscribers = useRef(new Set<(level: number) => void>());
@@ -129,6 +136,11 @@ export function useSimulator(
     emotesRef.current = merged;
     setEmotes(merged);
     engineRef.current?.setEmotes(merged);
+
+    // The OBS relay is created here rather than on start(), because the key
+    // comes from localStorage and this is the first point at which it can be
+    // read without desyncing server and client markup.
+    overlayRef.current = new OverlayTransport({ key: loadOverlayKey() });
   }, []);
 
   const subscribeLevel = useCallback((handler: (level: number) => void) => {
@@ -155,7 +167,18 @@ export function useSimulator(
       const engine = engineRef.current;
       if (!engine || pausedRef.current) return;
 
-      const released = engine.tick(Date.now());
+      const now = Date.now();
+      const released = engine.tick(now);
+
+      // The scheduler is the only source of released messages, so this is the
+      // one place the overlay is fed — nothing else can reach OBS.
+      const overlay = overlayRef.current;
+      if (overlay) {
+        overlay.push(released);
+        overlay.flush(now);
+        setOverlaySubscribers(overlay.subscribers);
+      }
+
       if (released.length > 0) {
         /**
          * The buffer is sized in messages but read as time.
@@ -336,6 +359,12 @@ export function useSimulator(
     engineRef.current?.flush();
     pausedRef.current = false;
 
+    // Wipe the browser source as well. Leaving the last few messages frozen on
+    // stream after the streamer has cleared their own view is the kind of
+    // mismatch you only notice on the VOD.
+    overlayRef.current?.clear();
+    overlayRef.current?.flush(Date.now());
+
     setMessages([]);
     setHeard([]);
     setInterim("");
@@ -379,5 +408,6 @@ export function useSimulator(
     clear,
     updateSettings,
     subscribeLevel,
+    overlaySubscribers,
   };
 }

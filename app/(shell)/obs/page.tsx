@@ -1,7 +1,15 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { Check, Copy, ExternalLink, Info, Monitor } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  Check,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  Monitor,
+  PlugZap,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -15,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { loadOverlayKey } from "@/lib/config/overlay-key";
 
 /**
  * OBS setup.
@@ -24,26 +33,71 @@ import { Separator } from "@/components/ui/separator";
  * height, fontFamily and color as well, none of which the overlay has ever
  * looked at. OBS sizes the browser source itself, so width and height in the
  * URL were always meaningless.
+ *
+ * The `key` in the URL is what pairs a browser source with this browser's
+ * simulator. It is persisted, so the URL pasted into OBS keeps working across
+ * restarts, and it is a secret: anyone holding it can read the chat going to
+ * this overlay, or push text onto the stream.
  */
 
 const DEFAULTS = { fontSize: 16, maxMessages: 50, timestamps: false };
+
+/** Polling cadence for the "is a source attached" indicator. */
+const STATUS_POLL_MS = 3_000;
 
 export default function ObsPage() {
   const [fontSize, setFontSize] = useState(DEFAULTS.fontSize);
   const [maxMessages, setMaxMessages] = useState(DEFAULTS.maxMessages);
   const [timestamps, setTimestamps] = useState(DEFAULTS.timestamps);
   const [copied, setCopied] = useState(false);
+  const [overlayKey, setOverlayKey] = useState("");
+  const [attached, setAttached] = useState<number | null>(null);
+
+  // The key lives in localStorage, so it can only be read after mount without
+  // the server and client rendering different URLs.
+  useEffect(() => setOverlayKey(loadOverlayKey()), []);
 
   const overlayUrl = useMemo(() => {
+    if (!overlayKey) return "";
     const origin =
       typeof window === "undefined" ? "http://localhost:3000" : window.location.origin;
     const params = new URLSearchParams({
+      key: overlayKey,
       fontSize: String(fontSize),
       max: String(maxMessages),
       timestamps: String(timestamps),
     });
     return `${origin}/overlay?${params}`;
-  }, [fontSize, maxMessages, timestamps]);
+  }, [overlayKey, fontSize, maxMessages, timestamps]);
+
+  // Answers the only question that actually matters on this page: did OBS
+  // connect? Polling beats pushing here — the page is open for a minute while
+  // someone sets a source up, then closed.
+  useEffect(() => {
+    if (!overlayKey) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const response = await fetch(
+          `/api/overlay/status?key=${encodeURIComponent(overlayKey)}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) throw new Error("status unavailable");
+        const body = (await response.json()) as { subscribers?: number };
+        if (!cancelled) setAttached(Number(body?.subscribers) || 0);
+      } catch {
+        if (!cancelled) setAttached(null);
+      }
+    };
+
+    void poll();
+    const timer = setInterval(poll, STATUS_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [overlayKey]);
 
   const copyUrl = useCallback(async () => {
     try {
@@ -59,23 +113,7 @@ export default function ObsPage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl space-y-5 pb-10">
-        {/* The transport genuinely does not work yet. Saying so here is better
-            than letting someone spend twenty minutes on OBS settings first. */}
-        <Card className="border-amber-500/40 bg-amber-500/5">
-          <CardContent className="flex gap-3 pt-1">
-            <Info className="mt-0.5 size-4 shrink-0 text-amber-600" />
-            <div className="space-y-1 text-sm">
-              <p className="font-medium">Not connected yet</p>
-              <p className="text-muted-foreground">
-                The overlay page renders, but messages don&apos;t reach it from
-                the simulator yet. OBS runs its own browser process, so the two
-                can&apos;t share a channel directly — that transport is the next
-                thing being built. You can set the URL up now; it will start
-                filling in once it lands.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <ConnectionStatus attached={attached} />
 
         <Card>
           <CardHeader>
@@ -92,10 +130,11 @@ export default function ObsPage() {
               <Input
                 readOnly
                 value={overlayUrl}
+                placeholder="Generating…"
                 onFocus={(e) => e.currentTarget.select()}
                 className="font-mono text-xs"
               />
-              <Button onClick={copyUrl} className="shrink-0">
+              <Button onClick={copyUrl} disabled={!overlayUrl} className="shrink-0">
                 {copied ? (
                   <Check className="size-4" />
                 ) : (
@@ -108,14 +147,21 @@ export default function ObsPage() {
             {/* Base UI's Button has no asChild (that's a Radix API), so the
                 link takes the variant classes directly. */}
             <a
-              href={overlayUrl}
+              href={overlayUrl || "#"}
               target="_blank"
               rel="noreferrer"
+              aria-disabled={!overlayUrl}
               className={buttonVariants({ variant: "outline", size: "sm" })}
             >
               <ExternalLink className="size-4" />
               Preview in a new tab
             </a>
+
+            <p className="text-xs text-muted-foreground">
+              Treat this URL like a password. The <code>key</code> in it is what
+              lets a browser source receive your chat — don&apos;t put it on
+              screen or paste it anywhere public.
+            </p>
           </CardContent>
         </Card>
 
@@ -176,7 +222,7 @@ export default function ObsPage() {
               <span className="space-y-1">
                 <span className="block text-sm font-medium">Show timestamps</span>
                 <span className="block text-xs text-muted-foreground">
-                  Off by default — most streamers don&apos;t put clocks on chat.
+                  Off by default (most streamers don&apos;t put clocks on chat).
                 </span>
               </span>
               <input
@@ -219,6 +265,80 @@ export default function ObsPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+/**
+ * Live answer to "did it work".
+ *
+ * `null` means the server didn't answer — worth distinguishing from zero,
+ * because the fix is completely different (restart the app vs. check the URL
+ * in OBS).
+ */
+function ConnectionStatus({ attached }: { attached: number | null }) {
+  if (attached === null) {
+    return (
+      <StatusCard
+        tone="warn"
+        icon={<AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />}
+        title="Can't reach the server"
+        body="The app isn't responding. Make sure it's still running, then reload this page."
+      />
+    );
+  }
+
+  if (attached === 0) {
+    return (
+      <StatusCard
+        tone="muted"
+        icon={<PlugZap className="mt-0.5 size-4 shrink-0 text-muted-foreground" />}
+        title="No browser source attached"
+        body="Add the URL below to OBS as a Browser source. This turns green the moment it connects — no need to check OBS."
+      />
+    );
+  }
+
+  return (
+    <StatusCard
+      tone="ok"
+      icon={<CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />}
+      title={
+        attached === 1
+          ? "Browser source connected"
+          : `${attached} browser sources connected`
+      }
+      body="Chat from the simulator is going through. Start talking on the Simulator page and it will appear in OBS."
+    />
+  );
+}
+
+const STATUS_TONES = {
+  ok: "border-emerald-500/40 bg-emerald-500/5",
+  warn: "border-amber-500/40 bg-amber-500/5",
+  muted: "",
+} as const;
+
+function StatusCard({
+  tone,
+  icon,
+  title,
+  body,
+}: {
+  tone: keyof typeof STATUS_TONES;
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+}) {
+  return (
+    <Card className={STATUS_TONES[tone]}>
+      <CardContent className="flex gap-3 pt-1">
+        {icon}
+        <div className="space-y-1 text-sm">
+          <p className="font-medium">{title}</p>
+          <p className="text-muted-foreground">{body}</p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

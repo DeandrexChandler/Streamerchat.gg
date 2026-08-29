@@ -171,11 +171,10 @@ both covered.
 
 - [x] Simulation engine — population, classifier, director, scheduler, filter
 - [x] Headless harness and test suite
-- [ ] Microphone pipeline (Web Speech API, Whisper fallback)
-- [ ] Rebuilt simulator UI
-- [ ] Settings page
+- [x] Microphone pipeline (Web Speech API, Whisper fallback)
+- [x] Rebuilt simulator UI, with settings inline in the control panel
+- [x] OBS overlay transport (SSE relay, paired by a persisted overlay key)
 - [ ] AI generation tier (Google Gemini)
-- [ ] OBS overlay transport
 
 Deliberately deferred until the product works end to end: accounts, database,
 analytics, and any marketing surface.
