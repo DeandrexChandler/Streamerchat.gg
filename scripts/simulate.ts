@@ -5,12 +5,21 @@
  * prints the resulting chat log. Lets us judge pacing and message quality
  * without a browser, a microphone, or a single React render.
  *
- *   npm run simulate            # default seed
- *   npm run simulate -- 12345   # fixed seed, reproducible
+ *   npm run simulate                    # default seed
+ *   npm run simulate -- 12345           # fixed seed, reproducible
+ *   npm run simulate -- --channel=xqc   # import a channel's emotes
+ *   npm run simulate -- --no-emotes     # skip emotes entirely
  */
 
 import { SimulationEngine } from "../lib/engine/engine";
+import { readFileSync, writeFileSync } from "node:fs";
 import { buildEmoteIndex, isEmoteOnly } from "../lib/data/emotes";
+import {
+  fetchChannelPack,
+  fetchPopularPack,
+  type EmotePack,
+} from "../lib/emotes/seventv";
+import type { Emote } from "../lib/engine/types";
 
 /** [secondsIntoStream, whatTheStreamerSaid, micEnergy 0..1] */
 const SCRIPT: Array<[number, string, number]> = [
@@ -30,14 +39,59 @@ const SCRIPT: Array<[number, string, number]> = [
   [175, "alright I think that's it for today, thanks for hanging out", 0.4],
 ];
 
-const SEED = Number(process.argv[2]) || 20260825;
+// Pick the first bare-number argument so the flags below can share argv.
+const SEED =
+  Number(process.argv.slice(2).find((a) => /^\d+$/.test(a))) || 20260825;
 const DURATION_S = 200;
 const STEP_MS = 250;
+
+const CACHE = ".emote-harness-cache.json";
+
+/**
+ * Emotes for the harness.
+ *
+ * Cached to disk because CLAUDE.md values this harness as "faster and more
+ * honest than clicking through the UI", and a ~1s network round-trip on every
+ * invocation undercuts both and breaks it offline.
+ */
+async function loadEmotes(): Promise<readonly Emote[]> {
+  const args = process.argv.slice(2);
+  if (args.includes("--no-emotes")) return [];
+
+  const channelArg = args.find((a) => a.startsWith("--channel="));
+  if (channelArg) {
+    const pack = await fetchChannelPack(channelArg.slice("--channel=".length));
+    return pack.emotes;
+  }
+
+  try {
+    const cached = JSON.parse(readFileSync(CACHE, "utf8")) as EmotePack;
+    if (cached?.emotes?.length) return cached.emotes;
+  } catch {
+    // No cache yet, or it is corrupt. Fetch below.
+  }
+
+  try {
+    const pack = await fetchPopularPack(150);
+    writeFileSync(CACHE, JSON.stringify(pack));
+    return pack.emotes;
+  } catch {
+    console.warn("Could not fetch emotes; running emote-free.");
+    return [];
+  }
+}
+
+/**
+ * Everything below runs inside main() because emote loading is async and tsx
+ * compiles this to CJS, which rejects top-level await.
+ */
+async function main() {
+const EMOTES = await loadEmotes();
 
 const engine = new SimulationEngine({
   seed: SEED,
   now: 0,
-  emotes: [],
+  emotes: EMOTES,
   settings: { audienceSize: 45, aiShare: 0 }, // aiShare 0 = fully offline run
 });
 
@@ -119,7 +173,7 @@ console.log(`by source:      ${JSON.stringify(stats.bySource)}`);
 // dominated by emotes and one-word reactions; a wall of 4-6 word statements
 // reads as everyone competing to say something clever.
 const lengths = { "emote/1 word": 0, "2-3 words": 0, "4-6 words": 0, "7-9 words": 0, "10+ words": 0 };
-const emoteIndex = buildEmoteIndex([]);
+const emoteIndex = buildEmoteIndex(EMOTES);
 for (const text of emitted) {
   const n = text.trim().split(/\s+/).length;
   // Emote spam is the shortest kind of message, however many tokens it has.
@@ -138,3 +192,6 @@ for (const [label, n] of Object.entries(lengths)) {
 }
 console.log(`ignored:        ${stats.ignored} of ${SCRIPT.length} utterances skipped by the attention gate`);
 console.log(`still queued:   ${stats.pending}`);
+}
+
+void main();
