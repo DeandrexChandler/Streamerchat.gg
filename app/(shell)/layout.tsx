@@ -65,6 +65,7 @@ export default function ShellLayout({
       </Button>
 
       <aside
+        data-app-nav
         className={cn(
           "fixed top-0 left-0 z-40 flex h-screen w-64 flex-col border-r border-border bg-sidebar transition-transform",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
@@ -127,7 +128,7 @@ export default function ShellLayout({
         </div>
       </aside>
 
-      <div className="flex h-screen flex-col overflow-hidden lg:ml-64">
+      <div data-app-content className="flex h-screen flex-col overflow-hidden lg:ml-64">
         <header className="flex shrink-0 items-center border-b border-border px-6 py-3.5">
           <div className="ml-12 lg:ml-0">
             <h1 className="text-lg font-semibold tracking-tight">

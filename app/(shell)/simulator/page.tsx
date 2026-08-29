@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
 import { ChatList } from "@/app/components/chat/ChatList";
 import { useSimulator } from "@/lib/react/use-simulator";
 import { ControlPanel } from "./ControlPanel";
@@ -27,8 +27,46 @@ function Simulator() {
   const live = status === "running";
   const started = live || status === "paused";
 
+  const [chatOnly, setChatOnly] = useState(false);
+
+  /**
+   * The browser's own fullscreen state is the source of truth.
+   *
+   * Esc and F11 both exit without going through our button, and a stale flag
+   * would leave the layout collapsed with no visible way back.
+   */
+  useEffect(() => {
+    const sync = () => {
+      if (!document.fullscreenElement) setChatOnly(false);
+    };
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
+
+  // Hiding the shell's sidebar means reaching outside this component, so it
+  // goes through a body class rather than drilling a prop up through layout.
+  useEffect(() => {
+    document.body.classList.toggle("chat-only", chatOnly);
+    return () => document.body.classList.remove("chat-only");
+  }, [chatOnly]);
+
+  const toggleChatOnly = useCallback(async () => {
+    if (chatOnly) {
+      setChatOnly(false);
+      if (document.fullscreenElement) {
+        await document.exitFullscreen().catch(() => {});
+      }
+      return;
+    }
+    setChatOnly(true);
+    // Fullscreen can be refused by permissions policy. The collapsed layout is
+    // useful on its own, so a refusal is not an error worth surfacing.
+    await document.documentElement.requestFullscreen().catch(() => {});
+  }, [chatOnly]);
+
   return (
     <div className="-my-6 flex h-[calc(100%+3rem)] justify-center gap-4 overflow-hidden py-6">
+      <div data-panel="controls" className="contents">
       <ControlPanel
         status={status}
         stats={simulator.stats}
@@ -39,12 +77,25 @@ function Simulator() {
         onClear={simulator.clear}
         onChange={simulator.updateSettings}
       />
+      </div>
 
       {/* Chat column — deliberately a fixed 384px, never flex-1. */}
       <div className="flex h-full w-96 flex-col overflow-hidden rounded-lg border border-gray-300 bg-[#18181b] shadow-sm dark:border-gray-700">
         <header className="flex flex-shrink-0 items-center justify-between border-b border-gray-700 bg-[#1f1f23] p-3">
           <h2 className="text-sm font-semibold text-white">StreamerChat.gg</h2>
           <StatusPill status={status} />
+          <button
+            onClick={() => void toggleChatOnly()}
+            aria-label={chatOnly ? "Exit fullscreen chat" : "Fullscreen chat"}
+            title={chatOnly ? "Exit fullscreen (Esc)" : "Fullscreen chat"}
+            className="rounded p-1 text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            {chatOnly ? (
+              <Minimize2 className="size-3.5" />
+            ) : (
+              <Maximize2 className="size-3.5" />
+            )}
+          </button>
         </header>
 
         {simulator.error && (
@@ -125,11 +176,13 @@ function Simulator() {
         </div>
       </div>
 
-      <TranscriptPanel
-        heard={simulator.heard}
-        interim={simulator.interim}
-        listening={live}
-      />
+      <div data-panel="transcript" className="contents">
+        <TranscriptPanel
+          heard={simulator.heard}
+          interim={simulator.interim}
+          listening={live}
+        />
+      </div>
     </div>
   );
 }

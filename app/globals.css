@@ -326,3 +326,24 @@
     animation: none;
   }
 }
+
+/* Fullscreen chat: everything except the chat column and its own controls.
+   Set from the simulator page, which has to reach the shell's sidebar. */
+body.chat-only [data-app-nav],
+body.chat-only [data-panel="controls"],
+body.chat-only [data-panel="transcript"] {
+  display: none;
+}
+
+/* The content column is offset by the fixed sidebar's width; reclaim it. */
+body.chat-only [data-app-content] {
+  margin-left: 0;
+}
+
+/* Header chrome and page padding go too — this is meant to be just chat. */
+body.chat-only [data-app-content] > header {
+  display: none;
+}
+body.chat-only [data-app-content] > main {
+  padding: 0.75rem;
+}
