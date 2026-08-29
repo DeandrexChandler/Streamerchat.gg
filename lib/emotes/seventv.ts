@@ -4,14 +4,16 @@ import { classifyEmote } from "./classify";
 /**
  * 7TV emote-set import.
  *
- * Only animated emotes are kept. A chat full of still images reads as a
- * screenshot; the motion is most of what makes real chat feel alive, and it's
- * what the owner asked for explicitly.
+ * Animated emotes are always kept, because motion is most of what makes chat
+ * feel alive rather than like a screenshot. Stills are admitted only where a
+ * mood would otherwise be too thin to use — see MOOD_FLOOR below for why that
+ * exception exists and what it costs.
  *
- * Format preference is GIF first, then animated WebP. WebP is smaller and
- * animates identically in every browser this targets, so it's the better file
- * — but 7TV doesn't expose GIF for every emote, and asking for GIF first keeps
- * the result predictable when both exist.
+ * Format preference is GIF first, then animated WebP, then PNG for the
+ * stills. WebP is smaller and animates identically in every browser this
+ * targets, so it's the better file — but 7TV doesn't expose GIF for every
+ * emote, and asking for GIF first keeps the result predictable when both
+ * exist.
  */
 
 /** Shape of the bits of the 7TV v3 response we actually read. */
@@ -55,24 +57,75 @@ const API = "https://7tv.io/v3";
  * and 4x is four times the bytes for detail nobody sees at 28px.
  */
 function pickFile(files: SevenTvFile[]): SevenTvFile | null {
-  const animated = files.filter(
-    (f) => f.format === "GIF" || f.format === "WEBP",
+  // PNG is included because stills are now admitted to top up thin moods,
+  // and most static emotes ship as PNG rather than WebP.
+  const usable = files.filter(
+    (f) => f.format === "GIF" || f.format === "WEBP" || f.format === "PNG",
   );
-  if (animated.length === 0) return null;
+  if (usable.length === 0) return null;
 
-  const byPreference = ["2x.gif", "2x.webp", "3x.gif", "3x.webp", "1x.gif", "1x.webp"];
+  const byPreference = [
+    "2x.gif", "2x.webp", "3x.gif", "3x.webp", "1x.gif", "1x.webp",
+    "2x.png", "3x.png", "1x.png",
+  ];
   for (const wanted of byPreference) {
-    const match = animated.find((f) => f.name.toLowerCase() === wanted);
+    const match = usable.find((f) => f.name.toLowerCase() === wanted);
     if (match) return match;
   }
-  return animated[0];
+  return usable[0];
 }
 
-function toEmote(raw: SevenTvEmote): Emote | null {
-  // Stills are dropped entirely — see the note at the top of this file.
-  if (!raw.data?.animated) return null;
+/**
+ * Minimum emotes per known mood before stills stop being admitted.
+ *
+ * The animated-only rule exists because a wall of stills reads as a
+ * screenshot. Measured against the top 150 it also removed KEKW, Pog, Sadge
+ * and the rest of the recognisable vocabulary, leaving two funny emotes out
+ * of 108 — and laughter is the most common thing real chat does.
+ *
+ * So: keep every animated emote, then admit stills only where a mood is thin.
+ * Against the live top 150 that adds fifteen stills and leaves the pack 88%
+ * animated, which keeps motion dominant while giving every mood a real
+ * vocabulary.
+ */
+export const MOOD_FLOOR = 10;
 
-  const host = raw.data.host;
+export interface EmoteCandidate {
+  emote: Emote;
+  animated: boolean;
+}
+
+/**
+ * Applies the animated-first, mood-floor selection rule.
+ * Input order is significance order — for the popular pack that is ranking.
+ */
+export function selectEmotes(candidates: readonly EmoteCandidate[]): Emote[] {
+  const kept: Emote[] = [];
+  const perMood = new Map<string, number>();
+
+  const bump = (mood: string) => perMood.set(mood, (perMood.get(mood) ?? 0) + 1);
+
+  for (const c of candidates) {
+    if (!c.animated) continue;
+    kept.push(c.emote);
+    bump(c.emote.mood);
+  }
+
+  for (const c of candidates) {
+    if (c.animated) continue;
+    // "unknown" is a wildcard usable in any mood and is already abundant in
+    // every real pack. Topping it up would add stills for no coverage gain.
+    if (c.emote.mood === "unknown") continue;
+    if ((perMood.get(c.emote.mood) ?? 0) >= MOOD_FLOOR) continue;
+    kept.push(c.emote);
+    bump(c.emote.mood);
+  }
+
+  return kept;
+}
+
+function toCandidate(raw: SevenTvEmote): EmoteCandidate | null {
+  const host = raw.data?.host;
   if (!host?.url || !host.files?.length) return null;
 
   const file = pickFile(host.files);
@@ -82,35 +135,38 @@ function toEmote(raw: SevenTvEmote): Emote | null {
   const base = host.url.startsWith("//") ? `https:${host.url}` : host.url;
 
   return {
-    id: raw.id,
-    name: raw.name,
-    mood: classifyEmote(raw.name),
-    url: `${base}/${file.name}`,
-    width: file.width,
-    height: file.height,
+    animated: raw.data?.animated === true,
+    emote: {
+      id: raw.id,
+      name: raw.name,
+      mood: classifyEmote(raw.name),
+      url: `${base}/${file.name}`,
+      width: file.width,
+      height: file.height,
+    },
   };
 }
 
 function normalize(set: SevenTvEmoteSet, source: string): EmotePack {
-  const emotes: Emote[] = [];
+  const candidates: EmoteCandidate[] = [];
   const seen = new Set<string>();
 
   for (const raw of set.emotes ?? []) {
-    const emote = toEmote(raw);
-    if (!emote) continue;
+    const candidate = toCandidate(raw);
+    if (!candidate) continue;
     // Packs can contain aliases of the same name; the renderer looks up by
     // lowercased name, so a duplicate would be unreachable anyway.
-    const key = emote.name.toLowerCase();
+    const key = candidate.emote.name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    emotes.push(emote);
+    candidates.push(candidate);
   }
 
   return {
     id: set.id,
     name: set.name?.trim() || source,
     source,
-    emotes,
+    emotes: selectEmotes(candidates),
     importedAt: Date.now(),
   };
 }
