@@ -25,12 +25,47 @@ them: it is a live-tuning strip, not a preferences screen.
 
 | Question | Decision |
 |---|---|
-| Fresh install with no packs imported | No emotes at all. Chat is text-only until a pack is imported. |
-| Discoverability of that | Dismissible one-time banner above chat while zero packs exist |
+| Fresh install with no packs imported | Auto-import the top ~150 most popular 7TV emotes on first run |
+| Which auto-import source | 7TV v4 GraphQL `TOP_ALL_TIME`, **not** the 7TV global set — see below |
+| If that fetch fails | Chat runs emote-free; dismissible banner offers a retry / manual import |
 | Page structure | `/settings` with sub-pages: Chat, Emotes, Appearance, OBS |
 | Simulator page | Keeps a small live strip; everything else moves to settings |
 | "Emote only mode" | Chat sends nothing but emotes; unavailable until a pack is imported |
 | Fullscreen button | Collapses to the chat column *and* requests the Fullscreen API |
+
+## Why not the 7TV global set
+
+The obvious auto-import source is `/emote-sets/global`. It was measured before
+being designed around, and it is unusable as a floor:
+
+```
+7TV global:  21 emotes
+moods:       unknown 67% · hype 19% · chill 10% · love 5%
+sample:      RainTime PETPET Clap2 PepePls forsenPls gachiBASS PartyParrot
+```
+
+No laughter, no sadness, no confusion — three of the six moods have zero
+coverage, and two thirds of the set classifies as `unknown`. The director picks
+emotes by mood to keep a burst tonally coherent; on this set that system has
+almost nothing to work with, and emote-only mode would spam `PartyParrot`
+where it should be spamming `KEKW`.
+
+The v4 GraphQL popularity search returns the real vocabulary, in one request:
+
+```
+top 150:   108 animated (72%), 1.1s
+funny      OMEGALUL KEKW PepeLaugh ICANT
+sad        Sadge monkaW PepeHands monkaChrist
+hype       GIGACHAD Pog POGGERS LETSGO Clap
+love       peepoLove peepoComfy widepeepoHappy
+confused   Clueless Hmm HUH 5Head
+chill      catJAM Bedge NODDERS o7 VIBE
+```
+
+Same implementation cost — `lib/emotes/seventv.ts` already posts to
+`https://7tv.io/v4/gql` for username resolution, and the search returns
+complete emotes with absolute CDN URLs inline, so no per-emote follow-up
+requests are needed.
 
 ## Scope discovered during design
 
@@ -79,17 +114,14 @@ fetching. This is a deliberate ordering choice — the overlay renders emotes as
 plain text in the interim, which is no worse than the placeholder tokens it
 renders today.
 
-**`scripts/simulate.ts`** has no localStorage to read packs from. It gains
-`--channel=<name>` to import a pack at startup and defaults to emote-free.
+**`scripts/simulate.ts`** has no localStorage to read packs from. It fetches the
+popular pack on first run and caches it to a gitignored file, so subsequent runs
+are instant and work offline. `--channel=<name>` imports a specific channel
+instead; `--no-emotes` skips fetching entirely.
 
-Rejected alternative: fetching the 7TV global pack on every run. CLAUDE.md
-values the harness as "faster and more honest than clicking through the UI"; a
-mandatory network round-trip on every invocation undercuts both, and breaks it
-offline.
-
-Accepted cost: `npm run simulate` no longer shows emote spam by default, so its
-output is less representative of real chat than it was. `--channel` is the
-escape hatch when that matters.
+The cache matters: CLAUDE.md values the harness as "faster and more honest than
+clicking through the UI", and a mandatory ~1.1s network round-trip on every
+invocation would undercut both and break it offline.
 
 **`lib/config/emote-store.ts`** validates stored packs with `isEmote()`, which
 checks `id`, `name` and `mood` but not `url`. It must now require `url` as well.
@@ -101,6 +133,48 @@ at render time, on stream, rather than at the boundary.
 `DEFAULT_EMOTES`. They move to a committed fixture pack at
 `lib/data/__fixtures__/emotes.ts` — a dozen real 7TV entries with URLs and
 known moods. Keeps the suite offline and deterministic.
+
+---
+
+## Part A2 — Auto-import on first run
+
+### New client for popular emotes
+
+`lib/emotes/seventv.ts` gains `fetchPopularPack(limit = 150)`, posting a
+`TOP_ALL_TIME` search to the v4 GraphQL endpoint it already uses. The response
+carries `id`, `defaultName`, `flags.animated` and a full `images[]` array with
+absolute CDN URLs, so one request yields complete emotes.
+
+The existing still-image rule is unchanged: non-animated emotes are dropped, as
+they are for channel imports. Expect ~108 usable emotes from a 150 request.
+
+`app/api/emotes/route.ts` gains a `popular` parameter alongside `channel` and
+`set`, so the client keeps going through the same proxy and rate limiter.
+
+### When it runs
+
+On simulator mount, when the pack store is empty. The result is saved through
+`localEmotePackStore` like any other pack, tagged as auto-imported so
+`/settings/emotes` can label it and offer removal.
+
+It runs **once**. If the user deletes it, it stays deleted — a re-import on
+every launch would override a deliberate choice.
+
+### Failure
+
+Network failure is non-fatal: chat runs emote-free and the banner offers a
+retry. Nothing blocks the simulator from starting.
+
+### Classifier coverage
+
+56% of the top 150 currently classify as `unknown`. That is survivable —
+`classify.ts` deliberately treats `unknown` as a wildcard usable in any mood
+rather than guessing — but roughly fifteen added rules would capture the
+common misses (`COPIUM`, `Prayge`, `Madge`, `NOOOO`, `YEP`, `Aware`,
+`DIESOFCRINGE`, `RAGEY`, `AINTNOWAY`, `SNIFFA`…).
+
+Worth doing here because it improves every channel import too, not just this
+pack.
 
 ---
 
@@ -151,7 +225,9 @@ director produces no message rather than an empty one. A UI-only gate would let
 a stale or hand-edited localStorage blob emit blank lines onto a live stream —
 exactly the class of failure `SimulationSettingsSchema` exists to prevent.
 
-The UI control is disabled with an explanation while zero packs are imported.
+The UI control is disabled with an explanation only when the emote list is
+genuinely empty — which, with auto-import, means the first-run fetch failed
+rather than the normal case.
 
 ### Fullscreen
 
@@ -167,9 +243,13 @@ disappearing together is how a user gets stuck.
 
 ### Empty-state banner
 
-Shown above the chat while zero emote packs are imported. One line, a link to
-`/settings/emotes`, dismissible; dismissal persisted in localStorage alongside
-the other client preferences.
+Shown above the chat only when the emote list is empty — i.e. the first-run
+auto-import failed, or the user deleted every pack. One line with a retry and a
+link to `/settings/emotes`, dismissible; dismissal persisted in localStorage
+alongside the other client preferences.
+
+With auto-import working this is rarely seen, which is the point: it is an
+error affordance, not an onboarding step.
 
 ---
 
@@ -205,6 +285,10 @@ Engine seams, per CLAUDE.md — not React internals.
   deleted `emoteChannel` still parses
 - `mergeEmotes` with its new single-argument signature
 - `isEmote()` rejects a stored emote with no `url`
+- `fetchPopularPack` maps the GraphQL shape to `Emote[]` and drops stills
+- Auto-import runs only when the store is empty, and not again after deletion
+- A failed auto-import leaves the simulator startable
+- Added classifier rules assign the expected moods
 
 Manual: `npm run simulate --channel=<name>` to eyeball emote density, and
 `npm run simulate` to confirm emote-free output is still coherent.
@@ -217,7 +301,8 @@ is created as an empty shell here and filled there.
 
 ## Sequence
 
-1. Part A — emote tier removal, fixture, harness flag
-2. Part C — `{streamer}` / `{topic}` slots (before the UI that exposes them)
-3. Part B — settings routes, redirects, nav, live strip split
-4. Emote-only mode, fullscreen, empty-state banner
+1. Part A — emote tier removal, fixture, `Emote.url` required
+2. Part A2 — `fetchPopularPack`, auto-import, classifier rules, harness cache
+3. Part C — `{streamer}` / `{topic}` slots (before the UI that exposes them)
+4. Part B — settings routes, redirects, nav, live strip split
+5. Emote-only mode, fullscreen, empty-state banner

@@ -98,8 +98,8 @@ that tree — it has no business inside a browser source.
 
 ## 3. 7TV emotes in the overlay
 
-Config carries the imported pack identifiers — `{ kind: "channel" | "set" | "global", value }` —
-mirrored from the emotes page. The overlay fetches each through the existing
+Config carries the imported pack identifiers — `{ kind: "popular" | "channel" | "set" | "global", value }` —
+mirrored from the emotes page. `popular` covers the auto-imported default set. The overlay fetches each through the existing
 `/api/emotes` proxy, which already sets `cache-control: public, max-age=300`,
 and merges them.
 
