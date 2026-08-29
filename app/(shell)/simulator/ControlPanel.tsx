@@ -54,6 +54,8 @@ export interface ControlPanelProps {
   stats: EngineStats;
   settings: SimulationSettings;
   micLabel: string;
+  /** Emotes currently loaded. Zero disables the emote-only mode. */
+  emoteCount: number;
   subscribeLevel: (handler: (level: number) => void) => () => void;
   /** Wipes the log and resets the session back to Play. */
   onClear: () => void;
@@ -65,6 +67,7 @@ export function ControlPanel({
   stats,
   settings,
   micLabel,
+  emoteCount,
   subscribeLevel,
   onClear,
   onChange,
@@ -97,6 +100,17 @@ export function ControlPanel({
           label="Emotes"
           checked={settings.emotesEnabled}
           onChange={(emotesEnabled) => onChange({ emotesEnabled })}
+        />
+        <Toggle
+          label="Emote only"
+          checked={settings.emoteOnlyMode}
+          disabled={emoteCount === 0}
+          hint={
+            emoteCount === 0
+              ? "Needs emotes — import a pack on the Emotes page."
+              : "Chat says nothing but emotes."
+          }
+          onChange={(emoteOnlyMode) => onChange({ emoteOnlyMode })}
         />
       </div>
 
@@ -206,17 +220,29 @@ function Toggle({
   label,
   checked,
   onChange,
+  disabled = false,
+  hint,
 }: {
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  hint?: string;
 }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-2">
+    <label
+      title={hint}
+      className={
+        disabled
+          ? "flex cursor-not-allowed items-center justify-between gap-2 opacity-50"
+          : "flex cursor-pointer items-center justify-between gap-2"
+      }
+    >
       <span className="text-xs text-gray-700 dark:text-gray-300">{label}</span>
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
         className="h-4 w-4 shrink-0 accent-purple-500"
       />

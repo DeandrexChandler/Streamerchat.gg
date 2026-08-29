@@ -34,6 +34,7 @@ function Simulator() {
         stats={simulator.stats}
         settings={settings}
         micLabel={simulator.micLabel}
+        emoteCount={simulator.emotes.length}
         subscribeLevel={simulator.subscribeLevel}
         onClear={simulator.clear}
         onChange={simulator.updateSettings}
