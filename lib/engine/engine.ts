@@ -195,9 +195,18 @@ export class SimulationEngine {
     const previousSpeechAt = this.lastSpeechAt;
     this.lastSpeechAt = now;
 
-    // A new utterance invalidates the tail of the previous burst: reacting to
-    // something said eight seconds ago is worse than not reacting.
-    this.scheduler.trimBeyond(now, 1200);
+    /**
+     * A new utterance invalidates the *stale tail* of the previous burst:
+     * reacting to something said eight seconds ago is worse than not
+     * reacting.
+     *
+     * The window was 1.2s, which was far too tight — a burst spreads over
+     * several seconds, so anyone talking at a normal pace had every burst
+     * truncated almost immediately and chat appeared to stop whenever they
+     * spoke. 3.5s drops genuinely stale reactions while letting a burst
+     * actually play out.
+     */
+    this.scheduler.trimBeyond(now, 3500);
 
     const classification = classify(text, {
       audioEnergy,

@@ -439,11 +439,32 @@ export function directIdle(options: IdleOptions): IdleResult | null {
   const { silentMs, population, settings, emotes, now, rng } = options;
 
   if (!settings.idleEnabled) return null;
-  if (silentMs < settings.idleAfterSeconds * 1000) return null;
+
+  /**
+   * Two different jobs share this function.
+   *
+   * Below `idleAfterSeconds` the streamer is still talking, and this is
+   * *background flow* — the constant low murmur a real chat has whether or not
+   * anything was just said. Above it, this is idle escalation, which notices
+   * the silence and comments on it.
+   *
+   * The two were previously one thing gated on silence, which meant talking
+   * continuously switched the background off entirely and chat went dead for
+   * the whole time the app was actually in use.
+   */
+  const settled = silentMs >= settings.idleAfterSeconds * 1000;
 
   // Chance of speaking decays as the room settles into the silence.
   const minutes = silentMs / 60_000;
-  const speakChance = Math.max(0.18, 0.62 - minutes * 0.12) * settings.chatSpeed;
+  const baseChance = settled
+    ? Math.max(0.18, 0.62 - minutes * 0.12)
+    : // Runs *underneath* whatever the streamer's utterances are already
+      // producing. Tuned by how many seconds of a session are completely
+      // still rather than by messages per minute: a chat that emits the right
+      // hourly total in tight clusters, with dead air between, still reads as
+      // frozen.
+      0.5;
+  const speakChance = baseChance * settings.chatSpeed;
   if (!rng.chance(Math.min(0.9, speakChance))) return null;
 
   const speaker = population.pickSpeaker(now);
@@ -491,7 +512,10 @@ export function directIdle(options: IdleOptions): IdleResult | null {
       ? SIDE_REPLIES
       : entriesForDepth(
           depth,
-          idlePoolFor(silentMs),
+          // Background flow stays on the settling vocabulary. The escalation
+          // tiers say things like "did the stream freeze", which is nonsense
+          // while the streamer is mid-sentence.
+          settled ? idlePoolFor(silentMs) : IDLE_SETTLING,
           idleClassification,
           IDLE_AMBIENT,
         );

@@ -1016,3 +1016,79 @@ describe("AI refill gate", () => {
     expect(e.wantsAiRefill(outcome, 0)).toBe(false);
   });
 });
+
+/**
+ * Regression: chat went almost completely silent while the streamer talked.
+ *
+ * Measured at 19 messages over 90 seconds with 75 of those seconds empty.
+ * Two causes, and neither was visible in isolation:
+ *
+ *  - `trimBeyond(now, 1200)` dropped every queued message more than 1.2s out,
+ *    so a burst spread over several seconds was truncated by the next
+ *    utterance. Talking continuously meant never hearing the end of anything.
+ *  - Ambient chatter was gated behind `silentMs >= idleAfterSeconds`, which
+ *    talking never satisfies — so the background flow was switched off
+ *    exactly while the app was being used.
+ *
+ * Real chat keeps moving whether or not the streamer just said something.
+ */
+describe("continuous chat motion", () => {
+  function motion(gapMs: number, durationMs = 90_000) {
+    const engine = make({ audienceSize: 45, aiShare: 0 }, 31);
+    const talk = [
+      "okay so let me get this set up",
+      "yeah I think that works",
+      "let me try the other way",
+      "hold on one sec",
+      "alright that looks better",
+      "so what do you guys think",
+      "this is kinda sick actually",
+      "okay moving on",
+      "let me check this real quick",
+      "yeah that's what I thought",
+    ];
+
+    let spoken = 0;
+    let total = 0;
+    const perSecond = new Map<number, number>();
+
+    for (let t = 0; t <= durationMs; t += 250) {
+      if (spoken < talk.length && t >= (spoken + 1) * gapMs) {
+        engine.handleTranscript(talk[spoken++], t);
+      }
+      const n = engine.tick(t).length;
+      total += n;
+      const sec = Math.floor(t / 1000);
+      perSecond.set(sec, (perSecond.get(sec) ?? 0) + n);
+    }
+
+    let emptySeconds = 0;
+    for (let sec = 0; sec < Math.floor(durationMs / 1000); sec += 1) {
+      if ((perSecond.get(sec) ?? 0) === 0) emptySeconds += 1;
+    }
+    return { total, emptySeconds };
+  }
+
+  /**
+   * Asserted on dead air rather than message count. The bug was not that too
+   * few messages arrived overall — it was that they arrived in clusters with
+   * long stillness between, which reads as frozen no matter what the
+   * per-minute figure says.
+   */
+  it("keeps moving while the streamer talks continuously", () => {
+    const { total, emptySeconds } = motion(8_000);
+    expect(total).toBeGreaterThan(45);
+    expect(emptySeconds).toBeLessThan(35);
+  });
+
+  it("keeps moving when the streamer talks quickly", () => {
+    const { total, emptySeconds } = motion(5_000);
+    expect(total).toBeGreaterThan(45);
+    expect(emptySeconds).toBeLessThan(35);
+  });
+
+  it("still fills silence", () => {
+    const { total } = motion(999_000);
+    expect(total).toBeGreaterThan(40);
+  });
+});
