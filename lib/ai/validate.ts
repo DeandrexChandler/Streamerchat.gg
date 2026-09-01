@@ -53,8 +53,51 @@ function clean(raw: string): string {
   return text.trim();
 }
 
+/**
+ * Dismissals that need no pronoun to land.
+ *
+ * Caught from live output: the model answered a streamer telling a story with
+ * "didnt ask". None of these mention "you", so the second-person check above
+ * never sees them, but aimed at the broadcaster every one is a dunk.
+ *
+ * Matched on a normalised copy so "didn't"/"didnt" and spacing variants are
+ * the same phrase.
+ */
+const DISMISSIVE = [
+  "didnt ask",
+  "did not ask",
+  "who asked",
+  "nobody asked",
+  "no one asked",
+  "dont care",
+  "do not care",
+  "ratio",
+  "skill issue",
+  "cope harder",
+  "get good",
+  "git gud",
+  "touch grass",
+  "yawn",
+  "boring stream",
+];
+
 function isHostileToStreamer(text: string): boolean {
-  return SECOND_PERSON.test(text) && HOSTILE.test(text);
+  if (SECOND_PERSON.test(text) && HOSTILE.test(text)) return true;
+
+  const normalised = text
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return DISMISSIVE.some(
+    (phrase) =>
+      normalised === phrase ||
+      normalised.startsWith(`${phrase} `) ||
+      normalised.endsWith(` ${phrase}`) ||
+      normalised.includes(` ${phrase} `),
+  );
 }
 
 /**

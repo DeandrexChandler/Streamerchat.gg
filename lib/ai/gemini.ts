@@ -20,12 +20,30 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 const TIMEOUT_MS = 12_000;
 
 /**
+ * Chosen by measuring, not by headline rates.
+ *
  * The 2.5 family is closed to new API keys — both `gemini-2.5-flash` and
- * `gemini-2.5-flash-lite` return 404 with "no longer available to new users",
- * even though the public pricing page still lists them for existing ones.
- * Verified against a fresh key, which is the only way to find this out.
+ * `gemini-2.5-flash-lite` return 404 "no longer available to new users", even
+ * though the public pricing page still lists them. `ListModels` reports them
+ * too, so the only way to know is to make a real call.
+ *
+ * Among what is actually reachable, measured against this app's real prompt
+ * (~428 input tokens, six runs each):
+ *
+ *   3.5-flash-lite   428 in /  80 out / 0 thinking    $0.000329 per call
+ *   3.1-flash-lite   428 in / 221 out / 121 thinking  $0.000438 per call
+ *   3.6-flash        429 in /  93 out / 0-421 varies  $0.000670 per call
+ *
+ * 3.1-flash-lite has the cheaper published rates ($0.25/$1.50 against
+ * $0.30/$2.50) and is still a third more expensive, because it spends
+ * reasoning tokens on every call and those bill at the output rate. Writing
+ * six-word chat messages does not need deliberation.
+ *
+ * 3.6-flash is the quality option, and its thinking is *variable* — measured
+ * at both 0 and 421 tokens for identical requests — so its cost is far less
+ * predictable. 3.5-flash-lite returned zero thinking tokens on every run.
  */
-export const DEFAULT_MODEL = "gemini-3.6-flash";
+export const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 
 export interface GeminiOptions {
   apiKey: string;

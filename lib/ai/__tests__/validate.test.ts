@@ -79,6 +79,24 @@ describe("validateCandidates", () => {
       expect(validateCandidates([line], [])).toEqual([]);
     });
 
+    it.each([
+      "didnt ask",
+      "didn't ask",
+      "who asked",
+      "nobody asked",
+      "dont care",
+      "L + ratio",
+      "ratio",
+      "skill issue",
+      "cope harder",
+      "get good",
+    ])("drops the dismissive %j", (line) => {
+      // Caught live: the model produced "didnt ask" against a streamer telling
+      // a story. These carry no second-person pronoun, so the hostility check
+      // above never sees them, but pointed at the broadcaster they are dunks.
+      expect(validateCandidates([line], [])).toEqual([]);
+    });
+
     it("still allows viewers teasing themselves", () => {
       expect(validateCandidates(["i suck at this game"], [])).toEqual([
         "i suck at this game",

@@ -156,7 +156,7 @@ export default function ChatSettingsPage() {
           <Field
             id="ai-model"
             label="Model"
-            hint="The prompt matters more than the model here. Try both on a real stream and pick by ear."
+            hint="Flash-Lite runs about $1-2 per 80 stream hours. The prompt matters more than the model here, so try both and pick by ear."
           >
             <select
               id="ai-model"
@@ -168,8 +168,12 @@ export default function ChatSettingsPage() {
               }
               className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
             >
-              <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
-              <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
+              <option value="gemini-3.5-flash-lite">
+                Gemini 3.5 Flash-Lite — cheapest (default)
+              </option>
+              <option value="gemini-3.6-flash">
+                Gemini 3.6 Flash — better, ~2x the cost
+              </option>
             </select>
           </Field>
         </CardContent>

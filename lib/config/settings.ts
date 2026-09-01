@@ -69,8 +69,8 @@ export const SimulationSettingsSchema = z.object({
    * one is to A/B them on a real stream by ear.
    */
   aiModel: z
-    .enum(["gemini-3.6-flash", "gemini-3.7-flash"])
-    .default("gemini-3.6-flash"),
+    .enum(["gemini-3.5-flash-lite", "gemini-3.6-flash"])
+    .default("gemini-3.5-flash-lite"),
 
   /** Optional context so chat can reference the streamer and what they're doing. */
   streamerName: z.string().max(40).default(""),

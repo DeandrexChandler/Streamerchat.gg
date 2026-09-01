@@ -25,7 +25,7 @@ function reply(text: string) {
 function provider(fetchImpl: unknown) {
   return createGeminiProvider({
     apiKey: "test-key",
-    model: "gemini-3.6-flash",
+    model: "gemini-3.5-flash-lite",
     fetchImpl: fetchImpl as typeof fetch,
   });
 }
@@ -97,10 +97,10 @@ describe("gemini provider", () => {
     );
     await createGeminiProvider({
       apiKey: "k",
-      model: "gemini-3.7-flash",
+      model: "gemini-3.6-flash",
       fetchImpl: impl as unknown as typeof fetch,
     }).generate(request);
-    expect(String(impl.mock.calls[0][0])).toContain("gemini-3.7-flash");
+    expect(String(impl.mock.calls[0][0])).toContain("gemini-3.6-flash");
   });
 });
 
