@@ -284,8 +284,35 @@ export class SimulationEngine {
     if (!outcome || !outcome.reacted) return false;
 
     const { classification } = outcome;
+
+    /**
+     * Which moments are worth spending a call on.
+     *
+     * The original condition was `confidence < 0.55 || energy > 0.6`, and
+     * measuring it across a full session showed it never opened once. The two
+     * halves are anti-correlated with the rest of the gate:
+     *
+     *  - Low-confidence utterances are exactly the ones the attention gate
+     *    marks unreacted, so they were already excluded a line above.
+     *  - Energy is mostly text-derived and tops out near 0.25; even a maximal
+     *    audioEnergy of 1.0 only blends to ~0.52, so 0.6 was unreachable.
+     *
+     * So the primary signal is now the *kind* of moment rather than a numeric
+     * threshold: the streamer being narrative, specific, or talking straight
+     * at chat is where a stock pool line is likeliest to feel generic, and
+     * that is precisely the gap this tier exists to fill.
+     */
+    const substantive =
+      classification.intent === "story" ||
+      classification.intent === "showing" ||
+      classification.intent === "question_to_chat" ||
+      classification.intent === "achievement" ||
+      classification.intent === "excitement";
+
     const worthIt =
-      classification.confidence < 0.55 || classification.energy > 0.6;
+      substantive ||
+      classification.confidence < 0.55 ||
+      classification.energy > 0.45;
     if (!worthIt) return false;
 
     // Hard spend limits have the final say — see AiBudget.

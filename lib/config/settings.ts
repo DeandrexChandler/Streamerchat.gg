@@ -61,6 +61,17 @@ export const SimulationSettingsSchema = z.object({
    */
   aiShare: z.number().min(0).max(0.4).default(0.05),
 
+  /**
+   * Which model the AI tier calls.
+   *
+   * A setting rather than a constant because the model is not where quality
+   * comes from at this task — the prompt is — so the only honest way to pick
+   * one is to A/B them on a real stream by ear.
+   */
+  aiModel: z
+    .enum(["gemini-2.5-flash", "gemini-2.5-flash-lite"])
+    .default("gemini-2.5-flash"),
+
   /** Optional context so chat can reference the streamer and what they're doing. */
   streamerName: z.string().max(40).default(""),
   streamTopic: z.string().max(80).default(""),

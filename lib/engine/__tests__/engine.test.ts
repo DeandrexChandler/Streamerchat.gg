@@ -922,3 +922,77 @@ describe("emote-only mode", () => {
     expect(released.some((t) => !isEmoteOnly(t, index))).toBe(true);
   });
 });
+
+describe("AI refill gate", () => {
+  function engine() {
+    return new SimulationEngine({
+      seed: 5,
+      now: 0,
+      emotes: FIXTURE_EMOTES,
+      settings: { audienceSize: 45, aiShare: 0.05 },
+    });
+  }
+
+  /**
+   * Regression: the gate used to require `confidence < 0.55 || energy > 0.6`
+   * on top of `reacted`. Those are anti-correlated — low-confidence utterances
+   * are the ones the attention gate ignores, and text-derived energy tops out
+   * around 0.25 — so it never opened across a whole session.
+   */
+  it("opens at least once over a realistic session", () => {
+    const e = engine();
+    const script: Array<[number, string]> = [
+      [1_500, "hey hey what's up everyone, welcome in"],
+      [16_000, "chat what do you think, should I do the roof or the walls"],
+      [68_000, "okay look at this, look how it turned out"],
+      [110_000, "so yesterday something really funny happened at work"],
+      [150_000, "alright I think that's it for today, thanks for hanging out"],
+    ];
+
+    let opened = 0;
+    for (const [at, text] of script) {
+      const outcome = e.handleTranscript(text, at, undefined);
+      if (e.wantsAiRefill(outcome, at)) {
+        opened += 1;
+        e.recordAiCall(at);
+      }
+    }
+    expect(opened).toBeGreaterThan(0);
+  });
+
+  it("never opens when the tier is switched off", () => {
+    const e = new SimulationEngine({
+      seed: 5,
+      now: 0,
+      emotes: FIXTURE_EMOTES,
+      settings: { audienceSize: 45, aiShare: 0 },
+    });
+    const outcome = e.handleTranscript("look at this, look how it turned out", 0);
+    expect(e.wantsAiRefill(outcome, 0)).toBe(false);
+  });
+
+  it("never opens for an utterance the attention gate ignored", () => {
+    const e = engine();
+    const outcome = e.handleTranscript("okay so today we're gonna finish the base", 0);
+    if (outcome && !outcome.reacted) {
+      expect(e.wantsAiRefill(outcome, 0)).toBe(false);
+    }
+  });
+
+  it("respects the minimum interval between calls", () => {
+    const e = engine();
+    const first = e.handleTranscript("look at this, look how it turned out", 0);
+    expect(e.wantsAiRefill(first, 0)).toBe(true);
+    e.recordAiCall(0);
+
+    const second = e.handleTranscript("so yesterday something funny happened at work", 5_000);
+    expect(e.wantsAiRefill(second, 5_000)).toBe(false);
+  });
+
+  it("stops asking once the pool is already stocked", () => {
+    const e = engine();
+    e.supplyAiCandidates(Array.from({ length: 10 }, (_, i) => `line ${i}`));
+    const outcome = e.handleTranscript("look at this, look how it turned out", 0);
+    expect(e.wantsAiRefill(outcome, 0)).toBe(false);
+  });
+});

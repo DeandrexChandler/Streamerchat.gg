@@ -125,6 +125,8 @@ export function useSimulator(
   const emotesRef = useRef<Emote[]>([]);
   const pausedRef = useRef(false);
   const overlayRef = useRef<OverlayTransport | null>(null);
+  /** What chat said recently, so an AI refill doesn't echo it. */
+  const recentTextsRef = useRef<string[]>([]);
 
   /** Level subscribers, kept outside React entirely. */
   const levelSubscribers = useRef(new Set<(level: number) => void>());
@@ -199,6 +201,15 @@ export function useSimulator(
       const now = Date.now();
       const released = engine.tick(now);
 
+      // Kept for the AI prompt, so a refill knows what chat just said and does
+      // not echo it back.
+      if (released.length > 0) {
+        recentTextsRef.current = [
+          ...recentTextsRef.current,
+          ...released.map((message) => message.text),
+        ].slice(-20);
+      }
+
       // The scheduler is the only source of released messages, so this is the
       // one place the overlay is fed — nothing else can reach OBS.
       const overlay = overlayRef.current;
@@ -239,6 +250,60 @@ export function useSimulator(
       tickRef.current = null;
     }
   }, []);
+
+  /**
+   * Tops up the AI candidate pool.
+   *
+   * Fire and forget by design. Nothing awaits this, nothing blocks on it, and
+   * a failure is invisible beyond slightly less variety — the pool and
+   * template tiers carry chat regardless. That is the whole point of the AI
+   * being a component rather than the system.
+   *
+   * The engine decides whether a moment is worth spending on; the budget guard
+   * inside it has the final say. This function only performs the call.
+   */
+  const maybeRefillAi = useCallback(
+    async (outcome: TranscriptOutcome | null, at: number) => {
+      const engine = engineRef.current;
+      if (!engine || !engine.wantsAiRefill(outcome, at) || !outcome) return;
+
+      // Recorded before the request, not after: the budget must account for a
+      // call that is in flight, or a burst of speech would stack requests.
+      engine.recordAiCall(at);
+
+      try {
+        const response = await fetch("/api/chat-candidates", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            classification: outcome.classification,
+            emotes: emotesRef.current.map((emote) => emote.name),
+            recent: recentTextsRef.current,
+            streamer: settingsRef.current.streamerName || undefined,
+            topic: settingsRef.current.streamTopic || undefined,
+            model: settingsRef.current.aiModel,
+            count: 12,
+          }),
+        });
+
+        if (!response.ok) {
+          engine.recordAiFailure(Date.now());
+          return;
+        }
+
+        const body = (await response.json()) as { lines?: string[] };
+        const lines = body.lines ?? [];
+
+        // An empty batch is not a failure — it is what a missing key returns,
+        // and backing off for that would be wrong.
+        if (lines.length > 0) engine.supplyAiCandidates(lines);
+      } catch {
+        engine.recordAiFailure(Date.now());
+      }
+    },
+    [],
+  );
 
   const start = useCallback(async () => {
     if (status === "running" || status === "starting") return;
@@ -287,6 +352,8 @@ export function useSimulator(
         const next = [...previous, { id: `${at}-${text.length}`, text, at, outcome }];
         return next.length > 30 ? next.slice(-30) : next;
       });
+
+      void maybeRefillAi(outcome, at);
     });
 
     provider.events.on("interim", ({ text }) => setInterim(text));
@@ -307,7 +374,7 @@ export function useSimulator(
     pausedRef.current = false;
     startTicking();
     setStatus("running");
-  }, [status, providerId, isDemo, ensureEngine, startTicking]);
+  }, [status, providerId, isDemo, ensureEngine, startTicking, maybeRefillAi]);
 
   const stop = useCallback(() => {
     stopTicking();
