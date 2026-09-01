@@ -1,50 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import type { Intent, Sentiment } from "../../engine/types";
+import { CandidateRequestSchema as RequestSchema } from "../schema";
 
 /**
- * The route's request schema, mirrored.
+ * The route's own schema, imported rather than mirrored.
  *
- * The route itself imports next/server, which cannot be constructed in this
- * environment. What is actually worth pinning is the contract: that the schema
- * accepts what the client sends and rejects what it must, and that the intent
- * list stays in step with the engine's own union.
+ * It used to be copied into this file, and the copies drifted the moment
+ * `directive` was added — the test kept passing while every directive request
+ * to the live route came back "invalid".
  */
-const IntentSchema: z.ZodType<Intent> = z.enum([
-  "greeting",
-  "question_to_chat",
-  "excitement",
-  "struggle",
-  "achievement",
-  "story",
-  "confusion",
-  "showing",
-  "farewell",
-  "mundane",
-]);
-
-const SentimentSchema: z.ZodType<Sentiment> = z.enum([
-  "positive",
-  "negative",
-  "neutral",
-]);
-
-const RequestSchema = z.object({
-  classification: z.object({
-    intent: IntentSchema,
-    sentiment: SentimentSchema,
-    energy: z.number().min(0).max(1),
-    keywords: z.array(z.string().max(40)).max(12),
-    confidence: z.number().min(0).max(1),
-  }),
-  emotes: z.array(z.string().max(60)).max(200).default([]),
-  recent: z.array(z.string().max(200)).max(30).default([]),
-  streamer: z.string().max(40).optional(),
-  topic: z.string().max(80).optional(),
-  count: z.number().int().min(1).max(24).default(12),
-  model: z.string().max(60).optional(),
-});
-
 const valid = {
   classification: {
     intent: "excitement",
@@ -72,6 +35,14 @@ describe("chat-candidates request contract", () => {
     const bad = { ...valid, classification: { ...valid.classification, intent: "vibing" } };
     expect(RequestSchema.safeParse(bad).success).toBe(false);
   });
+
+  it.each(["directive", "question_to_chat", "story", "mundane"])(
+    "accepts the %j intent the engine can actually emit",
+    (intent) => {
+      const req = { ...valid, classification: { ...valid.classification, intent } };
+      expect(RequestSchema.safeParse(req).success).toBe(true);
+    },
+  );
 
   it("rejects out-of-range energy", () => {
     const bad = { ...valid, classification: { ...valid.classification, energy: 4 } };

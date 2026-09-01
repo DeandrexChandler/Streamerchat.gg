@@ -55,6 +55,21 @@ const MAX_REPEATS_PER_VIEWER = 3;
 const REPEAT_WINDOW = 250;
 
 /** What the engine made of one utterance. Surfaced for the transcript panel. */
+/**
+ * How long background chatter holds off after chat reacts to something.
+ *
+ * Long enough for the burst to be the thing on screen, short enough that the
+ * room does not go quiet before idle chatter takes over.
+ */
+/**
+ * Queued messages above which the burst is considered to be carrying the room
+ * on its own, and background chatter holds off.
+ *
+ * Two rather than zero: a single straggler queued three seconds out is not
+ * motion, and waiting for it leaves a visible gap.
+ */
+const QUEUE_CARRIES_ITSELF = 2;
+
 export interface TranscriptOutcome {
   classification: Classification;
   /** False when the attention gate deliberately let it pass without reply. */
@@ -458,6 +473,21 @@ export class SimulationEngine {
     this.lastIdleCheckAt = now;
 
     const silentMs = now - this.lastSpeechAt;
+
+    /**
+     * Background filler stands down while a burst is still queued.
+     *
+     * Keyed on the scheduler's backlog rather than on a timer, because the
+     * backlog is the thing that actually matters: if messages are already
+     * waiting to be released then the burst *is* the motion, and adding
+     * ambient noise on top just salts a "spam W" with "chat fell off" and
+     * "it's so quiet". When the queue drains, filler resumes on its own.
+     *
+     * Self-scaling, which a timer was not — a sixteen-message directive burst
+     * holds filler off for as long as it needs, while a two-message reaction
+     * to background muttering barely delays it at all.
+     */
+    if (this.scheduler.pending > QUEUE_CARRIES_ITSELF) return;
 
     /**
      * Idle is polled about once a second, so a single message per poll caps

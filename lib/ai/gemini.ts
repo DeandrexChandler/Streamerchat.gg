@@ -16,8 +16,20 @@ import type { CandidateProvider, CandidateRequest } from "./provider";
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
-/** Long enough for a batch, short enough that a hang doesn't stall a refill. */
-const TIMEOUT_MS = 12_000;
+/**
+ * Generous, because measured latency is bimodal.
+ *
+ * Five consecutive identical calls returned in 1276, 912, 821, 757 and 30395
+ * ms — usually under a second and a half, with occasional severe outliers.
+ * At 12s roughly a fifth of refills were being thrown away mid-flight while
+ * the model was still answering perfectly well.
+ *
+ * Kept under the budget guard's 25s minimum call interval so a slow request
+ * cannot still be running when the next one is allowed. A timeout resolves to
+ * an empty batch, which the client treats as "nothing to add" rather than as a
+ * failure, so the cost of the remaining outliers is one skipped refill.
+ */
+const TIMEOUT_MS = 20_000;
 
 /**
  * Chosen by measuring, not by headline rates.

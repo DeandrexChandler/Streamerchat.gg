@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { RateLimiter, clientKey } from "@/lib/http/rate-limit";
 import { DEFAULT_MODEL, createGeminiProvider } from "@/lib/ai/gemini";
 import { validateCandidates } from "@/lib/ai/validate";
-import type { Intent, Sentiment } from "@/lib/engine/types";
+import { CandidateRequestSchema } from "@/lib/ai/schema";
 
 /**
  * AI candidate refill.
@@ -36,46 +35,6 @@ const limiter = new RateLimiter({ windowMs: 60_000, maxRequests: 30 });
 
 const MAX_BODY_BYTES = 16 * 1024;
 
-/**
- * Annotated against the engine's own unions, so if an intent is added there
- * and not here the build breaks rather than this route silently rejecting
- * every request carrying the new value.
- */
-const IntentSchema: z.ZodType<Intent> = z.enum([
-  "greeting",
-  "question_to_chat",
-  "excitement",
-  "struggle",
-  "achievement",
-  "story",
-  "confusion",
-  "showing",
-  "farewell",
-  "mundane",
-]);
-
-const SentimentSchema: z.ZodType<Sentiment> = z.enum([
-  "positive",
-  "negative",
-  "neutral",
-]);
-
-const RequestSchema = z.object({
-  classification: z.object({
-    intent: IntentSchema,
-    sentiment: SentimentSchema,
-    energy: z.number().min(0).max(1),
-    keywords: z.array(z.string().max(40)).max(12),
-    confidence: z.number().min(0).max(1),
-  }),
-  emotes: z.array(z.string().max(60)).max(200).default([]),
-  recent: z.array(z.string().max(200)).max(30).default([]),
-  streamer: z.string().max(40).optional(),
-  topic: z.string().max(80).optional(),
-  count: z.number().int().min(1).max(24).default(12),
-  model: z.string().max(60).optional(),
-});
-
 export async function POST(request: Request) {
   if (limiter.check(clientKey(request))) {
     return NextResponse.json({ lines: [], error: "rate-limited" }, { status: 429 });
@@ -93,7 +52,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ lines: [], error: "malformed" }, { status: 400 });
   }
 
-  const parsed = RequestSchema.safeParse(json);
+  const parsed = CandidateRequestSchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ lines: [], error: "invalid" }, { status: 400 });
   }

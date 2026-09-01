@@ -6,6 +6,12 @@ import {
   IDLE_SETTLING,
   SIDE_REPLIES,
 } from "../data/responses/idle";
+import {
+  AUDIO_ANSWERS,
+  DIRECTIVE_ASIDES,
+  PRESENCE_ANSWERS,
+  VISUAL_ANSWERS,
+} from "../data/responses/answers";
 import type { SimulationSettings } from "../config/settings";
 import { pickDepth, type Depth } from "./attention";
 import {
@@ -52,7 +58,11 @@ function burstSize(classification: Classification, rng: Rng): number {
   // Baseline by intent — a direct question to chat pulls far more replies than
   // background muttering.
   const base: Record<string, [number, number]> = {
-    question_to_chat: [4, 8],
+    question_to_chat: [5, 10],
+    // An instruction is the one moment chat acts in unison. This is the
+    // largest burst in the table on purpose — "spam W" answered by two
+    // messages is the feature visibly not working.
+    directive: [8, 16],
     excitement: [4, 9],
     achievement: [3, 7],
     greeting: [3, 6],
@@ -61,7 +71,7 @@ function burstSize(classification: Classification, rng: Rng): number {
     story: [2, 5],
     confusion: [2, 4],
     farewell: [3, 6],
-    mundane: [1, 3],
+    mundane: [2, 4],
   };
 
   const [min, max] = base[intent] ?? [1, 3];
@@ -227,6 +237,52 @@ function forcedEmoteOnly(
   return Array.from({ length: count }, () => emote.name).join(" ");
 }
 
+/**
+ * What one viewer posts when chat has been told to do something.
+ *
+ * Most people just do it, with the natural variation of a real room: some post
+ * the token once, some spam it, a few say something about it instead. The
+ * spam is what makes a "spam W" actually look like chat obeying rather than
+ * chat discussing.
+ */
+function complyWithDirective(
+  target: string | undefined,
+  viewer: Viewer,
+  emotes: readonly Emote[],
+  classification: Classification,
+  rng: Rng,
+): string | null {
+  // A minority comments instead of complying. Small — the point of a
+  // directive is that chat mostly does it — but never zero, because a room
+  // obeying in perfect unison reads as scripted.
+  if (rng.chance(0.12)) return null;
+
+  if (!target) {
+    // "let me hear it" — no token to post, so the room just gets loud.
+    const emote = pickEmote(emotes, classification.intent, classification.sentiment, rng);
+    if (!emote) return null;
+    return Array.from({ length: emoteSpamCount(rng) }, () => emote.name).join(" ");
+  }
+
+  // Repeat count tracks how emote-happy the viewer is, so the same instruction
+  // produces a ragged wall rather than forty identical lines.
+  const repeats = rng.chance(0.45 + viewer.emoteAffinity * 0.4)
+    ? rng.int(2, 6)
+    : 1;
+
+  return Array.from({ length: repeats }, () => target).join(" ");
+}
+
+/** The answer pool for a question that actually has an answer. */
+function answersFor(
+  subject: Classification["subject"],
+): readonly ResponseEntry[] | null {
+  if (subject === "audio") return AUDIO_ANSWERS;
+  if (subject === "visual") return VISUAL_ANSWERS;
+  if (subject === "presence") return PRESENCE_ANSWERS;
+  return null;
+}
+
 export interface DirectOptions {
   classification: Classification;
   population: Population;
@@ -339,16 +395,62 @@ export function directReaction(options: DirectOptions): DirectResult {
       source = "pool";
     }
 
-    // An emote on its own, which is what a large share of real chat is.
-    if (text === null && !replyTarget && depth === "ambient" && settings.emotesEnabled) {
+    // Chat was told to do something. Most of the room does it.
+    if (text === null && classification.intent === "directive" && !replyTarget) {
+      text = complyWithDirective(
+        classification.directiveTarget,
+        speaker,
+        emotes,
+        classification,
+        rng,
+      );
+      if (text !== null) source = "pool";
+    }
+
+    /**
+     * An emote on its own, which is what a large share of real chat is —
+     * except when a question is waiting for an actual answer. Someone asking
+     * whether their mic works does not need six people posting catJAM.
+     */
+    const owesAnAnswer = answersFor(classification.subject) !== null;
+    if (
+      text === null &&
+      !replyTarget &&
+      !owesAnAnswer &&
+      depth === "ambient" &&
+      settings.emotesEnabled
+    ) {
       text = maybeEmoteOnly(speaker, emotes, classification, rng);
     }
 
     if (text === null) {
       source = replyTarget ? "template" : "pool";
+
+      /**
+       * A question with a real answer gets answered.
+       *
+       * Without this, "can you hear me" drew from the generic
+       * question_to_chat pool and came back with "hm" or "wait what was the
+       * question" — which is the single most obviously broken thing chat can
+       * do, because the streamer is standing there waiting to be told yes.
+       */
+      const answers = replyTarget ? null : answersFor(classification.subject);
+
+      /**
+       * The minority who did not just do as they were told.
+       *
+       * They still have to be reacting to the instruction — falling back to
+       * the generic pool put "i feel that" and "ngl same" in the middle of a
+       * "spam W", which reads as chat not having heard it.
+       */
+      const asides =
+        !replyTarget && classification.intent === "directive"
+          ? DIRECTIVE_ASIDES
+          : null;
+
       const entries = replyTarget
         ? SIDE_REPLIES
-        : entriesForDepth(depth, pool, classification);
+        : (answers ?? asides ?? entriesForDepth(depth, pool, classification));
 
       const result = generateFromPool(
         entries,

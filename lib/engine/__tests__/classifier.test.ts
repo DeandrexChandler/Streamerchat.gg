@@ -158,3 +158,59 @@ describe("understands how people actually talk", () => {
     expect(classify("this part is really hard", {}).intent).not.toBe("excitement");
   });
 });
+
+/**
+ * Directives and direct questions were the biggest hole in the classifier.
+ * "spam W", "chat can you hear me" and "everyone say pog" all scored zero,
+ * landed in `mundane`, and produced byte-identical filler — chat could not
+ * tell the difference between being given an instruction and background talk.
+ */
+describe("directives to chat", () => {
+  it.each([
+    ["spam W", "W"],
+    ["spam w in chat", "w"],
+    ["everyone say pog", "pog"],
+    ["chat say hello", "hello"],
+    ["type KEKW", "KEKW"],
+    ["post F in the chat", "F"],
+    ["let me hear it chat", undefined],
+  ])("reads %j as a directive", (text, target) => {
+    const c = classify(text, {});
+    expect(c.intent).toBe("directive");
+    if (target !== undefined) expect(c.directiveTarget).toBe(target);
+  });
+
+  it("is confident about an explicit instruction", () => {
+    expect(classify("spam W", {}).confidence).toBeGreaterThan(0.6);
+  });
+
+  it("does not mistake ordinary talk for an instruction", () => {
+    expect(classify("there was so much spam in my inbox", {}).intent).not.toBe(
+      "directive",
+    );
+  });
+});
+
+describe("questions chat can actually answer", () => {
+  it.each([
+    ["chat can you hear me", "audio"],
+    ["can you guys hear me", "audio"],
+    ["am I loud enough", "audio"],
+    ["is my mic working", "audio"],
+    ["how do I sound", "audio"],
+    ["can you see my screen", "visual"],
+    ["does this look okay", "visual"],
+    ["is anyone here", "presence"],
+    ["chat you still there", "presence"],
+  ])("routes %j to the %s answers", (text, subject) => {
+    const c = classify(text, {});
+    expect(c.intent).toBe("question_to_chat");
+    expect(c.subject).toBe(subject);
+  });
+
+  it("leaves an open question without a subject", () => {
+    const c = classify("chat what do you think, roof or walls", {});
+    expect(c.intent).toBe("question_to_chat");
+    expect(c.subject).toBeUndefined();
+  });
+});

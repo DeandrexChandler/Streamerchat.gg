@@ -9,6 +9,7 @@
 export type Intent =
   | "greeting"
   | "question_to_chat" // streamer asked chat something — chat should answer
+  | "directive" // streamer told chat to do something — chat should comply
   | "excitement" // something good happened
   | "struggle" // something went wrong, streamer is frustrated
   | "achievement" // streamer succeeded at something
@@ -29,6 +30,21 @@ export interface Classification {
   keywords: string[];
   /** 0..1 — how sure we are. Low confidence is what invites the AI tier in. */
   confidence: number;
+  /**
+   * What chat was told to post, for `directive` intents.
+   *
+   * Undefined when the instruction had no quotable target ("let me hear it"),
+   * which chat answers with enthusiasm rather than a specific token.
+   */
+  directiveTarget?: string;
+  /**
+   * What a `question_to_chat` is actually asking about.
+   *
+   * Intent alone cannot separate "can you hear me" from "roof or walls", and
+   * they need completely different answers — one has a correct response and
+   * the other is an opinion.
+   */
+  subject?: "audio" | "visual" | "presence";
 }
 
 // --------------------------------------------------------------- population

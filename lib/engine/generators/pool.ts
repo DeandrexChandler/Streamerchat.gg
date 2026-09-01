@@ -49,6 +49,7 @@ const INTENT_MOODS: Record<Intent, readonly EmoteMood[]> = {
   greeting: ["love", "chill", "hype"],
   farewell: ["love", "chill", "sad"],
   question_to_chat: ["confused", "funny", "chill"],
+  directive: ["hype", "funny", "love"],
   excitement: ["hype", "funny", "love"],
   achievement: ["hype", "love", "funny"],
   struggle: ["sad", "funny", "love"],

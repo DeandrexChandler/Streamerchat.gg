@@ -27,7 +27,17 @@ const INTENT_SIGNALS: Readonly<Record<Intent, readonly string[]>> = {
     "what do you think", "should i", "chat what", "you guys think",
     "any ideas", "any suggestions", "which one", "help me", "thoughts",
     "am i crazy", "right chat", "anyone know", "does anyone", "tell me",
+    // Questions with an actual answer, rather than an opinion. These were the
+    // most obvious gap: asking "can you hear me" and getting background
+    // muttering back reads as broken, not as realistic.
+    "can you hear", "can you guys hear", "hear me", "am i loud", "too loud",
+    "is my mic", "mic working", "how do i sound", "audio ok", "audio okay",
+    "sound ok", "can you see", "does this look", "how does this look",
+    "can you read", "is this visible", "anyone here", "anybody here",
+    "still there", "you there", "is chat alive", "chat you alive",
   ],
+  // Detected by isDirective() rather than substrings — see the note there.
+  directive: [],
   excitement: [
     "let's go", "lets go", "no way", "oh my", "insane", "crazy", "unreal",
     "amazing", "incredible", "holy", "yes yes", "wow", "look at that",
@@ -135,6 +145,88 @@ function countMatches(haystack: string, needles: readonly string[]): number {
     }
   }
   return hits;
+}
+
+/**
+ * Whether the streamer is instructing chat rather than talking near it.
+ *
+ * Substring matching cannot do this. "spam" alone fires on "there was so much
+ * spam in my inbox", and a list long enough to cover the real phrasings would
+ * fire on half of ordinary speech. What actually distinguishes a directive is
+ * grammatical: an imperative verb, either opening the sentence or addressed to
+ * chat by name.
+ */
+const DIRECTIVE_VERBS = "spam|say|type|post|drop|send|smash";
+
+const DIRECTIVE_PATTERNS: readonly RegExp[] = [
+  // Opens with the verb: "spam W", "type KEKW", "post F".
+  new RegExp(`^\\s*(?:please\\s+|everyone\\s+|everybody\\s+|all\\s+of\\s+you\\s+)?(?:${DIRECTIVE_VERBS})\\b`, "i"),
+  // Addressed to chat: "chat say hello", "everyone spam W".
+  new RegExp(`\\b(?:chat|everyone|everybody|guys|y'?all)\\s+(?:can\\s+you\\s+|please\\s+)?(?:${DIRECTIVE_VERBS})\\b`, "i"),
+  // Set phrases with no verb of their own.
+  /\blet me hear (?:it|you|some)\b/i,
+  /\bgive me (?:a|an|some)\b/i,
+  /\bin the chat\b/i,
+];
+
+/** Nouns that turn a verb into a subject — "so much spam", "the post". */
+const NOT_IMPERATIVE = /\b(?:much|the|a|an|my|your|his|her|their|of|some|no|any|that|this)\s+(?:spam|post|type|say)\b/i;
+
+function isDirective(raw: string): boolean {
+  if (NOT_IMPERATIVE.test(raw)) return false;
+  return DIRECTIVE_PATTERNS.some((pattern) => pattern.test(raw));
+}
+
+/**
+ * Pulls out what chat has been told to post.
+ *
+ * Matched on the raw text rather than the lowercased copy, because "spam W"
+ * means the letter W and chat spamming a lowercase "w" instead looks wrong.
+ */
+function extractDirectiveTarget(raw: string): string | undefined {
+  const patterns = [
+    /\bspam\s+(?:the\s+)?([^\s,.!?]+)/i,
+    /\b(?:everyone|everybody|chat)\s+say\s+([^\s,.!?]+)/i,
+    /\btype\s+(?:in\s+chat\s+)?([^\s,.!?]+)/i,
+    /\bpost\s+([^\s,.!?]+)/i,
+    /\bgive\s+me\s+(?:a\s+|some\s+)?([^\s,.!?]+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = raw.match(pattern);
+    const token = match?.[1];
+    if (!token) continue;
+    // "spam it" / "say something" carry no postable token.
+    // "emote"/"emotes" is a category, not a token — chat spamming the literal
+    // word "emote" is worse than chat picking one.
+    if (/^(it|that|this|something|anything|em|them|those|emote|emotes)$/i.test(token)) {
+      continue;
+    }
+    if (token.length > 20) continue;
+    return token;
+  }
+  return undefined;
+}
+
+const SUBJECT_SIGNALS: ReadonlyArray<readonly [Classification["subject"], readonly string[]]> = [
+  ["audio", ["hear", "loud", "mic", "sound", "audio", "volume"]],
+  ["visual", ["see", "look", "visible", "read", "screen", "stream quality"]],
+  ["presence", ["anyone here", "anybody here", "still there", "you there", "chat alive", "alive"]],
+];
+
+/** Which answerable thing a question is about, if any. */
+function extractSubject(lower: string): Classification["subject"] {
+  // Presence first: "you still there" contains no audio or visual word, but
+  // "can you hear me" would match presence's "there" if that ran later.
+  for (const [subject, needles] of SUBJECT_SIGNALS) {
+    if (subject !== "presence") continue;
+    if (needles.some((n) => lower.includes(n))) return subject;
+  }
+  for (const [subject, needles] of SUBJECT_SIGNALS) {
+    if (subject === "presence") continue;
+    if (countMatches(lower, needles) > 0) return subject;
+  }
+  return undefined;
 }
 
 function scoreSentiment(text: string): { sentiment: Sentiment; magnitude: number } {
@@ -245,6 +337,18 @@ export function classify(
     }
   }
 
+  /**
+   * An explicit instruction outranks whatever else matched.
+   *
+   * "chat say hello" scores for both `greeting` and `directive`, and the
+   * greeting reading is wrong — chat has been told to do something, and
+   * answering with "hi" instead of "hello" misses the point entirely.
+   */
+  if (isDirective(raw)) {
+    bestIntent = "directive";
+    bestScore = Math.max(bestScore, 2);
+  }
+
   // A trailing "?" is strong evidence chat is being addressed, but only if the
   // streamer didn't already land on a more specific intent.
   const endsWithQuestion = /\?\s*$/.test(raw);
@@ -292,11 +396,26 @@ export function classify(
     ),
   );
 
+  const directiveTarget =
+    bestIntent === "directive" ? extractDirectiveTarget(raw) : undefined;
+  const subject =
+    bestIntent === "question_to_chat" ? extractSubject(lower) : undefined;
+
   return {
     intent: bestIntent,
     sentiment,
     energy,
     keywords: extractKeywords(raw),
-    confidence,
+    /**
+     * An explicit instruction is not a guess.
+     *
+     * Directives are short — "spam W" is two words — so the density formula
+     * scores them low even though the match is unambiguous. Confidence feeds
+     * the attention gate and the AI tier, and treating a clear command as a
+     * coin flip is what let these fall through to filler.
+     */
+    confidence: bestIntent === "directive" ? Math.max(confidence, 0.9) : confidence,
+    directiveTarget,
+    subject,
   };
 }

@@ -1063,33 +1063,45 @@ describe("continuous chat motion", () => {
     }
 
     let emptySeconds = 0;
+    let run = 0;
+    let longestSilence = 0;
     for (let sec = 0; sec < Math.floor(durationMs / 1000); sec += 1) {
-      if ((perSecond.get(sec) ?? 0) === 0) emptySeconds += 1;
+      if ((perSecond.get(sec) ?? 0) === 0) {
+        emptySeconds += 1;
+        run += 1;
+        longestSilence = Math.max(longestSilence, run);
+      } else {
+        run = 0;
+      }
     }
-    return { total, emptySeconds };
+    return { total, emptySeconds, longestSilence };
   }
 
   /**
-   * Asserted on dead air rather than message count. The bug was not that too
-   * few messages arrived overall — it was that they arrived in clusters with
-   * long stillness between, which reads as frozen no matter what the
-   * per-minute figure says.
+   * Asserted on the longest unbroken silence, not on total empty seconds.
+   *
+   * Counting empty seconds turned out to measure the wrong thing once chat
+   * started bursting properly: messages cluster inside a single second, so a
+   * lively session with strong bursts and normal gaps scores similarly to a
+   * dead one. What actually reads as frozen is a long stretch with nothing at
+   * all — and chat is *supposed* to burst on speech and taper afterwards.
    */
   it("keeps moving while the streamer talks continuously", () => {
-    const { total, emptySeconds } = motion(8_000);
+    const { total, longestSilence } = motion(8_000);
     expect(total).toBeGreaterThan(45);
-    expect(emptySeconds).toBeLessThan(35);
+    expect(longestSilence).toBeLessThan(7);
   });
 
   it("keeps moving when the streamer talks quickly", () => {
-    const { total, emptySeconds } = motion(5_000);
+    const { total, longestSilence } = motion(5_000);
     expect(total).toBeGreaterThan(45);
-    expect(emptySeconds).toBeLessThan(35);
+    expect(longestSilence).toBeLessThan(7);
   });
 
   it("still fills silence", () => {
-    const { total } = motion(999_000);
+    const { total, longestSilence } = motion(999_000);
     expect(total).toBeGreaterThan(40);
+    expect(longestSilence).toBeLessThan(9);
   });
 });
 
@@ -1128,5 +1140,84 @@ describe("message ids", () => {
 
     expect(seen.size).toBeGreaterThan(50);
     expect(duplicates).toEqual([]);
+  });
+});
+
+/**
+ * Regression: chat could not tell an instruction from background talk.
+ *
+ * "spam W", "chat can you hear me" and "everyone say pog" all classified as
+ * `mundane` at 0.15 confidence and produced byte-identical filler — "?", "hm",
+ * "just got here", "real". The streamer was talking directly to chat and chat
+ * answered with noise.
+ */
+describe("chat does as it is told", () => {
+  /**
+   * Messages released while the burst is actually landing.
+   *
+   * Bounded at 8s on purpose: compliance means the room answering the
+   * instruction, not every message for the rest of the session. Counting
+   * ambient chatter thirty seconds later would measure the wrong thing.
+   */
+  function say(text: string, seed = 12, windowMs = 8_000) {
+    const engine = make({ audienceSize: 45, aiShare: 0 }, seed);
+    engine.handleTranscript(text, 1_000);
+    const out: string[] = [];
+    for (let t = 1_000; t <= 1_000 + windowMs; t += 250) {
+      for (const m of engine.tick(t)) out.push(m.text);
+    }
+    return out;
+  }
+
+  it("spams what it was told to spam", () => {
+    const out = say("spam W");
+    const complying = out.filter((line) => /\bW\b/.test(line));
+    expect(out.length).toBeGreaterThan(6);
+    expect(complying.length / out.length).toBeGreaterThan(0.5);
+  });
+
+  it("actually repeats the token rather than mentioning it once", () => {
+    const out = say("spam W");
+    expect(out.some((line) => /\bW(\s+W){2,}/.test(line))).toBe(true);
+  });
+
+  it("says the word it was asked to say", () => {
+    const out = say("everyone say pog");
+    expect(out.filter((l) => /pog/i.test(l)).length / out.length).toBeGreaterThan(0.5);
+  });
+
+  it("picks a real emote when told to spam 'the emote'", () => {
+    const out = say("spam the emote");
+    // Never the literal word — chat posting "emote emote emote" is the bug.
+    expect(out.some((l) => /\bemote\b/i.test(l))).toBe(false);
+    expect(out.length).toBeGreaterThan(4);
+  });
+
+  it("does not comply in perfect unison", () => {
+    // A room where every single person obeys identically reads as scripted.
+    const out = say("spam W");
+    expect(out.some((line) => !/\bW\b/.test(line))).toBe(true);
+  });
+
+  it.each([
+    "chat can you hear me",
+    "can you guys hear me",
+    "is my mic working",
+  ])("answers %j instead of muttering", (text) => {
+    const out = say(text).map((l) => l.toLowerCase());
+    const answered = out.some((l) =>
+      /\b(yes|yeah|yep|hear you|loud and clear|audio|mic|sounds good|clear|quiet|all good|o7)\b/.test(l),
+    );
+    expect(answered).toBe(true);
+  });
+
+  it("answers a visual check", () => {
+    const out = say("can you see my screen").map((l) => l.toLowerCase());
+    expect(out.some((l) => /\b(yes|yep|see it|looks good|clear|blurry|small|all good)\b/.test(l))).toBe(true);
+  });
+
+  it("answers when asked if anyone is there", () => {
+    const out = say("is anyone here").map((l) => l.toLowerCase());
+    expect(out.some((l) => /\b(here|o\/|always|lurking|watching|yes)\b/.test(l))).toBe(true);
   });
 });

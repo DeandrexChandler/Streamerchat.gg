@@ -22,6 +22,7 @@ import type { Rng } from "./rng";
  */
 const BASE_ATTENTION: Record<Intent, number> = {
   question_to_chat: 1.0, // directly addressed — always
+  directive: 1.0, // an instruction to chat — ignoring it reads as broken
   greeting: 0.95,
   farewell: 0.95,
   achievement: 0.85,
@@ -76,7 +77,12 @@ export function shouldReact(
   rng: Rng,
 ): boolean {
   // Never ignore a direct question, regardless of fatigue.
-  if (classification.intent === "question_to_chat") return true;
+  if (
+    classification.intent === "question_to_chat" ||
+    classification.intent === "directive"
+  ) {
+    return true;
+  }
 
   // Said again right after being ignored — it did not land. Answered before
   // anything else can damp it.
