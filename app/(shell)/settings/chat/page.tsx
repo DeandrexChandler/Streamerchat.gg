@@ -168,10 +168,8 @@ export default function ChatSettingsPage() {
               }
               className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
             >
-              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-              <option value="gemini-2.5-flash-lite">
-                Gemini 2.5 Flash-Lite (cheaper)
-              </option>
+              <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+              <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
             </select>
           </Field>
         </CardContent>

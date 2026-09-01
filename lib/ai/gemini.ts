@@ -19,7 +19,13 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 /** Long enough for a batch, short enough that a hang doesn't stall a refill. */
 const TIMEOUT_MS = 12_000;
 
-export const DEFAULT_MODEL = "gemini-2.5-flash";
+/**
+ * The 2.5 family is closed to new API keys — both `gemini-2.5-flash` and
+ * `gemini-2.5-flash-lite` return 404 with "no longer available to new users",
+ * even though the public pricing page still lists them for existing ones.
+ * Verified against a fresh key, which is the only way to find this out.
+ */
+export const DEFAULT_MODEL = "gemini-3.6-flash";
 
 export interface GeminiOptions {
   apiKey: string;
@@ -49,8 +55,30 @@ export function parseLines(text: string): string[] {
         return parsed.filter((v): v is string => typeof v === "string");
       }
     } catch {
-      // Fall through to newline splitting.
+      // Malformed but bracketed — salvage below rather than newline-splitting.
     }
+  }
+
+  /**
+   * A bracket with no valid parse means the array was cut off — these models
+   * spend output tokens on reasoning first, so a tight cap truncates the
+   * answer mid-string.
+   *
+   * Complete string literals are recovered and the trailing fragment dropped.
+   * Newline-splitting here instead would turn `[` and `"gg",` into chat
+   * messages, and both are short and inoffensive enough to pass validation.
+   */
+  if (start !== -1) {
+    const salvaged: string[] = [];
+    for (const match of trimmed.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+      try {
+        const value: unknown = JSON.parse(`"${match[1]}"`);
+        if (typeof value === "string" && value.length > 0) salvaged.push(value);
+      } catch {
+        // Not a decodable literal; skip it.
+      }
+    }
+    return salvaged;
   }
 
   return trimmed
@@ -88,7 +116,21 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
                 // phrasings a lookup table would never contain.
                 temperature: 1.1,
                 topP: 0.95,
-                maxOutputTokens: 400,
+                /**
+                 * Generous because reasoning is billed and counted as output.
+                 * At 400 the model spent 381 tokens thinking and emitted 15,
+                 * truncating the JSON mid-string. Twelve short chat lines need
+                 * well under 200; the headroom exists so a verbose run degrades
+                 * to a smaller batch rather than to salvaged fragments.
+                 */
+                maxOutputTokens: 2000,
+                /**
+                 * Writing six-word chat messages needs no deliberation, and
+                 * thinking tokens are billed at the output rate — 515 of them
+                 * against 78 real tokens in one measured call. LOW removes them
+                 * entirely (`thoughtsTokenCount` disappears from the response).
+                 */
+                thinkingConfig: { thinkingLevel: "LOW" },
                 responseMimeType: "application/json",
               },
             }),
