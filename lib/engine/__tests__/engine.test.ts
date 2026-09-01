@@ -1092,3 +1092,41 @@ describe("continuous chat motion", () => {
     expect(total).toBeGreaterThan(40);
   });
 });
+
+/**
+ * Regression: React logged "two children with the same key" during real use.
+ *
+ * Idle message ids were `i${now}-${speakerId}` with no per-attempt index,
+ * unlike the reaction path which already carried one. That was survivable
+ * while idle fired at most once per poll — raising the background flow rate
+ * made same-tick collisions from one speaker routine, and duplicate keys make
+ * React duplicate or omit messages outright.
+ */
+describe("message ids", () => {
+  it("never repeats an id across a session", () => {
+    const engine = make({ audienceSize: 45, chatSpeed: 4, aiShare: 0 }, 77);
+    const talk = [
+      "okay so let me get this set up",
+      "this is kinda sick actually",
+      "so what do you guys think",
+      "alright moving on",
+    ];
+
+    const seen = new Set<string>();
+    const duplicates: string[] = [];
+    let spoken = 0;
+
+    for (let t = 0; t <= 120_000; t += 250) {
+      if (spoken < talk.length && t >= (spoken + 1) * 9_000) {
+        engine.handleTranscript(talk[spoken++], t);
+      }
+      for (const message of engine.tick(t)) {
+        if (seen.has(message.id)) duplicates.push(message.id);
+        seen.add(message.id);
+      }
+    }
+
+    expect(seen.size).toBeGreaterThan(50);
+    expect(duplicates).toEqual([]);
+  });
+});

@@ -471,6 +471,7 @@ export class SimulationEngine {
     for (let i = 0; i < attempts; i++) {
       const idle = directIdle({
         silentMs,
+        attempt: i,
         population: this.population,
         settings: this.settings,
         emotes: this.emotes,

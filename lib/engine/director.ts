@@ -413,6 +413,14 @@ function idlePoolFor(silentMs: number): readonly ResponseEntry[] {
 
 export interface IdleOptions {
   silentMs: number;
+  /**
+   * Attempt index within this poll.
+   *
+   * Part of the message id. Several idle messages can be produced in one tick
+   * and the same viewer can be picked twice, so without this two messages
+   * share an id — which React turns into duplicated or omitted chat lines.
+   */
+  attempt?: number;
   population: Population;
   settings: SimulationSettings;
   emotes: readonly Emote[];
@@ -554,7 +562,7 @@ export function directIdle(options: IdleOptions): IdleResult | null {
   return {
     template,
     message: {
-      id: `i${now}-${speaker.id}`,
+      id: `i${now}-${options.attempt ?? 0}-${speaker.id}`,
       viewerId: speaker.id,
       username: speaker.name,
       color: speaker.color,
