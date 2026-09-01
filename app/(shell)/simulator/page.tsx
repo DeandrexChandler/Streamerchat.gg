@@ -80,10 +80,25 @@ function Simulator() {
       />
       </div>
 
-      {/* Chat column — deliberately a fixed 384px, never flex-1. */}
-      <div className="flex h-full w-96 flex-col overflow-hidden rounded-lg border border-gray-300 bg-[#18181b] shadow-sm dark:border-gray-700">
+      {/*
+        Chat column — deliberately a fixed 384px in the normal layout, never
+        flex-1. That shape is the product.
+
+        Fullscreen is the one exception, and it is deliberate: "fullscreen"
+        that leaves a narrow card floating in the middle of a black screen is
+        not fullscreen. The `chat-only` class drops the width, the rounding and
+        the border so it actually fills the display.
+      */}
+      <div
+        data-chat-column
+        className="flex h-full w-96 flex-col overflow-hidden rounded-lg border border-gray-300 bg-[#18181b] shadow-sm dark:border-gray-700"
+      >
         <header className="flex flex-shrink-0 items-center justify-between border-b border-gray-700 bg-[#1f1f23] p-3">
           <h2 className="text-sm font-semibold text-white">StreamerChat.gg</h2>
+          {/* Status and the fullscreen control are one cluster: both describe
+              the state of this view, and splitting them across the header
+              read as two unrelated widgets. */}
+          <div className="flex items-center gap-2">
           <StatusPill status={status} />
           <button
             onClick={() => void toggleChatOnly()}
@@ -97,6 +112,7 @@ function Simulator() {
               <Maximize2 className="size-3.5" />
             )}
           </button>
+          </div>
         </header>
 
         {simulator.error && (

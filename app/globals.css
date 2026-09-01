@@ -345,5 +345,17 @@ body.chat-only [data-app-content] > header {
   display: none;
 }
 body.chat-only [data-app-content] > main {
-  padding: 0.75rem;
+  /* Edge to edge. Any padding here shows the page background as a frame,
+     which is the rectangular card this mode exists to escape. */
+  padding: 0;
+}
+
+/* Fullscreen chat breaks the fixed-width card and fills the display. A narrow
+   column floating in the middle of a black screen is not fullscreen. */
+body.chat-only [data-chat-column] {
+  width: 100%;
+  max-width: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
