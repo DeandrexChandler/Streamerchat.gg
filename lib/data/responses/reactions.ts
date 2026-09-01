@@ -52,6 +52,12 @@ export const REACTIONS: ResponsePool = {
   ],
 
   excitement: [
+    { text: "sheeeesh", length: "tiny", tags: ["hype"] },
+    { text: "nah that's actually crazy", length: "medium", tags: ["hype"] },
+    { text: "he's cracked", length: "short", tags: ["hype"] },
+    { text: "that was so clean", length: "short", tags: ["hype"] },
+    { text: "chat did you see that", length: "medium", tags: ["hype"] },
+    { text: "lowkey goated", length: "short", tags: ["hype"] },
     { text: "okay i genuinely did not think that was going to work", length: "long", tags: ["conversational"] },
     { text: "everyone in chat just made the same noise i think", length: "long", tags: ["joke", "conversational"] },
     { text: "LETS GO", length: "tiny", tags: ["hype", "caps", "short"] },
@@ -70,6 +76,12 @@ export const REACTIONS: ResponsePool = {
   ],
 
   struggle: [
+    { text: "unlucky fr", length: "short", tags: ["warm"] },
+    { text: "that was brutal", length: "short", tags: ["warm"] },
+    { text: "we go again", length: "short", tags: ["warm"] },
+    { text: "the game is griefing him", length: "medium", tags: ["joke"] },
+    { text: "not the lag", length: "short", tags: ["joke"] },
+    { text: "it's so over", length: "short", tags: [] },
     { text: "for what it's worth i have done that exact thing twice today", length: "long", tags: ["warm", "joke"] },
     { text: "honestly the fact that you're still going is impressive to me", length: "long", tags: ["warm"] },
     { text: "you got this", length: "short", tags: ["warm"] },
@@ -88,6 +100,9 @@ export const REACTIONS: ResponsePool = {
   ],
 
   achievement: [
+    { text: "he cooked", length: "short", tags: ["hype"] },
+    { text: "we are so back", length: "short", tags: ["hype"] },
+    { text: "called it", length: "tiny", tags: [] },
     { text: "{streamer} carrying as always", length: "short", weight: 3, tags: ["warm"] },
     { text: "LETS GOOO {streamer}", length: "short", weight: 3, tags: ["hype"] },
     { text: "LETS GOOO", length: "short", tags: ["hype", "caps"] },
@@ -119,6 +134,9 @@ export const REACTIONS: ResponsePool = {
   ],
 
   confusion: [
+    { text: "what is going on", length: "medium", tags: ["question"] },
+    { text: "chat explain", length: "short", tags: ["question"] },
+    { text: "I'm so lost ngl", length: "medium", tags: [] },
     { text: "same", length: "tiny", tags: ["short"] },
     { text: "i'm equally lost", length: "short", tags: ["conversational"] },
     { text: "wait what", length: "short", tags: ["short"] },

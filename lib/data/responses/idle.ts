@@ -11,6 +11,8 @@ import type { ResponseEntry } from "../../engine/types";
 
 /** ~10-25s of silence. Chat barely notices yet. */
 export const IDLE_SETTLING: readonly ResponseEntry[] = [
+  { text: "chat fell off", length: "short", tags: ["joke"] },
+  { text: "it's so quiet", length: "short", tags: [] },
   { text: "hm", length: "tiny", tags: ["short"] },
   { text: "o/", length: "tiny", tags: ["short", "emote"] },
   { text: "how's everyone doing", length: "medium", tags: ["warm", "question"] },
@@ -43,6 +45,8 @@ export const IDLE_NOTICING: readonly ResponseEntry[] = [
 
 /** 60s+. Chat has fully given up and is entertaining itself. */
 export const IDLE_RESTLESS: readonly ResponseEntry[] = [
+  { text: "chat is cooked", length: "short", tags: ["joke"] },
+  { text: "we're all just vibing", length: "medium", tags: [] },
   { text: "chat what are we having for dinner", length: "long", tags: ["conversational", "question"] },
   { text: "anyone else just staring at the screen", length: "long", tags: ["conversational"] },
   { text: "i've been here 10 minutes and heard nothing", length: "long", tags: ["joke"] },

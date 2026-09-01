@@ -113,3 +113,48 @@ describe("classify", () => {
     expect(classify("chat what do you think").confidence).toBeGreaterThan(0.6);
   });
 });
+
+/**
+ * The vocabulary was entirely formal English, so most of how people actually
+ * talk scored zero and fell through to `mundane` with a 0.15 confidence. That
+ * was the upstream half of chat ignoring almost everything: the gate never got
+ * a chance, because the intent was already wrong.
+ */
+describe("understands how people actually talk", () => {
+  it.each([
+    ["this is kinda sick actually", "excitement"],
+    ["yo that was clutch", "excitement"],
+    ["that goes hard", "excitement"],
+    ["okay that's actually fire", "excitement"],
+    ["nah that's crazy", "excitement"],
+    ["bro we are so cooked", "struggle"],
+    ["man this is taking forever", "struggle"],
+    ["I'm washed at this game", "struggle"],
+    ["that was rough ngl", "struggle"],
+    ["wait huh", "confusion"],
+    ["yeah I dunno man", "confusion"],
+    ["ayo what", "confusion"],
+  ])("classifies %j as %s", (text, intent) => {
+    expect(classify(text, {}).intent).toBe(intent);
+  });
+
+  it.each([
+    ["that was so clean", "positive"],
+    ["absolute banger", "positive"],
+    ["this is mid", "negative"],
+    ["we got clapped", "negative"],
+  ])("reads %j as %s", (text, sentiment) => {
+    expect(classify(text, {}).sentiment).toBe(sentiment);
+  });
+
+  it("is more confident about slang than it was about nothing", () => {
+    // A zero-signal utterance sits at 0.15. Recognising slang has to beat it,
+    // or the attention gate treats a clear reaction as background noise.
+    expect(classify("that was clutch", {}).confidence).toBeGreaterThan(0.3);
+  });
+
+  it("does not mistake plain difficulty for praise", () => {
+    // "hard" alone is struggle; only "goes hard" is a compliment.
+    expect(classify("this part is really hard", {}).intent).not.toBe("excitement");
+  });
+});

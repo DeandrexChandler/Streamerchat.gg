@@ -32,6 +32,11 @@ const INTENT_SIGNALS: Readonly<Record<Intent, readonly string[]>> = {
     "let's go", "lets go", "no way", "oh my", "insane", "crazy", "unreal",
     "amazing", "incredible", "holy", "yes yes", "wow", "look at that",
     "that was sick", "so good", "beautiful",
+    // Slang. "goes hard" is a phrase on purpose — bare "hard" is difficulty,
+    // which belongs to struggle.
+    "sick", "clutch", "goes hard", "went hard", "fire", "banger", "goated",
+    "cracked", "no shot", "sheesh", "actual cinema", "cinema", "clean",
+    "nuts", "peak", "bussin", "cold", "dub", "ez clap", "poggers", "lets goo",
   ],
   struggle: [
     "come on", "why", "are you kidding", "seriously", "this is impossible",
@@ -40,6 +45,10 @@ const INTENT_SIGNALS: Readonly<Record<Intent, readonly string[]>> = {
     "im dying", "so bad at this", "messed up", "ugh", "oh no", "no no",
     "you're kidding", "youre kidding", "come onnn", "nooo", "dang it",
     "what the", "of course", "typical",
+    // Slang.
+    "cooked", "washed", "griefing", "throwing", "taking forever", "so rough",
+    "was rough", "brutal", "clapped", "unlucky", "pain", "diff", "trolling",
+    "bruh", "why is this", "not again man", "im done", "i'm done",
   ],
   achievement: [
     "got it", "finally", "did it", "made it", "beat it", "we did it",
@@ -50,6 +59,9 @@ const INTENT_SIGNALS: Readonly<Record<Intent, readonly string[]>> = {
     "i don't know", "i dont know", "no idea", "what is", "how do i",
     "how does", "confused", "wait what", "hold on", "i'm lost", "im lost",
     "does this", "what happened", "not sure", "hmm",
+    // Slang and verbal shrugs.
+    "huh", "dunno", "no clue", "wdym", "ayo", "wait wait", "what is going on",
+    "im lost", "run that back", "come again",
   ],
   showing: [
     "look at", "check this", "check it out", "see this", "take a look",
@@ -68,12 +80,18 @@ const POSITIVE_WORDS = [
   "good", "great", "nice", "love", "happy", "fun", "cool", "awesome",
   "beautiful", "perfect", "amazing", "yes", "thanks", "cozy", "chill",
   "excited", "wonderful", "glad", "enjoy", "pretty", "sweet", "best",
+  // Slang praise.
+  "sick", "fire", "clean", "goated", "cracked", "clutch", "dub", "banger",
+  "peak", "elite", "valid", "based", "bussin", "insane", "nuts", "cinema",
 ];
 
 const NEGATIVE_WORDS = [
   "bad", "hate", "awful", "terrible", "annoying", "angry", "sad", "worst",
   "broken", "stupid", "boring", "tired", "sorry", "wrong", "fail", "ugh",
   "can't", "cant", "no", "never", "hard", "difficult", "stuck",
+  // Slang complaints.
+  "cooked", "washed", "mid", "trash", "rough", "brutal", "clapped", "cringe",
+  "ass", "garbage", "unlucky", "pain", "griefing",
 ];
 
 /** Words too common to be useful as template slots. */

@@ -107,6 +107,10 @@ export class SimulationEngine {
   private readonly aiBudget: AiBudget;
 
   private previousIntent: Classification["intent"] | undefined;
+  /** Normalised previous utterance, for detecting a literal repeat. */
+  private previousText = "";
+  /** Whether chat ignored that previous utterance. */
+  private previousWasIgnored = false;
   /** Live viewer count. Drifts around audienceSize — see updateViewerCount(). */
   private viewerCount = 0;
   private lastViewerDriftAt = 0;
@@ -203,19 +207,46 @@ export class SimulationEngine {
     const repeatsPrevious = this.previousIntent === classification.intent;
     this.previousIntent = classification.intent;
 
+    /**
+     * Did the streamer repeat something chat just ignored?
+     *
+     * Only that combination forces a reaction. Repeating a sentence over and
+     * over is not a signal, and would otherwise let one phrase guarantee a
+     * response every time — but saying it again straight after silence is
+     * almost always because it did not land.
+     *
+     * Compared on normalised words: a speech recogniser will not punctuate the
+     * same sentence identically twice, so "wait, what?" and "wait what" have
+     * to count as the same utterance.
+     */
+    const normalised = normaliseUtterance(text);
+    const repeatedAfterIgnore =
+      normalised.length > 0 &&
+      normalised === this.previousText &&
+      this.previousWasIgnored;
+    this.previousText = normalised;
+
     // Chat is allowed to simply not care. Reacting to every single utterance
     // is what makes generated chat feel relentless and attention-seeking —
     // real chat ignores most background talk and answers what's aimed at it.
     if (
       !shouldReact(
         classification,
-        { recentVolume: this.recentVolume(now), repeatsPrevious },
+        {
+          recentVolume: this.recentVolume(now),
+          repeatsPrevious,
+          repeatedAfterIgnore,
+        },
         this.rng,
       )
     ) {
       this.ignoredCount++;
+      // Remembered so that saying the same thing again forces an answer.
+      this.previousWasIgnored = true;
       return { classification, reacted: false, queued: 0 };
     }
+
+    this.previousWasIgnored = false;
 
     const { messages, templates } = directReaction({
       classification,
@@ -482,4 +513,19 @@ export class SimulationEngine {
       bySource: { ...this.sourceCounts },
     };
   }
+}
+
+/**
+ * Reduces an utterance to comparable words.
+ *
+ * Punctuation and casing are stripped because a speech recogniser does not
+ * emit them consistently — the same sentence said twice can arrive as "wait,
+ * what?" and "wait what", which must count as a repeat.
+ */
+function normaliseUtterance(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }

@@ -627,7 +627,17 @@ describe("SimulationEngine AI spend", () => {
 
     const slow = refillsAt(1);
     const fast = refillsAt(12);
-    expect(fast).toBeLessThanOrEqual(slow + 1);
+
+    /**
+     * A ratio, not `slow + 1`.
+     *
+     * If spend ever tracked message volume, 12x speed would produce roughly
+     * 13x the refills — so a 1.5x band catches the failure this test exists
+     * for with enormous margin. The old absolute tolerance was a +/-5% band on
+     * a stochastic simulation, which made it a flake detector rather than an
+     * invariant check.
+     */
+    expect(fast).toBeLessThan(Math.max(4, slow * 1.5));
   });
 
   it("stops asking for refills once the budget is exhausted", () => {
@@ -846,7 +856,17 @@ describe("SimulationEngine AI spend", () => {
 
     const slow = refillsAt(1);
     const fast = refillsAt(12);
-    expect(fast).toBeLessThanOrEqual(slow + 1);
+
+    /**
+     * A ratio, not `slow + 1`.
+     *
+     * If spend ever tracked message volume, 12x speed would produce roughly
+     * 13x the refills — so a 1.5x band catches the failure this test exists
+     * for with enormous margin. The old absolute tolerance was a +/-5% band on
+     * a stochastic simulation, which made it a flake detector rather than an
+     * invariant check.
+     */
+    expect(fast).toBeLessThan(Math.max(4, slow * 1.5));
   });
 
   it("stops asking for refills once the budget is exhausted", () => {

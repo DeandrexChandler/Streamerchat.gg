@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { repairSlang } from "@/lib/transcription/slang";
 
 /**
  * Whisper transcription — the *fallback* path.
@@ -97,7 +98,9 @@ export async function POST(request: NextRequest) {
     }
 
     const { text } = (await res.json()) as { text?: string };
-    return NextResponse.json({ text: text?.trim() ?? "" });
+    // Same repair the Web Speech path applies — Whisper mishears slang too,
+    // and the classifier matches on words.
+    return NextResponse.json({ text: repairSlang(text?.trim() ?? "") });
   } catch (error) {
     console.error("Transcription request failed:", error);
     return NextResponse.json(

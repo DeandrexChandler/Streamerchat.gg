@@ -17,6 +17,17 @@ import type { ResponseEntry, Sentiment } from "../../engine/types";
  */
 
 const POSITIVE: readonly ResponseEntry[] = [
+  { text: "sheesh", weight: 3, length: "tiny", tags: ["short", "hype"] },
+  { text: "clean", weight: 2, length: "tiny", tags: ["short", "hype"] },
+  { text: "goated", weight: 2, length: "tiny", tags: ["short", "hype"] },
+  { text: "peak", weight: 2, length: "tiny", tags: ["short", "hype"] },
+  { text: "he cooked", weight: 2, length: "short", tags: ["short", "hype"] },
+  { text: "that's cracked", weight: 2, length: "short", tags: ["hype"] },
+  { text: "actual cinema", weight: 2, length: "short", tags: ["hype"] },
+  { text: "nah that's fire", weight: 2, length: "short", tags: ["hype"] },
+  { text: "lowkey insane", weight: 2, length: "short", tags: ["hype"] },
+  { text: "no shot", weight: 2, length: "tiny", tags: ["short"] },
+  { text: "chat we won", weight: 1, length: "short", tags: ["hype"] },
   { text: "W", weight: 3, length: "tiny", tags: ["short", "hype"] },
   { text: "LOL", weight: 3, length: "tiny", tags: ["short", "joke"] },
   { text: "LMAO", weight: 2, length: "tiny", tags: ["short", "joke"] },
@@ -47,6 +58,14 @@ const POSITIVE: readonly ResponseEntry[] = [
 
 const NEGATIVE: readonly ResponseEntry[] = [
   { text: "oof", weight: 3, length: "tiny", tags: ["short"] },
+  { text: "brutal", weight: 2, length: "tiny", tags: ["short"] },
+  { text: "unlucky", weight: 2, length: "tiny", tags: ["short"] },
+  { text: "we cooked", weight: 2, length: "short", tags: ["short"] },
+  { text: "it's so over", weight: 2, length: "short", tags: [] },
+  { text: "pain", weight: 2, length: "tiny", tags: ["short"] },
+  { text: "not like this", weight: 1, length: "short", tags: [] },
+  { text: "we go again", weight: 2, length: "short", tags: [] },
+  { text: "oof", weight: 3, length: "tiny", tags: ["short"] },
   { text: "rip", weight: 2, length: "tiny", tags: ["short"] },
   { text: "nooo", weight: 2, length: "tiny", tags: ["short"] },
   { text: "pain", weight: 2, length: "tiny", tags: ["short"] },
@@ -65,6 +84,14 @@ const NEGATIVE: readonly ResponseEntry[] = [
 ];
 
 const NEUTRAL: readonly ResponseEntry[] = [
+  { text: "fr", weight: 3, length: "tiny", tags: ["short"] },
+  { text: "real", weight: 3, length: "tiny", tags: ["short"] },
+  { text: "bet", weight: 2, length: "tiny", tags: ["short"] },
+  { text: "valid", weight: 2, length: "tiny", tags: ["short"] },
+  { text: "bruh", weight: 2, length: "tiny", tags: ["short"] },
+  { text: "ngl same", weight: 2, length: "short", tags: [] },
+  { text: "deadass", weight: 1, length: "tiny", tags: ["short"] },
+  { text: "chat is silent", weight: 1, length: "short", tags: ["joke"] },
   { text: "yeah", weight: 3, length: "tiny", tags: ["short"] },
   { text: "hm", weight: 3, length: "tiny", tags: ["short"] },
   { text: "mm", weight: 2, length: "tiny", tags: ["short"] },

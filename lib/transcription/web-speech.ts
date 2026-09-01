@@ -1,4 +1,5 @@
 import { Emitter } from "../audio/emitter";
+import { repairSlang } from "./slang";
 import {
   isLikelyArtefact,
   type TranscriptionEvents,
@@ -132,7 +133,10 @@ export class WebSpeechProvider implements TranscriptionProvider {
         if (!text) continue;
 
         if (result.isFinal) {
-          const trimmed = text.trim();
+          // Repaired before anything downstream sees it: the classifier
+          // matches on words, so a mistranscribed "low key" silently becomes
+          // chat ignoring you.
+          const trimmed = repairSlang(text.trim());
           if (isLikelyArtefact(trimmed)) continue;
           // Real speech means the connection is healthy — reset the backoff.
           this.restartDelay = MIN_RESTART_DELAY_MS;

@@ -25,7 +25,7 @@ const viewer = (patch: Partial<Viewer> = {}): Viewer => ({
   ...patch,
 });
 
-const quiet = { recentVolume: 0, repeatsPrevious: false };
+const quiet = { recentVolume: 0, repeatsPrevious: false, repeatedAfterIgnore: false };
 
 /** Fraction of trials in which chat decides to react. */
 function reactionRate(
@@ -55,16 +55,26 @@ describe("shouldReact", () => {
       reactionRate(classification({ intent: "question_to_chat" }), {
         recentVolume: 500,
         repeatsPrevious: true,
+        repeatedAfterIgnore: false,
       }),
     ).toBe(1);
   });
 
-  it("mostly ignores low-signal background talk", () => {
-    // "okay so anyway I'm just gonna do the roof" deserves silence.
+  it("shows some restraint on low-signal background talk", () => {
+    /**
+     * This used to assert < 0.3, which turned out to encode a bug rather than
+     * a preference: `mundane` is around 60% of natural speech, so a 30% cap
+     * here set the response rate for the entire product and chat ignored most
+     * of what was said to it.
+     *
+     * Restraint still matters — chat reacting to literally every sentence is
+     * the other failure mode — so this asserts a band rather than a ceiling.
+     */
     const rate = reactionRate(
       classification({ intent: "mundane", confidence: 0.15, energy: 0.15 }),
     );
-    expect(rate).toBeLessThan(0.3);
+    expect(rate).toBeGreaterThan(0.35);
+    expect(rate).toBeLessThan(0.8);
   });
 
   it("reliably reacts to the streamer struggling", () => {
@@ -100,6 +110,7 @@ describe("shouldReact", () => {
     const repeat = reactionRate(classification({ intent: "story", energy: 0.2 }), {
       recentVolume: 0,
       repeatsPrevious: true,
+      repeatedAfterIgnore: false,
     });
     expect(repeat).toBeLessThan(fresh);
   });
@@ -108,14 +119,14 @@ describe("shouldReact", () => {
     // Saying "oh no. oh no no no" twice is escalation, not repetition.
     const c = classification({ intent: "struggle", energy: 0.9, confidence: 0.9 });
     const fresh = reactionRate(c);
-    const repeat = reactionRate(c, { recentVolume: 0, repeatsPrevious: true });
+    const repeat = reactionRate(c, { recentVolume: 0, repeatsPrevious: true, repeatedAfterIgnore: false });
     expect(repeat).toBeCloseTo(fresh, 1);
   });
 
   it("reacts less when chat has been busy", () => {
     const c = classification({ intent: "showing", confidence: 0.8 });
-    const rested = reactionRate(c, { recentVolume: 0, repeatsPrevious: false });
-    const tired = reactionRate(c, { recentVolume: 60, repeatsPrevious: false });
+    const rested = reactionRate(c, { recentVolume: 0, repeatsPrevious: false, repeatedAfterIgnore: false });
+    const tired = reactionRate(c, { recentVolume: 60, repeatsPrevious: false, repeatedAfterIgnore: false });
     expect(tired).toBeLessThan(rested);
   });
 
@@ -123,6 +134,7 @@ describe("shouldReact", () => {
     const rate = reactionRate(classification({ intent: "excitement", energy: 1 }), {
       recentVolume: 10_000,
       repeatsPrevious: true,
+      repeatedAfterIgnore: false,
     });
     expect(rate).toBeGreaterThan(0);
   });
@@ -180,5 +192,105 @@ describe("pickDepth", () => {
     const later = mix(viewer(), 0.3, 4);
     expect(first.ambient).toBeGreaterThan(later.ambient);
     expect(later.invested).toBeGreaterThan(first.invested);
+  });
+});
+
+/**
+ * Regression: chat used to ignore roughly three quarters of natural speech.
+ *
+ * Measured causes, all compounding:
+ *  - `mundane` had a 0.18 base while being ~60% of how people actually talk
+ *  - mundane was penalised twice, since its confidence is a fixed 0.15 and the
+ *    confidence multiplier then scaled it again
+ *  - `repeatsPrevious` matched on *intent*, so consecutive casual sentences —
+ *    the normal case — permanently applied a further 0.7x
+ *
+ * The product's whole premise is "talk normally and watch chat react", so a
+ * 28% response rate was a broken product, not tasteful restraint.
+ */
+describe("attention over natural speech", () => {
+  const NATURAL: Array<Partial<Classification>> = [
+    { intent: "mundane", confidence: 0.15, energy: 0.04 },
+    { intent: "mundane", confidence: 0.15, energy: 0.03 },
+    { intent: "mundane", confidence: 0.15, energy: 0.11 },
+    { intent: "mundane", confidence: 0.15, energy: 0.01 },
+    { intent: "mundane", confidence: 0.15, energy: 0.05 },
+    { intent: "confusion", confidence: 0.8, energy: 0.02 },
+    { intent: "excitement", confidence: 0.87, energy: 0.01 },
+    { intent: "achievement", confidence: 0.75, energy: 0.07 },
+    { intent: "struggle", confidence: 0.9, energy: 0.12 },
+    { intent: "showing", confidence: 0.95, energy: 0.05 },
+  ];
+
+  function rate(repeatsIntent: boolean, volume: number): number {
+    const rng = createRng(11);
+    let reacted = 0;
+    const runs = 40;
+    for (let i = 0; i < runs; i += 1) {
+      for (const patch of NATURAL) {
+        if (
+          shouldReact(
+            classification(patch),
+            { recentVolume: volume, repeatsPrevious: repeatsIntent, repeatedAfterIgnore: false },
+            rng,
+          )
+        ) {
+          reacted += 1;
+        }
+      }
+    }
+    return reacted / (runs * NATURAL.length);
+  }
+
+  it("reacts to most of what is said", () => {
+    expect(rate(false, 12)).toBeGreaterThan(0.6);
+  });
+
+  it("still holds up while chat is busy", () => {
+    expect(rate(false, 40)).toBeGreaterThan(0.45);
+  });
+
+  it("is not crushed by consecutive utterances sharing an intent", () => {
+    // Talking normally means several mundane sentences in a row. That must not
+    // read as "repeating yourself".
+    expect(rate(true, 12)).toBeGreaterThan(0.55);
+  });
+
+  it("still ignores some things — chat is not a metronome", () => {
+    expect(rate(false, 12)).toBeLessThan(0.95);
+  });
+});
+
+describe("repeating yourself", () => {
+  it("answers a repeat that followed silence", () => {
+    // Saying it again right after being ignored means it did not land.
+    // Treating that as less interesting is exactly backwards.
+    const rng = createRng(5);
+    let reacted = 0;
+    for (let i = 0; i < 200; i += 1) {
+      if (
+        shouldReact(
+          classification({ intent: "mundane", confidence: 0.15, energy: 0.03 }),
+          { recentVolume: 20, repeatsPrevious: true, repeatedAfterIgnore: true },
+          rng,
+        )
+      ) {
+        reacted += 1;
+      }
+    }
+    expect(reacted / 200).toBeGreaterThan(0.8);
+  });
+
+  it("a direct question is always answered", () => {
+    const rng = createRng(1);
+    for (let i = 0; i < 50; i += 1) {
+      expect(
+        shouldReact(
+          classification({ intent: "question_to_chat", confidence: 1 }),
+          { recentVolume: 200, repeatsPrevious: true, repeatedAfterIgnore: false },
+          rng,
+        ),
+      ).toBe(true);
+    }
   });
 });
