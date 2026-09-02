@@ -12,6 +12,14 @@ import {
   PRESENCE_ANSWERS,
   VISUAL_ANSWERS,
 } from "../data/responses/answers";
+import {
+  COMPOSED_AMBIENT,
+  COMPOSED_CALLBACK,
+  COMPOSED_CURIOUS,
+  COMPOSED_HYPE,
+  COMPOSED_LIGHT,
+  COMPOSED_STRUGGLE,
+} from "../data/composers";
 import type { SimulationSettings } from "../config/settings";
 import { pickDepth, type Depth } from "./attention";
 import {
@@ -357,7 +365,18 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
 
     const entries = replyTarget
       ? SIDE_REPLIES
-      : (answers ?? asides ?? entriesForTopic(topic, depth, classification, options.silentMs));
+      : (answers ??
+        asides ??
+        /**
+         * Depth decides whether this message is a reaction or a thought.
+         * `engaged` and `invested` draw on composed shapes, which is the only
+         * place messages longer than a few words come from.
+         */
+        (depth === "engaged" || depth === "invested"
+          ? composedFor(topic, stage)
+          : depth === "light"
+            ? COMPOSED_LIGHT
+            : entriesForTopic(topic, depth, classification, options.silentMs)));
 
     const result = generateFromPool(
       entries,
@@ -463,6 +482,38 @@ function classificationFor(topic: Topic | null): Classification {
 }
 
 /** Pool entries appropriate to a topic, falling back to ambient chatter. */
+/**
+ * Longer shapes appropriate to where a conversation is.
+ *
+ * Mixed into the pool rather than replacing it, so short reactions still
+ * happen — they are what a pile-on is made of. The point is that they stop
+ * being the only thing available.
+ */
+function composedFor(
+  topic: Topic | null,
+  stage: TopicStage,
+): readonly ResponseEntry[] {
+  if (!topic) return COMPOSED_AMBIENT;
+  // Late in a topic's life chat references it rather than reacting to it.
+  if (stage === "referencing") return COMPOSED_CALLBACK;
+
+  switch (topic.intent) {
+    case "achievement":
+    case "excitement":
+    case "directive":
+      return COMPOSED_HYPE;
+    case "struggle":
+    case "confusion":
+      return COMPOSED_STRUGGLE;
+    case "question_to_chat":
+    case "showing":
+    case "story":
+      return COMPOSED_CURIOUS;
+    default:
+      return COMPOSED_AMBIENT;
+  }
+}
+
 function entriesForTopic(
   topic: Topic | null,
   depth: Depth,

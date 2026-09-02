@@ -69,6 +69,20 @@ const REPEAT_WINDOW = 250;
  * Two rather than zero: a single straggler queued three seconds out is not
  * motion, and waiting for it leaves a visible gap.
  */
+/**
+ * Rate multiplier when nothing is happening.
+ *
+ * One, not a fraction. The setting is a baseline the room holds while quiet,
+ * and momentum adds on top — an earlier version floored this at 0.45 on the
+ * theory that busy stretches would average it back up, which measured out at
+ * 0.44x the configured rate across every setting. Sparse speech means most of
+ * a session is idle, so the idle multiplier *is* the long-run average.
+ */
+const RATE_FLOOR = 1;
+
+/** How hard live topics push the rate above that baseline. */
+const RATE_GAIN = 1.2;
+
 /** Constant pull toward off-topic chatter when picking a conversation. */
 const AMBIENT_WEIGHT = 0.35;
 
@@ -508,7 +522,7 @@ export class SimulationEngine {
    */
   private drawGap(now: number): number {
     const activity = Math.min(1.9, this.topics.activity(now));
-    const rate = this.settings.messagesPerSecond * (0.45 + 1.15 * activity);
+    const rate = this.settings.messagesPerSecond * (RATE_FLOOR + RATE_GAIN * activity);
     // 1 - next() so the draw is (0,1] and the logarithm is always finite.
     return (-Math.log(1 - this.rng.next()) / Math.max(0.05, rate)) * 1000;
   }

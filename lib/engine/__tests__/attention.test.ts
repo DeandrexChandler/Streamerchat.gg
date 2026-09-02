@@ -155,20 +155,37 @@ describe("pickDepth", () => {
     return counts;
   }
 
-  it("makes ambient the most common depth for a typical viewer", () => {
-    // Real chat is mostly emotes and single words, not a wall of statements.
+  /**
+   * These used to assert ambient dominance outright — the mix was 78% weighted
+   * to one-to-three words, which measured out as 77% of real output at three
+   * words or fewer and a mean of 2.5. That was the bias we set out to remove,
+   * so the assertions are now about balance rather than dominance.
+   *
+   * Short reactions are still the largest single bucket. They just no longer
+   * crowd everything else out of ordinary conversation.
+   */
+  it("keeps short reactions a major share without letting them dominate", () => {
     const result = mix(viewer());
-    expect(result.ambient).toBeGreaterThan(result.light);
-    expect(result.ambient).toBeGreaterThan(result.engaged);
+    // Still a big slice — a chat with no "W" or "LMAO" is not a chat.
+    expect(result.ambient).toBeGreaterThan(0.2);
+    // But no longer the whole picture: the requested shape has 4-7 word
+    // replies common and 8-12 very common, which cannot happen if short
+    // reactions outweigh everything else combined.
+    expect(result.ambient).toBeLessThan(result.light + result.engaged + result.invested);
     expect(result.ambient).toBeGreaterThan(result.invested);
   });
 
-  it("keeps full sentences rare", () => {
-    expect(mix(viewer()).invested).toBeLessThan(0.12);
+  it("leaves real replies as a substantial share, not a rounding error", () => {
+    const result = mix(viewer());
+    expect(result.engaged + result.invested).toBeGreaterThan(0.2);
   });
 
-  it("makes terse viewers almost entirely ambient", () => {
-    expect(mix(viewer({ verbosity: 0 })).ambient).toBeGreaterThan(0.6);
+  it("keeps full sentences a minority", () => {
+    expect(mix(viewer()).invested).toBeLessThan(0.25);
+  });
+
+  it("still skews terse viewers toward short reactions", () => {
+    expect(mix(viewer({ verbosity: 0 })).ambient).toBeGreaterThan(0.45);
   });
 
   it("lets verbose viewers write more", () => {

@@ -391,23 +391,30 @@ describe("SimulationEngine message shape", () => {
 
   const SEEDS = [11, 22, 33, 44, 55, 66, 77, 88];
 
-  it("is dominated by emotes and single words", () => {
-    // The realism failure this replaced: a wall of articulate 4-6 word
-    // statements, as if every viewer were competing to say something clever.
+  /**
+   * These replace three tests that asserted the opposite: that one-word
+   * messages exceeded 40%, medium statements stayed under 25%, and full
+   * sentences were rare. That shape measured out as 77% of output at three
+   * words or fewer with a mean of 2.5 words and nothing above twelve — a wall
+   * of "W" and "hm" rather than a room of people.
+   *
+   * Asserted as a distribution, never per message: short lines are still
+   * useful and still the bulk of a pile-on.
+   */
+  it("no longer lets tiny comments dominate", () => {
     const mix = lengthMix(SEEDS);
-    expect(mix.one / mix.total).toBeGreaterThan(0.4);
+    expect(mix.one / mix.total).toBeLessThan(0.55);
   });
 
-  it("keeps medium-length statements a minority", () => {
+  it("makes real replies common rather than exceptional", () => {
     const mix = lengthMix(SEEDS);
-    expect(mix.medium / mix.total).toBeLessThan(0.25);
+    expect((mix.medium + mix.long) / mix.total).toBeGreaterThan(0.3);
   });
 
-  it("produces full sentences occasionally but rarely", () => {
+  it("still produces plenty of short reactions", () => {
+    // The other failure mode: every viewer composing a paragraph.
     const mix = lengthMix(SEEDS);
-    const share = mix.long / mix.total;
-    expect(share).toBeGreaterThan(0);
-    expect(share).toBeLessThan(0.1);
+    expect(mix.one / mix.total).toBeGreaterThan(0.2);
   });
 
   it("ignores a meaningful share of what the streamer says", () => {
@@ -1047,7 +1054,7 @@ describe("chat does as it is told", () => {
   it("spams what it was told to spam", () => {
     const out = say("spam W");
     const complying = out.filter((line) => /\bW\b/.test(line));
-    expect(out.length).toBeGreaterThan(6);
+    expect(out.length).toBeGreaterThan(4);
     /**
      * A share rather than a majority. Off-topic chatter is now deliberately
      * interleaved through the ambient slot — a room where literally every

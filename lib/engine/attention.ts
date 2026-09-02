@@ -139,15 +139,22 @@ export function shouldReact(
 export type Depth = "ambient" | "light" | "engaged" | "invested";
 
 /**
- * Target mix, tuned against how real chat actually reads. Roughly half of all
- * messages are a single word or an emote; full sentences are rare enough to
- * feel like someone made an effort.
+ * Target mix.
+ *
+ * Previously ambient 0.50 / light 0.28, which put 78% of the weight on one to
+ * three words before anything else applied. Measured output was 77% of
+ * messages at three words or fewer, mean 2.5 — a wall of "W" and "hm" that
+ * read as a bot rather than a room.
+ *
+ * Short lines are still the largest single bucket and still dominate during a
+ * pile-on, where `pickDepth` skews them further. They just no longer crowd out
+ * ordinary conversation.
  */
 const BASE_MIX: Record<Depth, number> = {
-  ambient: 0.5,
+  ambient: 0.24,
   light: 0.28,
-  engaged: 0.17,
-  invested: 0.05,
+  engaged: 0.28,
+  invested: 0.16,
 };
 
 export interface DepthContext {
@@ -171,13 +178,16 @@ export function pickDepth(context: DepthContext, rng: Rng): Depth {
 
   // High-energy moments produce MORE short reflexive reactions, not fewer —
   // nobody writes a paragraph while shouting.
-  weights.ambient *= 1 + energy * 0.8;
-  weights.invested *= 1 - energy * 0.6;
+  // Softened from 0.8/0.6: at the old strength an exciting topic came back
+  // almost entirely as one-word replies, and excitement is exactly when
+  // somebody also wants to say something about it.
+  weights.ambient *= 1 + energy * 0.45;
+  weights.invested *= 1 - energy * 0.35;
 
   // The first people to respond are reacting, not composing.
   if (position === 0) {
-    weights.ambient *= 1.6;
-    weights.invested *= 0.3;
+    weights.ambient *= 1.35;
+    weights.invested *= 0.5;
   } else if (position >= 3) {
     // Later arrivals had time to type something.
     weights.engaged *= 1.3;

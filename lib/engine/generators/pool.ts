@@ -1,4 +1,5 @@
 import type { Rng } from "../rng";
+import { FRAGMENT_BANKS } from "../../data/composers";
 import type {
   Emote,
   EmoteMood,
@@ -105,6 +106,8 @@ export function canFill(entry: ResponseEntry, context: FillContext): boolean {
   // The truthiness check also covers "", which is the schema default.
   if (entry.text.includes("{streamer}") && !context.streamer) return false;
   if (entry.text.includes("{topic}") && !context.topic) return false;
+  // Bank slots ({open}, {hedge}, {int}, {tail}) always fill, so they never
+  // gate eligibility.
   return true;
 }
 
@@ -123,7 +126,25 @@ export function fill(entry: ResponseEntry, context: FillContext, rng: Rng): stri
   if (text.includes("{topic}") && context.topic) {
     text = text.replace(/\{topic\}/g, context.topic);
   }
-  return text;
+
+  /**
+   * Fragment banks.
+   *
+   * These are what turn a handful of shapes into a large space: "{open} that
+   * was {int} insane" covers fourteen openers times six intensifiers before
+   * any other slot is filled. Substituted last so a bank can never eat a
+   * keyword or username.
+   */
+  for (const [slot, bank] of Object.entries(FRAGMENT_BANKS)) {
+    const token = `{${slot}}`;
+    while (text.includes(token)) {
+      text = text.replace(token, rng.pick(bank));
+    }
+  }
+
+  // A bank entry may be empty (a trailing "" tail), which leaves double
+  // spaces or a dangling space at the end.
+  return text.replace(/\s+/g, " ").trim();
 }
 
 export interface PoolResult {
