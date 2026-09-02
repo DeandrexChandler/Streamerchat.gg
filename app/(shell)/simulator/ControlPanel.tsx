@@ -44,16 +44,20 @@ const SPEED_STEPS = [0.5, 1, 1.5, 2, 4] as const;
  * Labelled in the unit the engine actually uses.
  *
  * The old scale was a 0.25-12 multiplier labelled "~30/min", which meant the
- * setting, the engine and the tests all spoke different languages. Momentum
- * still swings the instantaneous rate well above and below these numbers —
- * they are the long-run average, not a metronome.
+ * setting, the engine and the tests all spoke different languages. These are
+ * long-run averages, not a metronome.
+ *
+ * The top step is deliberately NOT labelled with its rate. CHAOS is a mood,
+ * not a measurement — the red pulse in StepSlider keys off this exact string,
+ * and an earlier rewrite to "Chaos ~4/sec" silently broke that match and left
+ * it rendering as ordinary text.
  */
 const SPEED_LABELS = [
   "1 every 2s",
   "~1/sec",
   "~1.5/sec",
   "~2/sec",
-  "Chaos ~4/sec",
+  "CHAOS",
 ] as const;
 
 
