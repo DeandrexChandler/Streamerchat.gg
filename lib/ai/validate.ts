@@ -1,3 +1,5 @@
+import type { Reaction } from "./reaction";
+
 /**
  * Sanitises model output before it can reach the renderer.
  *
@@ -18,8 +20,13 @@
  * The cap does double duty: it also bounds how much any single bad line can
  * say if it slips past the tone check below.
  */
-const MAX_WORDS = 12;
-const MAX_CHARS = 120;
+/**
+ * Raised from 12. That cap forbade the one tier capable of writing a real
+ * sentence from writing one, which is most of why chat read as a wall of
+ * one-word reactions.
+ */
+const MAX_WORDS = 30;
+const MAX_CHARS = 200;
 
 /**
  * Lines that bite the broadcaster.
@@ -101,23 +108,23 @@ function isHostileToStreamer(text: string): boolean {
 }
 
 /**
- * Cleans, filters and deduplicates a batch of generated lines.
+ * Cleans, filters and deduplicates a batch of generated reactions.
  *
  * `recent` is the rolling window of what chat has already said; anything
  * matching it is dropped, because an AI refill echoing a line that went out
  * ten seconds ago is worse than no refill at all.
  */
-export function validateCandidates(
-  lines: readonly string[],
+export function validateReactions(
+  reactions: readonly Reaction[],
   recent: readonly string[],
-): string[] {
+): Reaction[] {
   const seen = new Set(recent.map((line) => line.trim().toLowerCase()));
-  const out: string[] = [];
+  const out: Reaction[] = [];
 
-  for (const raw of lines) {
-    if (typeof raw !== "string") continue;
+  for (const reaction of reactions) {
+    if (typeof reaction?.text !== "string") continue;
 
-    const text = clean(raw);
+    const text = clean(reaction.text);
     if (!text) continue;
     if (text.length > MAX_CHARS) continue;
     if (text.split(/\s+/).length > MAX_WORDS) continue;
@@ -127,7 +134,7 @@ export function validateCandidates(
     if (seen.has(key)) continue;
     seen.add(key);
 
-    out.push(text);
+    out.push({ ...reaction, text });
   }
 
   return out;

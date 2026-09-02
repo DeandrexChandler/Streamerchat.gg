@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { createGeminiProvider, parseLines } from "../gemini";
+import { createGeminiProvider, parseReactions } from "../gemini";
 import type { CandidateRequest } from "../provider";
 
 const request: CandidateRequest = {
+  utterance: "look at this roof",
+  history: [],
   classification: {
     intent: "excitement",
     sentiment: "positive",
@@ -31,28 +33,34 @@ function provider(fetchImpl: unknown) {
 }
 
 describe("gemini provider", () => {
-  it("maps a well-formed JSON array to lines", async () => {
-    const p = provider(vi.fn(async () => reply('["no shot", "actual cinema"]')));
-    expect(await p.generate(request)).toEqual(["no shot", "actual cinema"]);
+  it("maps a well-formed batch to reactions", async () => {
+    const p = provider(
+      vi.fn(async () =>
+        reply('[{"text":"no shot","emotion":"hype"},{"text":"actual cinema"}]'),
+      ),
+    );
+    const out = await p.generate(request);
+    expect(out.map((r) => r.text)).toEqual(["no shot", "actual cinema"]);
+    expect(out[0].emotion).toBe("hype");
   });
 
   it("tolerates a fenced code block, which models add unprompted", async () => {
     const p = provider(
-      vi.fn(async () => reply('```json\n["w", "gg"]\n```')),
+      vi.fn(async () => reply('```json\n[{"text":"w"},{"text":"gg"}]\n```')),
     );
-    expect(await p.generate(request)).toEqual(["w", "gg"]);
+    expect((await p.generate(request)).map((r) => r.text)).toEqual(["w", "gg"]);
   });
 
   it("tolerates prose wrapped around the array", async () => {
     const p = provider(
-      vi.fn(async () => reply('Sure! Here you go:\n["one", "two"]\nHope that helps.')),
+      vi.fn(async () => reply('Sure!\n[{"text":"one"},{"text":"two"}]\nHope that helps.')),
     );
-    expect(await p.generate(request)).toEqual(["one", "two"]);
+    expect((await p.generate(request)).map((r) => r.text)).toEqual(["one", "two"]);
   });
 
-  it("falls back to newline splitting when there is no array", async () => {
+  it("returns nothing when there is no JSON at all", async () => {
     const p = provider(vi.fn(async () => reply("no shot\nactual cinema")));
-    expect(await p.generate(request)).toEqual(["no shot", "actual cinema"]);
+    expect(await p.generate(request)).toEqual([]);
   });
 
   it("returns [] on malformed output rather than throwing", async () => {
@@ -74,9 +82,9 @@ describe("gemini provider", () => {
     await expect(p.generate(request)).resolves.toEqual([]);
   });
 
-  it("drops non-string entries in the array", async () => {
-    const p = provider(vi.fn(async () => reply('["ok", 5, null, "fine"]')));
-    expect(await p.generate(request)).toEqual(["ok", "fine"]);
+  it("drops malformed entries", async () => {
+    const p = provider(vi.fn(async () => reply('[{"text":"ok"},5,null,{"text":"fine"}]')));
+    expect((await p.generate(request)).map((r) => r.text)).toEqual(["ok", "fine"]);
   });
 
   it("sends the key in a header, never in the url", async () => {
@@ -113,35 +121,29 @@ describe("gemini provider", () => {
  * fragments like `[` and `holy roof Pog",` — which are not chat messages, and
  * which sail past a validator looking for length and tone.
  */
-describe("parseLines on truncated output", () => {
-  it("salvages the complete strings from a cut-off array", () => {
-    expect(parseLines('[\n  "no shot",\n  "actual cinema",\n  "wait is th')).toEqual([
-      "no shot",
-      "actual cinema",
-    ]);
+describe("parseReactions on truncated output", () => {
+  it("salvages the complete objects from a cut-off array", () => {
+    const out = parseReactions('[{"text":"no shot"},{"text":"actual cinema"},{"text":"wait is th');
+    expect(out.map((r) => r.text)).toEqual(["no shot", "actual cinema"]);
   });
 
   it("never emits bare JSON punctuation as a message", () => {
-    const lines = parseLines('[\n  "gg",\n  "holy roof Pog",\n  "wait is');
-    expect(lines).not.toContain("[");
-    expect(lines.some((l) => l.includes('",'))).toBe(false);
+    const out = parseReactions('[{"text":"gg"},{"text":"holy roof"},{"text":"wait is');
+    expect(out.map((r) => r.text)).not.toContain("[");
   });
 
-  it("returns nothing when a truncated array has no complete string", () => {
-    expect(parseLines('[\n  "wait is th')).toEqual([]);
+  it("returns nothing when a truncated array has no complete object", () => {
+    expect(parseReactions('[{"text":"wait is th')).toEqual([]);
   });
 
-  it("handles escaped quotes inside a salvaged string", () => {
-    expect(parseLines('[\n  "he said \\"what\\"",\n  "lol",')).toEqual([
-      'he said "what"',
-      "lol",
-    ]);
+  it("handles escaped quotes inside a salvaged object", () => {
+    const out = parseReactions(
+      '[{"text":"he said \\"what\\""},{"text":"lol"},',
+    );
+    expect(out.map((r) => r.text)).toEqual(['he said "what"', "lol"]);
   });
 
-  it("still newline-splits plain prose with no array at all", () => {
-    expect(parseLines("no shot\nactual cinema")).toEqual([
-      "no shot",
-      "actual cinema",
-    ]);
+  it("returns nothing for plain prose with no array at all", () => {
+    expect(parseReactions("no shot\nactual cinema")).toEqual([]);
   });
 });

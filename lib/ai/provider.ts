@@ -1,4 +1,5 @@
 import type { Classification } from "../engine/types";
+import type { Reaction } from "./reaction";
 
 /**
  * The AI tier is behind an interface for the same reason transcription is: the
@@ -12,6 +13,16 @@ import type { Classification } from "../engine/types";
  */
 
 export interface CandidateRequest {
+  /**
+   * What the streamer just said, verbatim.
+   *
+   * This was absent, and its absence was the central bug: the model received
+   * an intent label and a keyword list, so it could not react to a sentence it
+   * had never seen.
+   */
+  utterance: string;
+  /** Recent utterances, oldest first, so a change of mind is visible. */
+  history: readonly string[];
   classification: Classification;
   /**
    * Emote names actually loaded in this session.
@@ -30,10 +41,10 @@ export interface CandidateRequest {
 export interface CandidateProvider {
   readonly name: string;
   /**
-   * Returns candidate lines, or an empty array.
+   * Returns audience reactions, or an empty array.
    *
    * Never throws. An AI outage must degrade variety, never stop chat, so
    * every failure path resolves to `[]` and lets the pool tier carry on.
    */
-  generate(request: CandidateRequest): Promise<string[]>;
+  generate(request: CandidateRequest): Promise<Reaction[]>;
 }

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { validateCandidates } from "../validate";
+import { validateReactions } from "../validate";
+import type { Reaction } from "../reaction";
+
+/** Wraps bare strings so the existing cases read unchanged. */
+function validateCandidates(lines: readonly string[], recent: readonly string[]): string[] {
+  const reactions: Reaction[] = lines.map((text) => ({ text }));
+  return validateReactions(reactions, recent).map((r) => r.text);
+}
 
 describe("validateCandidates", () => {
   it("keeps a plain short line", () => {
@@ -37,12 +44,19 @@ describe("validateCandidates", () => {
   });
 
   it("drops lines longer than the word cap", () => {
-    const essay = Array.from({ length: 13 }, (_, i) => `word${i}`).join(" ");
+    // Raised from 12 to 30: the old cap forbade the one tier that can write a
+    // real sentence from writing one.
+    const essay = Array.from({ length: 31 }, (_, i) => `word${i}`).join(" ");
     expect(validateCandidates([essay], [])).toEqual([]);
   });
 
+  it("allows a genuine sentence through", () => {
+    const line = "bro i genuinely thought you were about to lose that whole run";
+    expect(validateCandidates([line], [])).toEqual([line]);
+  });
+
   it("drops lines longer than the character cap", () => {
-    expect(validateCandidates(["a".repeat(121)], [])).toEqual([]);
+    expect(validateCandidates(["a".repeat(201)], [])).toEqual([]);
   });
 
   it("drops lines that are empty after cleaning", () => {

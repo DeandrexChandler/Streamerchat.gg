@@ -1,5 +1,6 @@
 import { buildPrompt } from "./prompt";
 import type { CandidateProvider, CandidateRequest } from "./provider";
+import { ReactionBatchSchema, type Reaction } from "./reaction";
 
 /**
  * Gemini implementation of the candidate provider.
@@ -60,61 +61,50 @@ export const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 export interface GeminiOptions {
   apiKey: string;
   model?: string;
+  maxOutputTokens?: number;
   fetchImpl?: typeof fetch;
 }
 
 /**
- * Pulls a list of strings out of whatever the model actually returned.
+ * Pulls reactions out of whatever the model actually returned.
  *
- * Asking for "a JSON array and nothing else" gets you a JSON array most of the
- * time. The rest of the time it arrives fenced in ```json, wrapped in a
- * sentence of preamble, or as plain newline-separated lines — so the parser
- * accepts all of those rather than discarding a usable batch on formatting.
+ * Asking for "a JSON array and nothing else" gets one most of the time. The
+ * rest of the time it arrives fenced in ```json or wrapped in a sentence of
+ * preamble, so the widest bracketed span is used rather than the whole string.
+ *
+ * A truncated array is salvaged object by object instead of being discarded:
+ * eleven usable reactions out of twelve is a better outcome than none, and
+ * truncation is a real occurrence when a model spends output tokens thinking.
  */
-export function parseLines(text: string): string[] {
+export function parseReactions(text: string): Reaction[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
 
-  // Widest bracketed span, which survives both fencing and surrounding prose.
   const start = trimmed.indexOf("[");
   const end = trimmed.lastIndexOf("]");
+
   if (start !== -1 && end > start) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed.slice(start, end + 1));
-      if (Array.isArray(parsed)) {
-        return parsed.filter((v): v is string => typeof v === "string");
-      }
-    } catch {
-      // Malformed but bracketed — salvage below rather than newline-splitting.
-    }
+    const parsed = ReactionBatchSchema.safeParse(
+      tryJson(trimmed.slice(start, end + 1)),
+    );
+    if (parsed.success) return parsed.data;
   }
 
-  /**
-   * A bracket with no valid parse means the array was cut off — these models
-   * spend output tokens on reasoning first, so a tight cap truncates the
-   * answer mid-string.
-   *
-   * Complete string literals are recovered and the trailing fragment dropped.
-   * Newline-splitting here instead would turn `[` and `"gg",` into chat
-   * messages, and both are short and inoffensive enough to pass validation.
-   */
-  if (start !== -1) {
-    const salvaged: string[] = [];
-    for (const match of trimmed.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
-      try {
-        const value: unknown = JSON.parse(`"${match[1]}"`);
-        if (typeof value === "string" && value.length > 0) salvaged.push(value);
-      } catch {
-        // Not a decodable literal; skip it.
-      }
-    }
-    return salvaged;
+  // Salvage: every complete {...} object in the span, in order.
+  const salvaged: Reaction[] = [];
+  for (const match of trimmed.matchAll(/\{[^{}]*\}/g)) {
+    const one = ReactionBatchSchema.safeParse([tryJson(match[0])]);
+    if (one.success) salvaged.push(...one.data);
   }
+  return salvaged;
+}
 
-  return trimmed
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("```"));
+function tryJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 export function createGeminiProvider(options: GeminiOptions): CandidateProvider {
@@ -124,7 +114,7 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
   return {
     name: `gemini:${model}`,
 
-    async generate(request: CandidateRequest): Promise<string[]> {
+    async generate(request: CandidateRequest): Promise<Reaction[]> {
       try {
         const response = await doFetch(
           `${ENDPOINT}/${encodeURIComponent(model)}:generateContent`,
@@ -153,7 +143,7 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
                  * well under 200; the headroom exists so a verbose run degrades
                  * to a smaller batch rather than to salvaged fragments.
                  */
-                maxOutputTokens: 2000,
+                maxOutputTokens: options.maxOutputTokens ?? 2000,
                 /**
                  * Writing six-word chat messages needs no deliberation, and
                  * thinking tokens are billed at the output rate — 515 of them
@@ -175,7 +165,7 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
         };
 
         const text = body.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-        return parseLines(text);
+        return parseReactions(text);
       } catch {
         // Timeout, network failure, malformed JSON — all the same to callers.
         return [];

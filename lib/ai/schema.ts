@@ -42,6 +42,10 @@ void _intentsAreExhaustive;
 void _sentimentsAreExhaustive;
 
 export const CandidateRequestSchema = z.object({
+  /** What the streamer said. The reason this whole pipeline exists. */
+  utterance: z.string().min(1).max(1000),
+  /** Recent utterances, oldest first. Capped so a long stream cannot grow the prompt without bound. */
+  history: z.array(z.string().max(1000)).max(12).default([]),
   classification: z.object({
     intent: z.enum(INTENTS),
     sentiment: z.enum(SENTIMENTS),
@@ -53,6 +57,6 @@ export const CandidateRequestSchema = z.object({
   recent: z.array(z.string().max(200)).max(30).default([]),
   streamer: z.string().max(40).optional(),
   topic: z.string().max(80).optional(),
-  count: z.number().int().min(1).max(24).default(12),
+  count: z.number().int().min(1).max(40).default(16),
   model: z.string().max(60).optional(),
 });

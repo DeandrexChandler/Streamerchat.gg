@@ -159,85 +159,17 @@ describe("SimulationEngine", () => {
     }
   });
 
-  it("emits no AI-sourced messages when aiShare is 0", () => {
-    const engine = make({ aiShare: 0 });
-    engine.supplyAiCandidates(["an ai line", "another ai line"]);
-    const messages = run(engine, 60_000, [[1000, "chat what do you think"]]);
-    expect(messages.every((m) => m.source !== "ai")).toBe(true);
-  });
 
-  it("can use supplied AI candidates when aiShare is high", () => {
-    // AI only fills "engaged"/"invested" messages, which are a minority of
-    // traffic by design, and whether any given burst contains one depends on
-    // the RNG path. Sweeping seeds rather than pinning one keeps this from
-    // breaking every time an unrelated default shifts the random stream.
-    const sawAi = [1, 2, 3, 4, 5, 6].some((seed) => {
-      const engine = make({ aiShare: 0.4 }, seed);
-      engine.supplyAiCandidates(
-        Array.from({ length: 40 }, (_, i) => `an ai written candidate line ${i}`),
-      );
-      const messages = run(engine, 400_000, [
-        [1_000, "chat what do you think about the roof or the walls"],
-        [40_000, "look at this, check out how it turned out"],
-        [90_000, "so yesterday this really funny thing happened at work"],
-        [150_000, "I have no idea how any of this works, I'm completely lost"],
-        [220_000, "come on, this is so annoying, not again"],
-        [300_000, "chat should I keep going or call it here"],
-      ]);
-      return messages.some((m) => m.source === "ai");
-    });
 
-    expect(sawAi).toBe(true);
-  });
 
-  it("spends AI on only a small slice of traffic", () => {
-    // AI fills "engaged"/"invested" messages only — generating "W" or an
-    // emote through a language model would be waste. So even at a high
-    // aiShare, AI lines should stay a small fraction of everything emitted.
-    //
-    // Note this asserts on *how often* AI is used, not on how long its output
-    // is: the text is whatever the caller supplied, so asserting on length
-    // would only be testing the fixture.
-    const engine = make({ aiShare: 0.4 }, 246);
-    engine.supplyAiCandidates(
-      Array.from({ length: 200 }, (_, i) => `a written out candidate line ${i}`),
-    );
-    const messages = run(engine, 400_000, [
-      [1_000, "chat what do you think about the roof"],
-      [60_000, "look at this, check out how it turned out"],
-      [140_000, "so yesterday something really funny happened"],
-      [240_000, "come on, this is so annoying, not again"],
-      [320_000, "chat should I keep going or call it here"],
-    ]);
 
-    const ai = messages.filter((m) => m.source === "ai").length;
-    expect(messages.length).toBeGreaterThan(30);
-    expect(ai / messages.length).toBeLessThan(0.2);
-  });
 
-  it("does not want an AI refill when the tier is disabled", () => {
-    const engine = make({ aiShare: 0 });
-    const outcome = engine.handleTranscript("something vague", 1000);
-    expect(engine.wantsAiRefill(outcome)).toBe(false);
-  });
 
-  it("wants an AI refill on a high-energy moment", () => {
-    const engine = make({ aiShare: 0.1 });
-    const outcome = engine.handleTranscript(
-      "LET'S GO THAT WAS ABSOLUTELY INSANE AMAZING!!!",
-      1000,
-      0.95,
-    );
-    expect(outcome!.classification.energy).toBeGreaterThan(0.6);
-    expect(engine.wantsAiRefill(outcome)).toBe(true);
-  });
 
-  it("never spends an AI call on an utterance chat ignored", () => {
-    // No point generating a novel line for something nobody responded to.
-    const engine = make({ aiShare: 0.2 });
-    const ignored = { classification: { intent: "mundane" as const, sentiment: "neutral" as const, energy: 0.1, keywords: [], confidence: 0.15 }, reacted: false, queued: 0 };
-    expect(engine.wantsAiRefill(ignored)).toBe(false);
-  });
+
+
+
+
 
   it("flush() clears queued messages", () => {
     const engine = make();
@@ -578,73 +510,6 @@ describe("SimulationEngine viewer count", () => {
   });
 });
 
-describe("SimulationEngine AI spend", () => {
-  it("does not spend more on AI just because chat is faster", () => {
-    // The whole point of the budget: turning chat speed up 10x emits ~13x the
-    // messages, but the streamer is saying exactly the same things, so the
-    // number of refills worth making has not changed. Tying spend to message
-    // volume would multiply the bill for no extra value.
-    const refillsAt = (messagesPerSecond: number) => {
-      const engine = make({ aiShare: 0.2, messagesPerSecond }, 909);
-      let refills = 0;
-      let next = 0;
-      const script: Array<[number, string]> = Array.from(
-        { length: 40 },
-        (_, i) => [i * 15_000, "okay so anyway I think we should try this next"],
-      );
-      for (let t = 0; t <= 600_000; t += 250) {
-        while (next < script.length && script[next][0] <= t) {
-          const outcome = engine.handleTranscript(script[next++][1], t);
-          if (engine.wantsAiRefill(outcome, t)) {
-            engine.recordAiCall(t);
-            refills++;
-          }
-        }
-        engine.tick(t);
-      }
-      return refills;
-    };
-
-    const slow = refillsAt(0.5);
-    const fast = refillsAt(4);
-
-    /**
-     * A ratio, not `slow + 1`.
-     *
-     * If spend ever tracked message volume, 12x speed would produce roughly
-     * 13x the refills — so a 1.5x band catches the failure this test exists
-     * for with enormous margin. The old absolute tolerance was a +/-5% band on
-     * a stochastic simulation, which made it a flake detector rather than an
-     * invariant check.
-     */
-    expect(fast).toBeLessThan(Math.max(4, slow * 1.5));
-  });
-
-  it("stops asking for refills once the budget is exhausted", () => {
-    const engine = make({ aiShare: 0.3 }, 42);
-    for (let i = 0; i < 30; i++) engine.recordAiCall(i * 30_000);
-
-    const outcome = engine.handleTranscript("something quite ambiguous here", 1_000_000);
-    // Far inside the minimum interval since the last recorded call.
-    expect(engine.wantsAiRefill(outcome, 30 * 30_000 + 1000)).toBe(false);
-  });
-
-  it("stops asking for refills while backing off from a failure", () => {
-    const engine = make({ aiShare: 0.3 }, 43);
-    engine.recordAiFailure(0);
-    const outcome = engine.handleTranscript("something quite ambiguous here", 5_000);
-    expect(engine.wantsAiRefill(outcome, 5_000)).toBe(false);
-  });
-
-  it("reports what the AI tier has cost so far", () => {
-    const engine = make({ aiShare: 0.3 }, 44);
-    engine.recordAiCall(0);
-    engine.recordAiCall(30_000);
-    const stats = engine.aiBudgetStats(60_000);
-    expect(stats.calls).toBe(2);
-    expect(stats.estimatedTokens).toBeGreaterThan(0);
-  });
-});
 
 describe("SimulationEngine repeat cap", () => {
   /**
@@ -796,73 +661,6 @@ describe("SimulationEngine viewer count", () => {
   });
 });
 
-describe("SimulationEngine AI spend", () => {
-  it("does not spend more on AI just because chat is faster", () => {
-    // The whole point of the budget: turning chat speed up 10x emits ~13x the
-    // messages, but the streamer is saying exactly the same things, so the
-    // number of refills worth making has not changed. Tying spend to message
-    // volume would multiply the bill for no extra value.
-    const refillsAt = (messagesPerSecond: number) => {
-      const engine = make({ aiShare: 0.2, messagesPerSecond }, 909);
-      let refills = 0;
-      let next = 0;
-      const script: Array<[number, string]> = Array.from(
-        { length: 40 },
-        (_, i) => [i * 15_000, "okay so anyway I think we should try this next"],
-      );
-      for (let t = 0; t <= 600_000; t += 250) {
-        while (next < script.length && script[next][0] <= t) {
-          const outcome = engine.handleTranscript(script[next++][1], t);
-          if (engine.wantsAiRefill(outcome, t)) {
-            engine.recordAiCall(t);
-            refills++;
-          }
-        }
-        engine.tick(t);
-      }
-      return refills;
-    };
-
-    const slow = refillsAt(0.5);
-    const fast = refillsAt(4);
-
-    /**
-     * A ratio, not `slow + 1`.
-     *
-     * If spend ever tracked message volume, 12x speed would produce roughly
-     * 13x the refills — so a 1.5x band catches the failure this test exists
-     * for with enormous margin. The old absolute tolerance was a +/-5% band on
-     * a stochastic simulation, which made it a flake detector rather than an
-     * invariant check.
-     */
-    expect(fast).toBeLessThan(Math.max(4, slow * 1.5));
-  });
-
-  it("stops asking for refills once the budget is exhausted", () => {
-    const engine = make({ aiShare: 0.3 }, 42);
-    for (let i = 0; i < 30; i++) engine.recordAiCall(i * 30_000);
-
-    const outcome = engine.handleTranscript("something quite ambiguous here", 1_000_000);
-    // Far inside the minimum interval since the last recorded call.
-    expect(engine.wantsAiRefill(outcome, 30 * 30_000 + 1000)).toBe(false);
-  });
-
-  it("stops asking for refills while backing off from a failure", () => {
-    const engine = make({ aiShare: 0.3 }, 43);
-    engine.recordAiFailure(0);
-    const outcome = engine.handleTranscript("something quite ambiguous here", 5_000);
-    expect(engine.wantsAiRefill(outcome, 5_000)).toBe(false);
-  });
-
-  it("reports what the AI tier has cost so far", () => {
-    const engine = make({ aiShare: 0.3 }, 44);
-    engine.recordAiCall(0);
-    engine.recordAiCall(30_000);
-    const stats = engine.aiBudgetStats(60_000);
-    expect(stats.calls).toBe(2);
-    expect(stats.estimatedTokens).toBeGreaterThan(0);
-  });
-});
 
 
 describe("emote-only mode", () => {
@@ -912,79 +710,6 @@ describe("emote-only mode", () => {
   });
 });
 
-describe("AI refill gate", () => {
-  function engine() {
-    return new SimulationEngine({
-      seed: 5,
-      now: 0,
-      emotes: FIXTURE_EMOTES,
-      settings: { audienceSize: 45, aiShare: 0.05 },
-    });
-  }
-
-  /**
-   * Regression: the gate used to require `confidence < 0.55 || energy > 0.6`
-   * on top of `reacted`. Those are anti-correlated — low-confidence utterances
-   * are the ones the attention gate ignores, and text-derived energy tops out
-   * around 0.25 — so it never opened across a whole session.
-   */
-  it("opens at least once over a realistic session", () => {
-    const e = engine();
-    const script: Array<[number, string]> = [
-      [1_500, "hey hey what's up everyone, welcome in"],
-      [16_000, "chat what do you think, should I do the roof or the walls"],
-      [68_000, "okay look at this, look how it turned out"],
-      [110_000, "so yesterday something really funny happened at work"],
-      [150_000, "alright I think that's it for today, thanks for hanging out"],
-    ];
-
-    let opened = 0;
-    for (const [at, text] of script) {
-      const outcome = e.handleTranscript(text, at, undefined);
-      if (e.wantsAiRefill(outcome, at)) {
-        opened += 1;
-        e.recordAiCall(at);
-      }
-    }
-    expect(opened).toBeGreaterThan(0);
-  });
-
-  it("never opens when the tier is switched off", () => {
-    const e = new SimulationEngine({
-      seed: 5,
-      now: 0,
-      emotes: FIXTURE_EMOTES,
-      settings: { audienceSize: 45, aiShare: 0 },
-    });
-    const outcome = e.handleTranscript("look at this, look how it turned out", 0);
-    expect(e.wantsAiRefill(outcome, 0)).toBe(false);
-  });
-
-  it("never opens for an utterance the attention gate ignored", () => {
-    const e = engine();
-    const outcome = e.handleTranscript("okay so today we're gonna finish the base", 0);
-    if (outcome && !outcome.reacted) {
-      expect(e.wantsAiRefill(outcome, 0)).toBe(false);
-    }
-  });
-
-  it("respects the minimum interval between calls", () => {
-    const e = engine();
-    const first = e.handleTranscript("look at this, look how it turned out", 0);
-    expect(e.wantsAiRefill(first, 0)).toBe(true);
-    e.recordAiCall(0);
-
-    const second = e.handleTranscript("so yesterday something funny happened at work", 5_000);
-    expect(e.wantsAiRefill(second, 5_000)).toBe(false);
-  });
-
-  it("stops asking once the pool is already stocked", () => {
-    const e = engine();
-    e.supplyAiCandidates(Array.from({ length: 10 }, (_, i) => `line ${i}`));
-    const outcome = e.handleTranscript("look at this, look how it turned out", 0);
-    expect(e.wantsAiRefill(outcome, 0)).toBe(false);
-  });
-});
 
 
 /**

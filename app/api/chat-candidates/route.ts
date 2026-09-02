@@ -1,86 +1,123 @@
 import { NextResponse } from "next/server";
 import { RateLimiter, clientKey } from "@/lib/http/rate-limit";
-import { DEFAULT_MODEL, createGeminiProvider } from "@/lib/ai/gemini";
-import { validateCandidates } from "@/lib/ai/validate";
+import { createGeminiProvider } from "@/lib/ai/gemini";
+import { createMockProvider } from "@/lib/ai/mock";
+import { AiRateLimiter, loadAiConfig } from "@/lib/ai/config";
+import { validateReactions } from "@/lib/ai/validate";
 import { CandidateRequestSchema } from "@/lib/ai/schema";
 
 /**
- * AI candidate refill.
+ * Audience reaction generation.
+ *
+ * One request per streamer utterance, returning a batch the simulation then
+ * releases over the following seconds. Never one call per rendered message.
  *
  * The key lives here and only here — never NEXT_PUBLIC_, which would inline it
- * into the client bundle and ship it to every visitor.
+ * into the client bundle.
  *
- * SECURITY POSTURE, stated so it is not discovered later. CLAUDE.md requires
- * that any route which spends money be authenticated, rate limited and size
- * capped. This one is rate limited and size capped. It is NOT authenticated,
- * because the product has no accounts and none are wanted.
- *
- * That is acceptable while this runs on localhost, and only there. Exposed to
- * a network it is an open relay on the owner's API key. The real backstop is
- * lib/engine/ai-budget.ts, which caps calls per hour and per session on the
- * client; the limiter here only stops a runaway loop.
- *
- * A missing key returns 200 with no lines rather than an error: running with
- * zero keys set is a supported state, not a failure.
+ * SECURITY POSTURE. CLAUDE.md requires that any route which spends money be
+ * authenticated, rate limited and size capped. This one is rate limited and
+ * size capped. It is NOT authenticated, because the product has no accounts.
+ * That is acceptable on localhost and nowhere else: exposed to a network it is
+ * an open relay on the owner's API key.
  */
 
 export const dynamic = "force-dynamic";
 
-/**
- * The budget guard allows at most 90 calls an hour per session. This sits well
- * above that so a couple of people sharing one instance are never throttled,
- * while a loop still stops.
- */
-const limiter = new RateLimiter({ windowMs: 60_000, maxRequests: 30 });
+const httpLimiter = new RateLimiter({ windowMs: 60_000, maxRequests: 60 });
 
-const MAX_BODY_BYTES = 16 * 1024;
+/**
+ * Process-wide, so the ceilings actually hold.
+ *
+ * Pinned to globalThis because `next dev` re-evaluates modules on hot reload,
+ * and a limiter that resets on every edit protects nothing during exactly the
+ * session it exists for.
+ */
+const globalRef = globalThis as typeof globalThis & {
+  __aiLimiter?: AiRateLimiter;
+};
+
+const MAX_BODY_BYTES = 32 * 1024;
 
 export async function POST(request: Request) {
-  if (limiter.check(clientKey(request))) {
-    return NextResponse.json({ lines: [], error: "rate-limited" }, { status: 429 });
+  const config = loadAiConfig();
+  const limiter = (globalRef.__aiLimiter ??= new AiRateLimiter(config));
+
+  if (httpLimiter.check(clientKey(request))) {
+    return NextResponse.json(
+      { reactions: [], status: "http-rate-limited" },
+      { status: 429 },
+    );
   }
 
   const raw = await request.text();
   if (raw.length > MAX_BODY_BYTES) {
-    return NextResponse.json({ lines: [], error: "too-large" }, { status: 413 });
+    return NextResponse.json({ reactions: [], status: "too-large" }, { status: 413 });
   }
 
   let json: unknown;
   try {
     json = JSON.parse(raw);
   } catch {
-    return NextResponse.json({ lines: [], error: "malformed" }, { status: 400 });
+    return NextResponse.json({ reactions: [], status: "malformed" }, { status: 400 });
   }
 
   const parsed = CandidateRequestSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ lines: [], error: "invalid" }, { status: 400 });
+    return NextResponse.json({ reactions: [], status: "invalid" }, { status: 400 });
   }
 
-  // The key check sits *after* validation on purpose. Running with no key is
-  // the normal state during development, and short-circuiting before parsing
-  // would return 200 for a malformed request and hide client bugs exactly
-  // when they are cheapest to find.
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) {
-    // Not an error. The app is required to run fully with no keys set.
+  const { model, ...candidateRequest } = parsed.data;
+  const count = Math.min(candidateRequest.count, config.maxBatchSize);
+  const said = candidateRequest.utterance.slice(0, 80);
+
+  const refusal = limiter.refusal();
+  if (refusal) {
+    // Visible, never silent: the developer has to be able to tell an exhausted
+    // quota from a broken application.
+    console.warn(`[ai] REFUSED (${refusal}) — falling back to templates | "${said}"`);
     return NextResponse.json(
-      { lines: [] },
+      { reactions: [], status: refusal, usage: limiter.usage() },
       { headers: { "cache-control": "no-store" } },
     );
   }
 
-  const { model, ...candidateRequest } = parsed.data;
+  const provider =
+    config.mode === "mock"
+      ? createMockProvider()
+      : createGeminiProvider({
+          apiKey: process.env.GOOGLE_API_KEY ?? "",
+          model: model || config.model,
+          maxOutputTokens: config.maxOutputTokens,
+        });
 
-  const provider = createGeminiProvider({
-    apiKey,
-    model: model || DEFAULT_MODEL,
-  });
+  console.log(
+    `[ai] → ${provider.name} | ctx=${candidateRequest.history.length} | batch=${count} | "${said}"`,
+  );
 
-  const generated = await provider.generate(candidateRequest);
+  limiter.record();
+  const started = Date.now();
+  const generated = await provider.generate({ ...candidateRequest, count });
+  const elapsed = Date.now() - started;
 
   // Validation runs server-side so a client cannot skip it.
-  const lines = validateCandidates(generated, candidateRequest.recent);
+  const reactions = validateReactions(generated, candidateRequest.recent);
 
-  return NextResponse.json({ lines }, { headers: { "cache-control": "no-store" } });
+  if (reactions.length === 0) {
+    // Distinguished on purpose: "the model returned nothing" and "everything
+    // it returned was rejected" have completely different causes, and a single
+    // message for both sends you looking in the wrong place.
+    const why =
+      generated.length === 0
+        ? "provider returned nothing — bad key, refusal, or timeout"
+        : `all ${generated.length} rejected by validation`;
+    console.warn(`[ai] ← EMPTY after ${elapsed}ms (${why})`);
+  } else {
+    console.log(`[ai] ← ${reactions.length} reactions in ${elapsed}ms`);
+  }
+
+  return NextResponse.json(
+    { reactions, status: "ok", usage: limiter.usage() },
+    { headers: { "cache-control": "no-store" } },
+  );
 }

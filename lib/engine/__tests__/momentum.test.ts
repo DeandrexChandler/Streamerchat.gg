@@ -115,26 +115,43 @@ describe("deterministic fallback", () => {
   });
 });
 
-describe("AI stays bounded", () => {
-  it("never becomes most of the chat, even at high share", () => {
+describe("contextual reactions dominate", () => {
+  it("makes generated reactions the bulk of chat, not a garnish", () => {
     const engine = make({ aiShare: 0.4 }, 31);
     // Keep the candidate pool permanently stocked so nothing but the ceiling
     // limits how much AI could be used.
     const messages: Array<{ source: string }> = [];
     let next = 0;
-    const script: Array<[number, string]> = [
-      [2_000, "BRO I JUST BEAT IT"],
-      [20_000, "that was actually insane"],
-      [40_000, "chat what do you think"],
-    ];
-    for (let t = 0; t <= 120_000; t += 250) {
+    /**
+     * A streamer who keeps talking, which is the case this measures. Long
+     * trailing silence would be measuring ambient fallback instead, and
+     * ambient is *supposed* to win once nobody has said anything for a while.
+     */
+    const script: Array<[number, string]> = Array.from({ length: 10 }, (_, k) => [
+      2_000 + k * 10_000,
+      `okay so here is the next thing number ${k}`,
+    ]);
+    for (let t = 0; t <= 100_000; t += 250) {
       while (next < script.length && script[next][0] <= t) {
         engine.handleTranscript(script[next++][1], t);
       }
-      engine.supplyAiCandidates(["a generated line", "another generated line"]);
+      // A fresh batch on each utterance, as the real pipeline supplies them.
+      if (script.some(([at]) => at === t)) {
+        engine.supplyReactions(
+          Array.from({ length: 20 }, (_, k) => ({ text: `generated line ${t}-${k}` })),
+          t,
+        );
+      }
       for (const m of engine.tick(t)) messages.push({ source: m.source });
     }
     const ai = messages.filter((m) => m.source === "ai").length;
-    expect(ai / messages.length).toBeLessThan(0.4);
+    /**
+     * The inversion this restructure exists for. Contextual output used to be
+     * capped near 5% and measured at 6% even with an unlimited supply, so the
+     * streamer was reading a chat that had not listened to them.
+     */
+    expect(ai / messages.length).toBeGreaterThan(0.6);
+    // Still not everything: ambient chatter is deliberate seasoning.
+    expect(ai / messages.length).toBeLessThan(0.98);
   });
 });

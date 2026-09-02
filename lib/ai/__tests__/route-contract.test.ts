@@ -9,6 +9,8 @@ import { CandidateRequestSchema as RequestSchema } from "../schema";
  * to the live route came back "invalid".
  */
 const valid = {
+  utterance: "look at this roof I just built",
+  history: ["I think I'm gonna play Minecraft"],
   classification: {
     intent: "excitement",
     sentiment: "positive",
@@ -27,8 +29,18 @@ describe("chat-candidates request contract", () => {
   });
 
   it("defaults the optional collections", () => {
-    const parsed = RequestSchema.parse({ classification: valid.classification });
-    expect(parsed).toMatchObject({ emotes: [], recent: [], count: 12 });
+    const parsed = RequestSchema.parse({
+      utterance: "hello",
+      classification: valid.classification,
+    });
+    expect(parsed).toMatchObject({ emotes: [], recent: [], history: [], count: 16 });
+  });
+
+  it("rejects a request with no transcript", () => {
+    // The whole point of the pipeline: a request that cannot say what the
+    // streamer said is not a request worth making.
+    const withoutTranscript = { ...valid, utterance: undefined };
+    expect(RequestSchema.safeParse(withoutTranscript).success).toBe(false);
   });
 
   it("rejects an intent the engine does not define", () => {
@@ -56,6 +68,11 @@ describe("chat-candidates request contract", () => {
 
   it("caps how many lines may be requested", () => {
     expect(RequestSchema.safeParse({ ...valid, count: 500 }).success).toBe(false);
+  });
+
+  it("caps how much history may be sent", () => {
+    const long = Array.from({ length: 13 }, () => "an utterance");
+    expect(RequestSchema.safeParse({ ...valid, history: long }).success).toBe(false);
   });
 
   it("rejects an oversized streamer name", () => {

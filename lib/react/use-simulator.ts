@@ -11,6 +11,18 @@ import {
   mergeEmotes,
 } from "../config/emote-store";
 import type { EmotePack } from "../emotes/seventv";
+import type { Reaction } from "../ai/reaction";
+
+/**
+ * Reactions requested per utterance, scaled by chat speed.
+ *
+ * Bigger batches at higher speeds so CHAOS has more to release, bounded
+ * server-side by AI_MAX_BATCH_SIZE so a UI slider can never drive spend past
+ * a known ceiling.
+ */
+function reactionCountFor(messagesPerSecond: number): number {
+  return Math.round(Math.min(28, 14 + messagesPerSecond * 3.5));
+}
 import type { Emote } from "../engine/types";
 import {
   SimulationEngine,
@@ -90,6 +102,12 @@ export interface UseSimulatorResult {
 
   /** OBS browser sources currently receiving this session's chat. */
   overlaySubscribers: number;
+
+  /** Last generation outcome: ok, cooling, empty, error, a refusal reason. */
+  aiStatus: string;
+
+  /** Feed a line in as though it had been spoken. Same path as speech. */
+  say: (text: string) => void;
 }
 
 export function useSimulator(
@@ -116,6 +134,8 @@ export function useSimulator(
   const [settings, setSettings] = useState<SimulationSettings>(DEFAULT_SETTINGS);
   const [emotes, setEmotes] = useState<Emote[]>(() => []);
   const [overlaySubscribers, setOverlaySubscribers] = useState(0);
+  /** Last thing the generation pipeline did, surfaced so failures are visible. */
+  const [aiStatus, setAiStatus] = useState<string>("idle");
 
   const engineRef = useRef<SimulationEngine | null>(null);
   const micRef = useRef<MicSession | null>(null);
@@ -125,8 +145,10 @@ export function useSimulator(
   const emotesRef = useRef<Emote[]>([]);
   const pausedRef = useRef(false);
   const overlayRef = useRef<OverlayTransport | null>(null);
-  /** What chat said recently, so an AI refill doesn't echo it. */
+  /** What chat said recently, so a batch doesn't echo it. */
   const recentTextsRef = useRef<string[]>([]);
+  /** What the streamer has said recently, oldest first. The AI's context. */
+  const historyRef = useRef<string[]>([]);
 
   /** Level subscribers, kept outside React entirely. */
   const levelSubscribers = useRef(new Set<(level: number) => void>());
@@ -262,14 +284,27 @@ export function useSimulator(
    * The engine decides whether a moment is worth spending on; the budget guard
    * inside it has the final say. This function only performs the call.
    */
-  const maybeRefillAi = useCallback(
-    async (outcome: TranscriptOutcome | null, at: number) => {
+  /**
+   * Asks for a batch of audience reactions to what was just said.
+   *
+   * Fire and forget. Nothing awaits this and nothing blocks on it — the
+   * template tiers carry chat regardless, which is what keeps an AI outage
+   * from being an outage of the product.
+   *
+   * One request per utterance, never one per rendered message.
+   */
+  const requestReactions = useCallback(
+    async (utterance: string, outcome: TranscriptOutcome | null, at: number) => {
       const engine = engineRef.current;
-      if (!engine || !engine.wantsAiRefill(outcome, at) || !outcome) return;
+      if (!engine || !outcome) return;
 
-      // Recorded before the request, not after: the budget must account for a
-      // call that is in flight, or a burst of speech would stack requests.
-      engine.recordAiCall(at);
+      historyRef.current = [...historyRef.current, utterance].slice(-12);
+
+      if (!engine.wantsReactions(at)) {
+        setAiStatus("cooling");
+        return;
+      }
+      setAiStatus("requesting");
 
       try {
         const response = await fetch("/api/chat-candidates", {
@@ -277,32 +312,65 @@ export function useSimulator(
           headers: { "content-type": "application/json" },
           cache: "no-store",
           body: JSON.stringify({
+            utterance,
+            // Everything before this utterance, so a change of mind is legible.
+            history: historyRef.current.slice(0, -1),
             classification: outcome.classification,
             emotes: emotesRef.current.map((emote) => emote.name),
             recent: recentTextsRef.current,
             streamer: settingsRef.current.streamerName || undefined,
             topic: settingsRef.current.streamTopic || undefined,
             model: settingsRef.current.aiModel,
-            count: 12,
+            count: reactionCountFor(settingsRef.current.messagesPerSecond),
           }),
         });
 
-        if (!response.ok) {
-          engine.recordAiFailure(Date.now());
+        const body = (await response.json()) as {
+          reactions?: Reaction[];
+          status?: string;
+        };
+
+        if (!response.ok || !body.reactions?.length) {
+          const why = body.status ?? `http ${response.status}`;
+          console.warn(`[ai] no reactions (${why}) — chat falls back to templates`);
+          setAiStatus(why === "ok" ? "empty" : why);
           return;
         }
 
-        const body = (await response.json()) as { lines?: string[] };
-        const lines = body.lines ?? [];
-
-        // An empty batch is not a failure — it is what a missing key returns,
-        // and backing off for that would be wrong.
-        if (lines.length > 0) engine.supplyAiCandidates(lines);
-      } catch {
-        engine.recordAiFailure(Date.now());
+        console.log(`[ai] queued ${body.reactions.length} reactions for "${utterance.slice(0, 60)}"`);
+        setAiStatus("ok");
+        engine.supplyReactions(body.reactions, Date.now());
+      } catch (error) {
+        console.warn("[ai] request failed — chat falls back to templates", error);
+        setAiStatus("error");
       }
     },
     [],
+  );
+
+  /**
+   * Accepts a line as though the streamer had spoken it.
+   *
+   * The same entry point speech uses, deliberately: a typed message that took
+   * a different path would test a different product.
+   */
+  const say = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const engine = ensureEngine();
+      const at = Date.now();
+      const outcome = engine.handleTranscript(trimmed, at);
+      if (!outcome) return;
+
+      setHeard((previous) => {
+        const next = [...previous, { id: `${at}-typed`, text: trimmed, at, outcome }];
+        return next.length > 30 ? next.slice(-30) : next;
+      });
+      startTicking();
+      void requestReactions(trimmed, outcome, at);
+    },
+    [ensureEngine, startTicking, requestReactions],
   );
 
   const start = useCallback(async () => {
@@ -353,7 +421,7 @@ export function useSimulator(
         return next.length > 30 ? next.slice(-30) : next;
       });
 
-      void maybeRefillAi(outcome, at);
+      void requestReactions(text, outcome, at);
     });
 
     provider.events.on("interim", ({ text }) => setInterim(text));
@@ -374,7 +442,7 @@ export function useSimulator(
     pausedRef.current = false;
     startTicking();
     setStatus("running");
-  }, [status, providerId, isDemo, ensureEngine, startTicking, maybeRefillAi]);
+  }, [status, providerId, isDemo, ensureEngine, startTicking, requestReactions]);
 
   const stop = useCallback(() => {
     stopTicking();
@@ -505,5 +573,7 @@ export function useSimulator(
     updateSettings,
     subscribeLevel,
     overlaySubscribers,
+    aiStatus,
+    say,
   };
 }
