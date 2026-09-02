@@ -229,10 +229,10 @@ export function useSimulator(
          * square root keeps roughly comparable history without letting the
          * node count grow linearly with speed.
          */
-        const { messageBufferSize, chatSpeed } = settingsRef.current;
+        const { messageBufferSize, messagesPerSecond } = settingsRef.current;
         const cap = Math.min(
           MAX_RENDERED_MESSAGES,
-          Math.round(messageBufferSize * Math.sqrt(Math.max(1, chatSpeed))),
+          Math.round(messageBufferSize * Math.sqrt(Math.max(1, messagesPerSecond * 2))),
         );
         setMessages((previous) => {
           const next = [...previous, ...released];

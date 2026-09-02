@@ -7,7 +7,8 @@ import {
 } from "./ai-budget";
 import { shouldReact } from "./attention";
 import { classify } from "./classifier";
-import { directIdle, directReaction } from "./director";
+import { directOne } from "./director";
+import { TopicTracker, type Topic } from "./topics";
 import { Population } from "./population";
 import { createFilter, type Filter } from "./profanity";
 import { createRng, type Rng } from "./rng";
@@ -68,7 +69,11 @@ const REPEAT_WINDOW = 250;
  * Two rather than zero: a single straggler queued three seconds out is not
  * motion, and waiting for it leaves a visible gap.
  */
-const QUEUE_CARRIES_ITSELF = 2;
+/** Constant pull toward off-topic chatter when picking a conversation. */
+const AMBIENT_WEIGHT = 0.35;
+
+/** No topic may become mostly AI, whatever its momentum. */
+const AI_SHARE_CEILING = 0.35;
 
 export interface TranscriptOutcome {
   classification: Classification;
@@ -99,7 +104,11 @@ export class SimulationEngine {
 
   private emotes: readonly Emote[];
   private lastSpeechAt: number;
-  private lastIdleCheckAt: number;
+  private readonly topics = new TopicTracker();
+  /** When the rate governor says the next message should land. */
+  private nextEmitAt: number;
+  /** Monotonic, so two messages in the same millisecond get distinct ids. */
+  private emitSequence = 0;
   /** Recent speakers as [viewerId, username], for side-reply targeting. */
   private recentSpeakers: Array<readonly [string, string]> = [];
   /**
@@ -149,7 +158,7 @@ export class SimulationEngine {
 
     const now = options.now ?? Date.now();
     this.lastSpeechAt = now;
-    this.lastIdleCheckAt = now;
+    this.nextEmitAt = now;
     this.lastViewerDriftAt = now;
     // Start near the target rather than at it, so the first render already
     // looks like a live number rather than the setting echoed back.
@@ -166,10 +175,15 @@ export class SimulationEngine {
    * pacing control — leaving it fixed meant the top speed setting was clamped
    * straight back down to a readable trickle.
    */
+  /**
+   * Safety valve, not a target.
+   *
+   * The Poisson emitter already tracks messagesPerSecond; this exists only to
+   * stop a defect from flooding the renderer. Headroom above the target so
+   * legitimate high-momentum stretches are never clipped.
+   */
   private effectiveRateLimit(): number {
-    return Math.round(
-      this.settings.maxMessagesPerMinute * Math.max(0.25, this.settings.chatSpeed),
-    );
+    return Math.ceil(this.settings.messagesPerSecond * 60 * 1.6);
   }
 
   /** Actual viewers to simulate — the setting clamped to the real ceiling. */
@@ -272,21 +286,16 @@ export class SimulationEngine {
 
     this.previousWasIgnored = false;
 
-    const { messages, templates } = directReaction({
-      classification,
-      population: this.population,
-      settings: this.settings,
-      emotes: this.emotes,
-      aiCandidates: this.aiCandidates,
-      recentTexts: new Set(this.recentTexts),
-      lastTemplate: this.recentTexts.at(-1),
-      now,
-      rng: this.rng,
-    });
+    /**
+     * Folded into the conversation rather than turned straight into messages.
+     *
+     * The topic is what persists; the emitter draws from it over the following
+     * seconds. That indirection is the whole point — a burst generated here
+     * and forgotten is exactly the behaviour this replaced.
+     */
+    const topic = this.topics.observe(classification, text, now);
 
-    for (const template of templates) this.rememberText(template);
-    this.scheduler.enqueueBurst(messages, now);
-    return { classification, reacted: messages.length > 0, queued: messages.length };
+    return { classification, reacted: topic !== null, queued: this.scheduler.pending };
   }
 
   /**
@@ -295,7 +304,8 @@ export class SimulationEngine {
    */
   tick(now: number): ChatMessage[] {
     this.updateViewerCount(now);
-    this.maybeIdle(now);
+    this.topics.prune(now);
+    this.emitDue(now);
 
     const released = this.scheduler.tick(now);
     const visible: ChatMessage[] = [];
@@ -467,69 +477,109 @@ export class SimulationEngine {
     }
   }
 
-  private maybeIdle(now: number): void {
-    // Poll at ~1s rather than every frame; idle is not time-critical.
-    if (now - this.lastIdleCheckAt < 1000) return;
-    this.lastIdleCheckAt = now;
+  /**
+   * Rate governor.
+   *
+   * Emits every message whose scheduled moment has arrived, then draws the
+   * next gap. Gaps come from an exponential distribution, which is the correct
+   * model for independent arrivals: it produces natural jitter for free and
+   * its mean is exactly 1/rate, so timing variance costs nothing in rate
+   * accuracy. The old hand-tuned offset table could not make that promise.
+   */
+  private emitDue(now: number): void {
+    // A long pause between ticks must not fire a hundred backlogged messages.
+    if (now - this.nextEmitAt > 5_000) this.nextEmitAt = now;
 
-    const silentMs = now - this.lastSpeechAt;
-
-    /**
-     * Background filler stands down while a burst is still queued.
-     *
-     * Keyed on the scheduler's backlog rather than on a timer, because the
-     * backlog is the thing that actually matters: if messages are already
-     * waiting to be released then the burst *is* the motion, and adding
-     * ambient noise on top just salts a "spam W" with "chat fell off" and
-     * "it's so quiet". When the queue drains, filler resumes on its own.
-     *
-     * Self-scaling, which a timer was not — a sixteen-message directive burst
-     * holds filler off for as long as it needs, while a two-message reaction
-     * to background muttering barely delays it at all.
-     */
-    if (this.scheduler.pending > QUEUE_CARRIES_ITSELF) return;
-
-    /**
-     * Idle is polled about once a second, so a single message per poll caps
-     * ambient chat at ~60/min no matter what the speed setting says. That cap
-     * was why the top setting never felt chaotic: event bursts got bigger, but
-     * the constant background flow — which is most of what a busy chat *is* —
-     * stayed at a trickle. Higher speeds get proportionally more attempts.
-     */
-    const attempts = Math.max(1, Math.round(this.settings.chatSpeed));
-
-    for (let i = 0; i < attempts; i++) {
-      const idle = directIdle({
-        silentMs,
-        attempt: i,
-        population: this.population,
-        settings: this.settings,
-        emotes: this.emotes,
-        recentSpeakers: this.recentSpeakers,
-        recentTexts: new Set(this.recentTexts),
-        lastTemplate: this.recentTexts.at(-1),
-        now,
-        rng: this.rng,
-      });
-      if (!idle) continue;
-
-      this.rememberText(idle.template);
-      // Spread across the poll interval so they don't land on the same tick.
-      this.scheduler.enqueueAt(idle.message, now + this.rng.int(0, 900));
+    let guard = 0;
+    while (now >= this.nextEmitAt && guard++ < 32) {
+      const at = this.nextEmitAt;
+      this.produceOne(at);
+      this.nextEmitAt = at + this.drawGap(at);
     }
+  }
 
-    // Resize toward the configured audience whenever it doesn't match.
-    const target = this.simulatedViewers();
-    if (this.population.size !== target && this.rng.chance(0.4)) {
-      this.population.driftToward(target);
-      return;
+  /**
+   * Instantaneous rate, scaled by how much is going on.
+   *
+   * Quiet chat runs below the configured target and busy chat above it. The
+   * long-run average tracks the target because high-momentum stretches are
+   * short relative to idle — which is what lets one setting mean both "about
+   * one a second" and "the room goes wild when something happens".
+   */
+  private drawGap(now: number): number {
+    const activity = Math.min(1.9, this.topics.activity(now));
+    const rate = this.settings.messagesPerSecond * (0.45 + 1.15 * activity);
+    // 1 - next() so the draw is (0,1] and the logarithm is always finite.
+    return (-Math.log(1 - this.rng.next()) / Math.max(0.05, rate)) * 1000;
+  }
+
+  private produceOne(at: number): void {
+    const topic = this.pickTopic(at);
+    const stage = topic ? this.topics.stageOf(topic, at) : "developing";
+    const band = this.topics.band(topic ? this.topics.momentumOf(topic, at) : 0);
+
+    if (topic === null && !this.settings.idleEnabled) return;
+
+    const result = directOne({
+      topic,
+      stage,
+      band,
+      population: this.population,
+      settings: this.settings,
+      emotes: this.emotes,
+      aiCandidates: this.aiCandidates,
+      allowAi: this.invitesAi(band, stage),
+      recentTexts: new Set(this.recentTexts),
+      lastTemplate: this.recentTexts.at(-1),
+      recentSpeakers: this.recentSpeakers,
+      now: at,
+      silentMs: at - this.lastSpeechAt,
+      sequence: this.emitSequence++,
+      rng: this.rng,
+    });
+    if (!result) return;
+
+    if (result.template) this.rememberText(result.template);
+    if (topic) this.topics.recordParticipation(topic, result.viewerId);
+    this.scheduler.enqueueAt(result.message, at);
+  }
+
+  /**
+   * Which conversation this message belongs to.
+   *
+   * Weighted by momentum, with a constant-weight ambient slot so off-topic
+   * chatter, greetings and lurker noise never vanish entirely — even at the
+   * height of an event, somebody is still asking what game is on tomorrow.
+   */
+  private pickTopic(now: number): Topic | null {
+    const active = this.topics.active(now);
+    if (active.length === 0) return null;
+
+    const weights = active.map((topic) => this.topics.momentumOf(topic, now));
+    const total = weights.reduce((a, b) => a + b, 0) + AMBIENT_WEIGHT;
+
+    let roll = this.rng.float(0, total);
+    for (let i = 0; i < active.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) return active[i];
     }
+    return null;
+  }
 
-    // At target, turn the roster over at a rate proportional to its size.
-    // A 10-viewer stream swaps someone every several minutes; a 200-viewer
-    // one every twenty seconds or so. This is checked about once a second.
-    const churnChance = Math.min(0.05, this.settings.audienceSize / 4000);
-    if (this.rng.chance(churnChance)) this.population.churn();
+  /**
+   * Whether this message may draw on the AI pool.
+   *
+   * AI enriches peaks rather than carrying the simulation: likeliest when a
+   * topic is being developed at high momentum, rare during reflexive pile-on,
+   * and never the reason a message happens at all.
+   */
+  private invitesAi(band: string, stage: string): boolean {
+    if (this.settings.aiShare <= 0) return false;
+    const byBand =
+      band === "viral" ? 3.2 : band === "high" ? 2.2 : band === "medium" ? 1 : 0.5;
+    const byStage = stage === "reacting" ? 0.4 : 1.5;
+    const chance = Math.min(AI_SHARE_CEILING, this.settings.aiShare * byBand * byStage);
+    return this.rng.chance(chance);
   }
 
   /** Clears queued messages — used when the user pauses. */

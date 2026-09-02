@@ -38,14 +38,22 @@ import type { SimulatorStatus } from "@/lib/react/use-simulator";
  * drift if the director's burst sizes are retuned — treat them as the label
  * for a measured value, not as a target the engine enforces.
  */
-const SPEED_STEPS = [0.5, 0.8, 1.2, 2, 3.5, 12] as const;
+const SPEED_STEPS = [0.5, 1, 1.5, 2, 4] as const;
+
+/**
+ * Labelled in the unit the engine actually uses.
+ *
+ * The old scale was a 0.25-12 multiplier labelled "~30/min", which meant the
+ * setting, the engine and the tests all spoke different languages. Momentum
+ * still swings the instantaneous rate well above and below these numbers —
+ * they are the long-run average, not a metronome.
+ */
 const SPEED_LABELS = [
-  "~15/min",
-  "~20/min",
-  "~30/min",
-  "~70/min",
-  "~130/min",
-  "CHAOS",
+  "1 every 2s",
+  "~1/sec",
+  "~1.5/sec",
+  "~2/sec",
+  "Chaos ~4/sec",
 ] as const;
 
 
@@ -85,8 +93,8 @@ export function ControlPanel({
           label="Chat speed"
           steps={SPEED_STEPS}
           labels={SPEED_LABELS}
-          value={settings.chatSpeed}
-          onChange={(chatSpeed) => onChange({ chatSpeed })}
+          value={settings.messagesPerSecond}
+          onChange={(messagesPerSecond) => onChange({ messagesPerSecond })}
         />
       </div>
 

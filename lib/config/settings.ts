@@ -20,11 +20,15 @@ export const SimulationSettingsSchema = z.object({
    */
   audienceSize: z.number().int().min(5).max(10_000).default(50),
 
-  /** Global message-rate multiplier. 1 = tuned default. */
-  chatSpeed: z.number().min(0.25).max(12).default(1.2),
-
-  /** Hard ceiling so a hype spike can't flood the renderer. */
-  maxMessagesPerMinute: z.number().int().min(5).max(400).default(90),
+  /**
+   * Target output rate, in messages per second.
+   *
+   * An explicit unit rather than the old 0.25-12 multiplier, so the setting,
+   * the engine and the tests all mean the same thing. Momentum makes the
+   * instantaneous rate swing well above and below this; the long-run average
+   * is what tracks it.
+   */
+  messagesPerSecond: z.number().min(0.25).max(4).default(1),
 
   /** Idle chatter when the streamer goes quiet. */
   idleEnabled: z.boolean().default(true),
@@ -98,6 +102,34 @@ export const DEFAULT_SETTINGS: SimulationSettings =
 const STORAGE_KEY = "streamerchat-gg:settings:v2";
 
 /**
+ * Old `chatSpeed` multipliers mapped to the rates they actually produced.
+ *
+ * The multiplier was labelled in the UI as "~30/min" and friends, so these
+ * come from those labels rather than from the raw number. Anything not in the
+ * table falls through to the schema default, which is the right outcome for a
+ * hand-edited or corrupt value.
+ */
+const LEGACY_SPEED_TO_RATE: Readonly<Record<string, number>> = {
+  "0.5": 0.5,
+  "0.8": 0.5,
+  "1.2": 1,
+  "2": 1.5,
+  "3.5": 2,
+  "12": 4,
+};
+
+/** Rewrites a pre-messagesPerSecond blob in place. Unknown shapes pass through. */
+function migrate(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const blob = raw as Record<string, unknown>;
+  if ("messagesPerSecond" in blob || !("chatSpeed" in blob)) return blob;
+
+  const { chatSpeed, ...rest } = blob;
+  const mapped = LEGACY_SPEED_TO_RATE[String(chatSpeed)];
+  return mapped === undefined ? rest : { ...rest, messagesPerSecond: mapped };
+}
+
+/**
  * Storage is behind this interface so swapping localStorage for a database
  * later is a new implementation rather than a rewrite of every caller.
  */
@@ -113,7 +145,7 @@ export const localSettingsStore: SettingsStore = {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (!raw) return DEFAULT_SETTINGS;
       // Partial/unknown keys are coerced back to defaults by the schema.
-      const parsed = SimulationSettingsSchema.safeParse(JSON.parse(raw));
+      const parsed = SimulationSettingsSchema.safeParse(migrate(JSON.parse(raw)));
       return parsed.success ? parsed.data : DEFAULT_SETTINGS;
     } catch {
       return DEFAULT_SETTINGS;
