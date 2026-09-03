@@ -30,6 +30,8 @@ function Simulator() {
 
   const [chatOnly, setChatOnly] = useState(false);
   const [typed, setTyped] = useState("");
+  /** Non-whitespace text turns the one primary action into Send. */
+  const hasText = typed.trim().length > 0;
 
   /**
    * Sends typed text down the same path as a finished microphone utterance.
@@ -188,33 +190,60 @@ function Simulator() {
               aria-label="Send a message as the streamer"
               className="min-w-0 flex-1 rounded bg-[#464649] px-3 py-2 text-sm text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:outline-none"
             />
-            <button
-              type="button"
-              onClick={submitTyped}
-              disabled={!typed.trim()}
-              aria-label="Send"
-              title="Send as if you had said it"
-              className="rounded border-2 border-gray-600 px-3 py-2 text-sm text-gray-300 transition-colors hover:border-purple-500 hover:text-white disabled:opacity-40 disabled:hover:border-gray-600 disabled:hover:text-gray-300"
-            >
-              <SendHorizontal className="size-4" />
-            </button>
+            {/*
+              One primary action beside the input, never two.
+              
+              Empty field: this is Play/Playing/Paused, exactly as before.
+              Text present: it becomes Send, and clicking it must not touch the
+              running state — someone mid-sentence pressing the only button
+              next to their text means "send this", never "pause the stream".
+            */}
             <button
               type="button"
               onClick={() => {
+                if (hasText) {
+                  submitTyped();
+                  return;
+                }
                 if (!started) void simulator.start();
                 else if (live) simulator.pause();
                 else simulator.resume();
               }}
-              disabled={status === "starting"}
-              className={`min-w-[100px] rounded border-2 px-4 py-2 text-sm transition-colors disabled:opacity-60 ${
-                !started
+              disabled={!hasText && status === "starting"}
+              aria-label={
+                hasText
+                  ? "Send message"
+                  : !started
+                    ? "Start the simulator"
+                    : live
+                      ? "Pause the simulator"
+                      : "Resume the simulator"
+              }
+              title={
+                hasText
+                  ? "Send as if you had said it"
+                  : !started
+                    ? "Start"
+                    : live
+                      ? "Pause"
+                      : "Resume"
+              }
+              className={`flex min-w-[100px] items-center justify-center gap-1.5 rounded border-2 px-4 py-2 text-sm transition-colors disabled:opacity-60 ${
+                hasText
                   ? "border-purple-500 bg-purple-500 text-white hover:bg-purple-600"
-                  : live
-                    ? "border-green-500 bg-green-500 text-white hover:bg-green-600"
-                    : "border-orange-500 bg-transparent text-orange-500 hover:bg-orange-500/10"
+                  : !started
+                    ? "border-purple-500 bg-purple-500 text-white hover:bg-purple-600"
+                    : live
+                      ? "border-green-500 bg-green-500 text-white hover:bg-green-600"
+                      : "border-orange-500 bg-transparent text-orange-500 hover:bg-orange-500/10"
               }`}
             >
-              {status === "starting" ? (
+              {hasText ? (
+                <>
+                  <SendHorizontal className="size-4" />
+                  Send
+                </>
+              ) : status === "starting" ? (
                 "Starting"
               ) : !started ? (
                 "Play"
@@ -263,16 +292,38 @@ export default function SimulatorPage() {
  * is working as specified.
  */
 const AI_STATUS_MESSAGES: Record<string, string> = {
-  disabled: "AI is off — no GOOGLE_API_KEY set, or AI_MODE=off. Chat will stay quiet until you speak with it configured.",
-  "per-minute": "AI rate limit reached (per minute) — chat will resume shortly.",
-  "per-hour": "AI rate limit reached (per hour) — chat will resume when the window rolls over.",
-  cooldown: "Waiting out the AI cooldown between requests.",
-  empty: "The AI returned nothing usable for that one. Try saying something longer.",
-  error: "Couldn't reach the AI provider. Check the key and your connection.",
-  "http-rate-limited": "Too many requests too quickly — slowing down.",
-  invalid: "The generation request was rejected as malformed. This is a bug worth reporting.",
+  disabled:
+    "AI is off. Set GOOGLE_API_KEY in .env.local, or AI_MODE, then restart the dev server.",
+  auth: "The API key was rejected. Check GOOGLE_API_KEY in .env.local.",
+  "model-missing":
+    "That model isn't available to this key. Google retires models — try another in Settings → Chat.",
+  quota: "Gemini is rate limiting or the quota is spent. It should recover shortly.",
+  network: "Couldn't reach Gemini. Check the connection, then try again.",
+  "bad-response":
+    "Gemini replied in a shape we couldn't read. If this keeps happening it's worth reporting.",
+  empty:
+    "Gemini returned nothing for that one — usually a safety filter. Rephrasing often clears it.",
+  "all-rejected":
+    "Responses came back but none passed safety and length checks. Nothing was shown.",
+  "per-minute": "Pausing briefly — the per-minute AI limit was reached.",
+  "per-hour": "Pausing — the per-hour AI limit was reached.",
+  cooldown: "Waiting out the short cooldown between AI requests.",
+  "http-rate-limited": "Too many requests at once. Slowing down.",
+  invalid: "The generation request was malformed. This one is a bug — worth reporting.",
 };
 
+/**
+ * Why chat is quiet, when it is.
+ *
+ * Active responses are AI-only by design, so a failure means an empty chat
+ * rather than a degraded one. That has to be legible, and it has to name a
+ * cause the streamer can act on.
+ *
+ * The previous copy said the AI "returned nothing usable" and suggested saying
+ * something longer, which was wrong twice over: it blamed the streamer for a
+ * parser that could not read a valid response, and it named the same cause for
+ * a rejected key, a spent quota and a retired model.
+ */
 function AiStatusBanner({ status }: { status: string }) {
   const message = AI_STATUS_MESSAGES[status];
   if (!message) return null;

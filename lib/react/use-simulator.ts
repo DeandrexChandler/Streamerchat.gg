@@ -347,9 +347,10 @@ export function useSimulator(
         };
 
         if (!response.ok || !body.reactions?.length) {
+          // The server names the cause; the client never guesses at one.
           const why = body.status ?? `http ${response.status}`;
-          console.warn(`[ai] no reactions (${why}) — chat falls back to templates`);
-          setAiStatus(why === "ok" ? "empty" : why);
+          console.warn(`[ai] no reactions (${why}) — chat stays quiet`);
+          setAiStatus(why);
           return;
         }
 

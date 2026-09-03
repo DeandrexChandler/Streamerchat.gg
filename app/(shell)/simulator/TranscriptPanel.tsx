@@ -109,8 +109,7 @@ export function TranscriptPanel({
       </div>
 
       <footer className="flex-shrink-0 border-t border-gray-200 px-3 py-2 text-[10px] leading-tight text-gray-500 dark:border-gray-700 dark:text-gray-400">
-        HEARD means chat was asked to respond. IGNORED means the engine let it
-        pass on purpose — typed messages are never ignored.
+        Ignored when messages appear too bland. Repeated and Typed messages are never ignored. 
       </footer>
     </aside>
   );

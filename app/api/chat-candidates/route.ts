@@ -110,23 +110,47 @@ export async function POST(request: Request) {
   const elapsed = Date.now() - started;
 
   // Validation runs server-side so a client cannot skip it.
-  const reactions = validateReactions(generated, candidateRequest.recent);
+  const validated = validateReactions(generated.reactions, candidateRequest.recent);
 
-  if (reactions.length === 0) {
-    // Distinguished on purpose: "the model returned nothing" and "everything
-    // it returned was rejected" have completely different causes, and a single
-    // message for both sends you looking in the wrong place.
-    const why =
-      generated.length === 0
-        ? "provider returned nothing — bad key, refusal, or timeout"
-        : `all ${generated.length} rejected by validation`;
-    console.warn(`[ai] ← EMPTY after ${elapsed}ms (${why})`);
+  /**
+   * The provider's own verdict wins when it failed.
+   *
+   * "all-rejected" only makes sense if something actually came back; reporting
+   * it for a rejected key would send the streamer looking at safety rules for
+   * an authentication problem.
+   */
+  const status =
+    generated.status !== "ok"
+      ? generated.status
+      : validated.reactions.length === 0
+        ? "all-rejected"
+        : "ok";
+
+  if (validated.reactions.length === 0) {
+    const counts = Object.entries(validated.rejected)
+      .filter(([, n]) => n > 0)
+      .map(([rule, n]) => `${rule}=${n}`)
+      .join(" ");
+    console.warn(
+      `[ai] ← EMPTY after ${elapsed}ms | provider=${generated.status}` +
+        `${counts ? ` | rejected ${counts}` : ""}` +
+        `${generated.detail ? ` | ${generated.detail}` : ""}`,
+    );
   } else {
-    console.log(`[ai] ← ${reactions.length} reactions in ${elapsed}ms`);
+    console.log(
+      `[ai] ← ${validated.reactions.length} reactions in ${elapsed}ms` +
+        `${validated.echoed ? " (echoes — everything else duplicated recent chat)" : ""}`,
+    );
   }
 
   return NextResponse.json(
-    { reactions, status: "ok", usage: limiter.usage() },
+    {
+      reactions: validated.reactions,
+      status,
+      rejected: validated.rejected,
+      echoed: validated.echoed,
+      usage: limiter.usage(),
+    },
     { headers: { "cache-control": "no-store" } },
   );
 }

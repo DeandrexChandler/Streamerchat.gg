@@ -28,12 +28,12 @@ import {
   generateFromPool,
   measureLength,
   pickEmote,
-  pickEmoteByMood,
 } from "./generators/pool";
 import type { Population } from "./population";
 import type { Rng } from "./rng";
 import type { MomentumBand, Topic, TopicStage } from "./topics";
 import type { QueuedReaction } from "../ai/reaction";
+import { pickSemanticEmote } from "../emotes/semantic";
 import type {
   Classification,
   Emote,
@@ -106,12 +106,11 @@ function maybeEmoteOnly(
   if (emotes.length === 0) return null;
   if (!rng.chance(viewer.emoteAffinity * 0.55)) return null;
 
-  const emote = pickEmote(
+  const emote = pickSemanticEmote({
     emotes,
-    classification.intent,
-    classification.sentiment,
+    intent: classification.intent,
     rng,
-  );
+  });
   if (!emote) return null;
 
   // Repeats one emote rather than mixing several — "KEKW KEKW KEKW", not
@@ -136,12 +135,13 @@ function forcedEmoteOnly(
 ): string | null {
   if (emotes.length === 0) return null;
 
-  const emote = pickEmote(
+  // Semantic first here too: told to post emotes after saying hi, chat should
+  // reach for the `hi` emote rather than whatever the mood table suggests.
+  const emote = pickSemanticEmote({
     emotes,
-    classification.intent,
-    classification.sentiment,
+    intent: classification.intent,
     rng,
-  );
+  });
   if (!emote) return null;
 
   const count = emoteSpamCount(rng);
@@ -362,8 +362,13 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
      * sees an image URL, and a laughing line never picks up a sad emote —
      * which is what random insertion produced.
      */
-    if (settings.emotesEnabled && reaction.emotion && rng.chance(0.3)) {
-      const emote = pickEmoteByMood(emotes, reaction.emotion, rng);
+    if (settings.emotesEnabled && rng.chance(0.3)) {
+      const emote = pickSemanticEmote({
+        emotes,
+        intent: classification.intent,
+        emotion: reaction.emotion,
+        rng,
+      });
       if (emote) text = `${text} ${emote.name}`;
     }
   }

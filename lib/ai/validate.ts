@@ -29,6 +29,17 @@ const MAX_WORDS = 30;
 const MAX_CHARS = 200;
 
 /**
+ * Recent chat lines compared against for duplicates.
+ *
+ * Short: the point is stopping an immediate echo, not enforcing global
+ * novelty. Real chat repeats itself constantly.
+ */
+const RECENT_WINDOW = 8;
+
+/** How many echoes to release when nothing else survived. */
+const ECHO_FALLBACK = 4;
+
+/**
  * Lines that bite the broadcaster.
  *
  * CLAUDE.md is unambiguous: chat may be confused, may derail, may tease each
@@ -114,28 +125,85 @@ function isHostileToStreamer(text: string): boolean {
  * matching it is dropped, because an AI refill echoing a line that went out
  * ten seconds ago is worse than no refill at all.
  */
+export interface ValidationResult {
+  reactions: Reaction[];
+  /** How many fell to each rule. Reported so an empty batch names its cause. */
+  rejected: {
+    empty: number;
+    tooLong: number;
+    hostile: number;
+    duplicate: number;
+  };
+  /**
+   * True when dedup against recent chat emptied the batch and it was allowed
+   * back in. An echoed greeting beats a dead chat, but it is worth surfacing.
+   */
+  echoed: boolean;
+}
+
 export function validateReactions(
   reactions: readonly Reaction[],
   recent: readonly string[],
-): Reaction[] {
-  const seen = new Set(recent.map((line) => line.trim().toLowerCase()));
+): ValidationResult {
+  /**
+   * Only the last few lines.
+   *
+   * The whole recent buffer was used, which for a greeting is fatal: chat's
+   * greeting vocabulary is about six words wide, so after one round of hellos
+   * every subsequent greeting batch deduplicated to nothing and the streamer
+   * was told the AI had produced nothing usable.
+   */
+  const window = recent.slice(-RECENT_WINDOW);
+  const seen = new Set(window.map((line) => line.trim().toLowerCase()));
+  const rejected = { empty: 0, tooLong: 0, hostile: 0, duplicate: 0 };
   const out: Reaction[] = [];
+  /** Survived every rule except the recent-chat check. */
+  const echoes: Reaction[] = [];
 
   for (const reaction of reactions) {
-    if (typeof reaction?.text !== "string") continue;
+    if (typeof reaction?.text !== "string") {
+      rejected.empty += 1;
+      continue;
+    }
 
     const text = clean(reaction.text);
-    if (!text) continue;
-    if (text.length > MAX_CHARS) continue;
-    if (text.split(/\s+/).length > MAX_WORDS) continue;
-    if (isHostileToStreamer(text)) continue;
+    if (!text) {
+      rejected.empty += 1;
+      continue;
+    }
+    if (text.length > MAX_CHARS || text.split(/\s+/).length > MAX_WORDS) {
+      rejected.tooLong += 1;
+      continue;
+    }
+    if (isHostileToStreamer(text)) {
+      rejected.hostile += 1;
+      continue;
+    }
 
     const key = text.toLowerCase();
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      rejected.duplicate += 1;
+      // Held aside rather than discarded, in case nothing else survives.
+      if (!echoes.some((e) => e.text.toLowerCase() === key)) {
+        echoes.push({ ...reaction, text });
+      }
+      continue;
+    }
     seen.add(key);
 
     out.push({ ...reaction, text });
   }
 
-  return out;
+  /**
+   * Silence is worse than an echo.
+   *
+   * If every line duplicated something chat said recently, releasing a couple
+   * of them is a far better outcome than telling the streamer the AI failed.
+   * They said hello twice; chat saying hello twice is correct.
+   */
+  if (out.length === 0 && echoes.length > 0) {
+    return { reactions: echoes.slice(0, ECHO_FALLBACK), rejected, echoed: true };
+  }
+
+  return { reactions: out, rejected, echoed: false };
 }

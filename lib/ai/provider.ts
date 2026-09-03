@@ -38,13 +38,37 @@ export interface CandidateRequest {
   count: number;
 }
 
+/**
+ * Why a generation produced what it did.
+ *
+ * An empty batch used to be indistinguishable from a rejected key, an
+ * exhausted quota and a retired model — all of which reached the streamer as
+ * the same unhelpful line. These need different fixes, so they get different
+ * names.
+ */
+export type ProviderStatus =
+  | "ok"
+  | "auth"          // key rejected
+  | "model-missing" // retired, or not available to this key
+  | "quota"         // provider-side rate limit or exhausted quota
+  | "network"       // timeout, DNS, connection reset
+  | "bad-response"  // 2xx that could not be parsed
+  | "empty";        // parsed fine, contained nothing
+
+export interface GenerationResult {
+  reactions: Reaction[];
+  status: ProviderStatus;
+  /** The provider's own message, when it gave one. For logs, not the UI. */
+  detail?: string;
+}
+
 export interface CandidateProvider {
   readonly name: string;
   /**
-   * Returns audience reactions, or an empty array.
+   * Returns audience reactions and why.
    *
-   * Never throws. An AI outage must degrade variety, never stop chat, so
-   * every failure path resolves to `[]` and lets the pool tier carry on.
+   * Never throws. Active chat is AI-only, so a failure means chat stays quiet
+   * and the reason is surfaced — never a deterministic pool standing in.
    */
-  generate(request: CandidateRequest): Promise<Reaction[]>;
+  generate(request: CandidateRequest): Promise<GenerationResult>;
 }

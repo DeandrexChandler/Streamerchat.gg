@@ -39,7 +39,7 @@ describe("gemini provider", () => {
         reply('[{"text":"no shot","emotion":"hype"},{"text":"actual cinema"}]'),
       ),
     );
-    const out = await p.generate(request);
+    const out = (await p.generate(request)).reactions;
     expect(out.map((r) => r.text)).toEqual(["no shot", "actual cinema"]);
     expect(out[0].emotion).toBe("hype");
   });
@@ -48,29 +48,29 @@ describe("gemini provider", () => {
     const p = provider(
       vi.fn(async () => reply('```json\n[{"text":"w"},{"text":"gg"}]\n```')),
     );
-    expect((await p.generate(request)).map((r) => r.text)).toEqual(["w", "gg"]);
+    expect((await p.generate(request)).reactions.map((r) => r.text)).toEqual(["w", "gg"]);
   });
 
   it("tolerates prose wrapped around the array", async () => {
     const p = provider(
       vi.fn(async () => reply('Sure!\n[{"text":"one"},{"text":"two"}]\nHope that helps.')),
     );
-    expect((await p.generate(request)).map((r) => r.text)).toEqual(["one", "two"]);
+    expect((await p.generate(request)).reactions.map((r) => r.text)).toEqual(["one", "two"]);
   });
 
   it("returns nothing when there is no JSON at all", async () => {
     const p = provider(vi.fn(async () => reply("no shot\nactual cinema")));
-    expect(await p.generate(request)).toEqual([]);
+    expect((await p.generate(request)).reactions).toEqual([]);
   });
 
   it("returns [] on malformed output rather than throwing", async () => {
     const p = provider(vi.fn(async () => reply("")));
-    expect(await p.generate(request)).toEqual([]);
+    expect((await p.generate(request)).reactions).toEqual([]);
   });
 
   it("returns [] on an HTTP error", async () => {
     const p = provider(vi.fn(async () => ({ ok: false, status: 429 }) as Response));
-    await expect(p.generate(request)).resolves.toEqual([]);
+    expect((await p.generate(request)).reactions).toEqual([]);
   });
 
   it("returns [] when the request throws", async () => {
@@ -79,12 +79,12 @@ describe("gemini provider", () => {
         throw new Error("network down");
       }),
     );
-    await expect(p.generate(request)).resolves.toEqual([]);
+    expect((await p.generate(request)).reactions).toEqual([]);
   });
 
   it("drops malformed entries", async () => {
     const p = provider(vi.fn(async () => reply('[{"text":"ok"},5,null,{"text":"fine"}]')));
-    expect((await p.generate(request)).map((r) => r.text)).toEqual(["ok", "fine"]);
+    expect((await p.generate(request)).reactions.map((r) => r.text)).toEqual(["ok", "fine"]);
   });
 
   it("sends the key in a header, never in the url", async () => {

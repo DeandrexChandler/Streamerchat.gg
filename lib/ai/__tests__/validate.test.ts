@@ -5,7 +5,7 @@ import type { Reaction } from "../reaction";
 /** Wraps bare strings so the existing cases read unchanged. */
 function validateCandidates(lines: readonly string[], recent: readonly string[]): string[] {
   const reactions: Reaction[] = lines.map((text) => ({ text }));
-  return validateReactions(reactions, recent).map((r) => r.text);
+  return validateReactions(reactions, recent).reactions.map((r) => r.text);
 }
 
 describe("validateCandidates", () => {

@@ -1,6 +1,11 @@
 import { buildPrompt } from "./prompt";
-import type { CandidateProvider, CandidateRequest } from "./provider";
-import { ReactionBatchSchema, type Reaction } from "./reaction";
+import type {
+  CandidateProvider,
+  CandidateRequest,
+  GenerationResult,
+  ProviderStatus,
+} from "./provider";
+import { ReactionSchema, type Reaction } from "./reaction";
 
 /**
  * Gemini implementation of the candidate provider.
@@ -68,35 +73,81 @@ export interface GeminiOptions {
 /**
  * Pulls reactions out of whatever the model actually returned.
  *
- * Asking for "a JSON array and nothing else" gets one most of the time. The
- * rest of the time it arrives fenced in ```json or wrapped in a sentence of
- * preamble, so the widest bracketed span is used rather than the whole string.
+ * Three shapes are accepted, because models emit all three and rejecting two
+ * of them was a silent total loss:
  *
- * A truncated array is salvaged object by object instead of being discarded:
- * eleven usable reactions out of twelve is a better outcome than none, and
- * truncation is a real occurrence when a model spends output tokens thinking.
+ *   [{"text":"hi"}]        the requested shape
+ *   ["hi","hey"]           a bare string array, which short prompts often get
+ *                          back because the object wrapper feels like overkill
+ *   {"reactions":[...]}    a wrapper the model added unprompted
+ *
+ * Only the first was handled, so asking chat to react to "hi" could return a
+ * perfectly good batch and score zero.
+ *
+ * A truncated array is salvaged element by element rather than discarded:
+ * eleven usable reactions out of twelve beats none, and truncation is real
+ * when a model spends output tokens thinking.
  */
 export function parseReactions(text: string): Reaction[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
 
+  const direct = coerce(tryJson(trimmed));
+  if (direct.length > 0) return direct;
+
   const start = trimmed.indexOf("[");
   const end = trimmed.lastIndexOf("]");
-
   if (start !== -1 && end > start) {
-    const parsed = ReactionBatchSchema.safeParse(
-      tryJson(trimmed.slice(start, end + 1)),
-    );
-    if (parsed.success) return parsed.data;
+    const span = coerce(tryJson(trimmed.slice(start, end + 1)));
+    if (span.length > 0) return span;
   }
 
-  // Salvage: every complete {...} object in the span, in order.
+  // Salvage from a truncated array: complete objects first, then bare strings.
   const salvaged: Reaction[] = [];
   for (const match of trimmed.matchAll(/\{[^{}]*\}/g)) {
-    const one = ReactionBatchSchema.safeParse([tryJson(match[0])]);
-    if (one.success) salvaged.push(...one.data);
+    salvaged.push(...coerce([tryJson(match[0])]));
+  }
+  if (salvaged.length > 0) return salvaged;
+
+  /**
+   * Bare-string salvage, and only when the payload is not objects.
+   *
+   * A truncated object array contains `"text"` as a *key*, and scanning it for
+   * quoted strings harvests field names as though they were chat messages.
+   */
+  if (start !== -1 && !trimmed.includes("{")) {
+    for (const match of trimmed.slice(start).matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+      salvaged.push(...coerce([tryJson(`"${match[1]}"`)]));
+    }
   }
   return salvaged;
+}
+
+/** Normalises any accepted shape into validated reactions. */
+function coerce(value: unknown): Reaction[] {
+  if (value === null || value === undefined) return [];
+
+  // A wrapper object the model added of its own accord.
+  if (!Array.isArray(value) && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of ["reactions", "messages", "chat", "lines", "items"]) {
+      if (Array.isArray(record[key])) return coerce(record[key]);
+    }
+    // A single reaction object rather than an array of one.
+    const single = ReactionSchema.safeParse(value);
+    return single.success ? [single.data] : [];
+  }
+
+  const list = Array.isArray(value) ? value : [value];
+  const out: Reaction[] = [];
+  for (const entry of list) {
+    // A bare string is a reaction with no metadata, which is fine — the emote
+    // selector falls back to the topic's own mood when emotion is absent.
+    const candidate = typeof entry === "string" ? { text: entry } : entry;
+    const parsed = ReactionSchema.safeParse(candidate);
+    if (parsed.success) out.push(parsed.data);
+  }
+  return out;
 }
 
 function tryJson(raw: string): unknown {
@@ -107,6 +158,8 @@ function tryJson(raw: string): unknown {
   }
 }
 
+
+
 export function createGeminiProvider(options: GeminiOptions): CandidateProvider {
   const model = options.model || DEFAULT_MODEL;
   const doFetch = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
@@ -114,7 +167,7 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
   return {
     name: `gemini:${model}`,
 
-    async generate(request: CandidateRequest): Promise<Reaction[]> {
+    async generate(request: CandidateRequest): Promise<GenerationResult> {
       try {
         const response = await doFetch(
           `${ENDPOINT}/${encodeURIComponent(model)}:generateContent`,
@@ -159,32 +212,58 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
         );
 
         if (!response.ok) {
-          /**
-           * The status and the provider's own message.
-           *
-           * "returned nothing" cannot distinguish an exhausted free-tier
-           * quota from a bad key from a model that no longer exists, and
-           * those need completely different fixes.
-           */
           const detail = await response.text().catch(() => "");
+          const status = statusFor(response.status);
           console.warn(
-            `[ai] ${model} HTTP ${response.status}: ${detail.slice(0, 300)}`,
+            `[ai] ${model} HTTP ${response.status} (${status}): ${detail.slice(0, 300)}`,
           );
-          return [];
+          return { reactions: [], status, detail: detail.slice(0, 300) };
         }
 
         const body = (await response.json()) as {
-          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+          candidates?: Array<{
+            content?: { parts?: Array<{ text?: string }> };
+            finishReason?: string;
+          }>;
         };
 
         const text = body.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-        return parseReactions(text);
+        if (!text.trim()) {
+          // A 2xx with no text: usually a safety block or a finishReason that
+          // stopped before any content was produced.
+          const finish = body.candidates?.[0]?.finishReason ?? "none";
+          console.warn(`[ai] ${model} returned no text (finishReason ${finish})`);
+          return { reactions: [], status: "empty", detail: `finishReason ${finish}` };
+        }
+
+        const reactions = parseReactions(text);
+        if (reactions.length === 0) {
+          console.warn(`[ai] ${model} output could not be parsed: ${text.slice(0, 200)}`);
+          return { reactions, status: "bad-response", detail: text.slice(0, 200) };
+        }
+        return { reactions, status: "ok" };
       } catch (error) {
-        // Timeout, network failure, malformed JSON. Logged with the reason,
-        // because a silent empty batch looks identical to a refusal.
-        console.warn(`[ai] ${model} request failed: ${String(error).slice(0, 200)}`);
-        return [];
+        // Timeout, DNS, connection reset. Logged with the reason, because a
+        // silent empty batch looks identical to a refusal.
+        const detail = String(error).slice(0, 200);
+        console.warn(`[ai] ${model} request failed: ${detail}`);
+        return { reactions: [], status: "network", detail };
       }
     },
   };
+}
+
+/**
+ * Maps an HTTP status onto something the streamer can act on.
+ *
+ * 404 is separated out because Google retires models and returns 404 with a
+ * "no longer available to new users" message — which reads as a broken app
+ * unless it is named for what it is.
+ */
+function statusFor(httpStatus: number): ProviderStatus {
+  if (httpStatus === 401 || httpStatus === 403) return "auth";
+  if (httpStatus === 404) return "model-missing";
+  if (httpStatus === 429) return "quota";
+  if (httpStatus >= 500) return "network";
+  return "bad-response";
 }

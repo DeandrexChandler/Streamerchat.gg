@@ -1,4 +1,8 @@
-import type { CandidateProvider, CandidateRequest } from "./provider";
+import type {
+  CandidateProvider,
+  CandidateRequest,
+  GenerationResult,
+} from "./provider";
 import type { Reaction } from "./reaction";
 
 /**
@@ -30,11 +34,14 @@ const SHAPES: ReadonlyArray<(said: string) => Reaction> = [
 export function createMockProvider(): CandidateProvider {
   return {
     name: "mock",
-    async generate(request: CandidateRequest): Promise<Reaction[]> {
+    async generate(request: CandidateRequest): Promise<GenerationResult> {
       const said = request.utterance.trim() || "nothing";
-      return Array.from({ length: request.count }, (_, i) =>
-        SHAPES[i % SHAPES.length](said),
-      );
+      return {
+        reactions: Array.from({ length: request.count }, (_, i) =>
+          SHAPES[i % SHAPES.length](said),
+        ),
+        status: "ok",
+      };
     },
   };
 }

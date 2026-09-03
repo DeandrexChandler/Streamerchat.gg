@@ -265,24 +265,3 @@ export function decorateWithEmotes(
   return text;
 }
 
-/**
- * Picks an emote matching a stated mood.
- *
- * The counterpart to the AI producing `emotion: "hype"` rather than an image
- * URL: semantics come from the model, the concrete emote comes from whatever
- * pack the user actually imported. Unknown-mood emotes are eligible as a
- * fallback because a large imported pack is mostly channel-specific names the
- * classifier cannot place, and excluding them would leave thin packs with
- * nothing to offer.
- */
-export function pickEmoteByMood(
-  emotes: readonly Emote[],
-  mood: EmoteMood,
-  rng: Rng,
-): Emote | null {
-  const matching = emotes.filter((emote) => emote.mood === mood);
-  if (matching.length > 0) return rng.pick(matching);
-
-  const wildcards = emotes.filter((emote) => emote.mood === "unknown");
-  return wildcards.length > 0 ? rng.pick(wildcards) : null;
-}
