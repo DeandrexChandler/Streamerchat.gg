@@ -64,7 +64,16 @@ export async function POST(request: Request) {
 
   const parsed = CandidateRequestSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ reactions: [], status: "invalid" }, { status: 400 });
+    // Which field, and why. "invalid" on its own sends you reading the whole
+    // request shape looking for the one thing that moved.
+    const issues = parsed.error.issues
+      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+      .join("; ");
+    console.warn(`[ai] INVALID REQUEST — ${issues}`);
+    return NextResponse.json(
+      { reactions: [], status: "invalid", issues },
+      { status: 400 },
+    );
   }
 
   const { model, ...candidateRequest } = parsed.data;

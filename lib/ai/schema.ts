@@ -55,8 +55,13 @@ export const CandidateRequestSchema = z.object({
   }),
   emotes: z.array(z.string().max(60)).max(200).default([]),
   recent: z.array(z.string().max(200)).max(30).default([]),
-  streamer: z.string().max(40).optional(),
-  topic: z.string().max(80).optional(),
+  /**
+   * Nullish rather than optional: JSON.stringify drops `undefined`, but any
+   * caller that sends an explicit `null` should be treated as "not set" rather
+   * than failing the whole request over an absent nicety.
+   */
+  streamer: z.string().max(40).nullish().transform((v) => v ?? undefined),
+  topic: z.string().max(80).nullish().transform((v) => v ?? undefined),
   count: z.number().int().min(1).max(40).default(16),
   model: z.string().max(60).optional(),
 });

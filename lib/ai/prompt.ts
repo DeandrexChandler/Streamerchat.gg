@@ -16,8 +16,16 @@ import type { CandidateRequest } from "./provider";
 /** Recent utterances included as context. Enough to follow a change of mind. */
 const MAX_HISTORY = 6;
 
-/** Emote names shown. A full pack would dominate the prompt and cost more. */
-const MAX_EMOTES_IN_PROMPT = 40;
+/**
+ * Emote names shown to the model.
+ *
+ * Exported because the client must not send more than this. It used to send
+ * the entire merged pack — several hundred names once a channel pack was
+ * imported — which blew past the request schema's cap and got every single
+ * generation rejected as malformed. Sending what the prompt actually uses
+ * removes the class of bug rather than raising a number.
+ */
+export const MAX_EMOTES_IN_PROMPT = 40;
 
 /** Recent chat lines shown, so a batch does not echo what just went out. */
 const MAX_RECENT_IN_PROMPT = 10;

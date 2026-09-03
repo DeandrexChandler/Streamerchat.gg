@@ -158,7 +158,20 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
           },
         );
 
-        if (!response.ok) return [];
+        if (!response.ok) {
+          /**
+           * The status and the provider's own message.
+           *
+           * "returned nothing" cannot distinguish an exhausted free-tier
+           * quota from a bad key from a model that no longer exists, and
+           * those need completely different fixes.
+           */
+          const detail = await response.text().catch(() => "");
+          console.warn(
+            `[ai] ${model} HTTP ${response.status}: ${detail.slice(0, 300)}`,
+          );
+          return [];
+        }
 
         const body = (await response.json()) as {
           candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
@@ -166,8 +179,10 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
 
         const text = body.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
         return parseReactions(text);
-      } catch {
-        // Timeout, network failure, malformed JSON — all the same to callers.
+      } catch (error) {
+        // Timeout, network failure, malformed JSON. Logged with the reason,
+        // because a silent empty batch looks identical to a refusal.
+        console.warn(`[ai] ${model} request failed: ${String(error).slice(0, 200)}`);
         return [];
       }
     },

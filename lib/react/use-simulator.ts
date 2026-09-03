@@ -12,6 +12,7 @@ import {
 } from "../config/emote-store";
 import type { EmotePack } from "../emotes/seventv";
 import type { Reaction } from "../ai/reaction";
+import { MAX_EMOTES_IN_PROMPT } from "../ai/prompt";
 
 /**
  * Reactions requested per utterance, scaled by chat speed.
@@ -327,7 +328,11 @@ export function useSimulator(
             // Everything before this utterance, so a change of mind is legible.
             history: historyRef.current.slice(0, -1),
             classification: outcome.classification,
-            emotes: emotesRef.current.map((emote) => emote.name),
+            // Only what the prompt will use. A full imported pack is several
+            // hundred names, which the request schema rejects outright.
+            emotes: emotesRef.current
+              .slice(0, MAX_EMOTES_IN_PROMPT)
+              .map((emote) => emote.name),
             recent: recentTextsRef.current,
             streamer: settingsRef.current.streamerName || undefined,
             topic: settingsRef.current.streamTopic || undefined,
