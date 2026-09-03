@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Loader2, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { AUTO_PACK_ID, localEmotePackStore } from "@/lib/config/emote-store";
+import {
+  AUTO_PACK_ID,
+  localEmotePackStore,
+  mergeEmotes,
+} from "@/lib/config/emote-store";
+import { EmoteTagger } from "./EmoteTagger";
 import type { EmotePack } from "@/lib/emotes/seventv";
 
 /**
@@ -72,6 +77,9 @@ export default function EmotesPage() {
   );
 
   const total = packs.reduce((sum, p) => sum + p.emotes.length, 0);
+  // One list across every pack, deduplicated the same way chat sees it, so a
+  // tag is assigned to the emote that will actually be posted.
+  const merged = useMemo(() => mergeEmotes(packs, {}), [packs]);
 
   return (
     <div className="h-full overflow-y-auto">
@@ -231,6 +239,8 @@ export default function EmotesPage() {
             )}
           </CardContent>
         </Card>
+
+        <EmoteTagger emotes={merged} />
       </div>
     </div>
   );

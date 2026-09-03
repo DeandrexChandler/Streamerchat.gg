@@ -162,11 +162,52 @@ export type EmoteMood =
    */
   | "unknown";
 
+/**
+ * What a moment an emote suits.
+ *
+ * Deliberately the same vocabulary as Intent plus "idle" and "general", so a
+ * tag can be matched against the classifier's output with no translation.
+ */
+export type EmoteTag =
+  | "greeting"
+  | "farewell"
+  | "hype"
+  | "achievement"
+  | "struggle"
+  | "confusion"
+  | "question"
+  | "showing"
+  | "story"
+  | "idle"
+  | "general";
+
+export const EMOTE_TAGS: readonly EmoteTag[] = [
+  "greeting",
+  "farewell",
+  "hype",
+  "achievement",
+  "struggle",
+  "confusion",
+  "question",
+  "showing",
+  "story",
+  "idle",
+  "general",
+];
+
 export interface Emote {
   id: string;
   /** The token as typed in chat, e.g. "KEKW". */
   name: string;
   mood: EmoteMood;
+  /**
+   * Tags the user assigned by hand.
+   *
+   * Absent on every emote until someone edits one, and checked before mood —
+   * guessing a category from a name like "GAMBA" or "xqcWOT" is unreliable, so
+   * the person who imported the pack gets the final say.
+   */
+  tags?: readonly EmoteTag[];
   /** Image URL. Required — there is no text-only emote tier. */
   url: string;
   width?: number;

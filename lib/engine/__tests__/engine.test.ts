@@ -609,3 +609,110 @@ describe("emote-only mode", () => {
  * "just got here", "real". The streamer was talking directly to chat and chat
  * answered with noise.
  */
+
+describe("viewers do not repeat themselves", () => {
+  /**
+   * The reported bug, verbatim:
+   *
+   *   quinn: sup
+   *   sillyDrift53: hey BlacBushido
+   *   quinn: heyyyy
+   *   sillyDrift53: hey man !
+   *
+   * One person greeting twice is the tell. Chat as a whole repeating a phrase
+   * is fine and stays allowed.
+   */
+  it("never lets one viewer post the same line twice", () => {
+    const engine = new SimulationEngine({
+      seed: 99,
+      now: 0,
+      emotes: FIXTURE_EMOTES,
+      settings: { idleEnabled: false },
+    });
+
+    const out: ChatMessage[] = [];
+    for (let now = 0; now <= 60_000; now += 250) {
+      if (now % 5_000 === 0) {
+        engine.handleTranscript("hey what's up chat", now);
+        engine.supplyReactions(
+          [
+            { text: "hey", emotion: "chill" },
+            { text: "sup", emotion: "chill" },
+            { text: "yo", emotion: "chill" },
+          ],
+          now,
+        );
+      }
+      out.push(...engine.tick(now));
+    }
+
+    const seen = new Map<string, Set<string>>();
+    for (const message of out) {
+      const said = seen.get(message.username) ?? new Set<string>();
+      const normalised = message.text.toLowerCase().replace(/[^a-z0-9 ]/g, "");
+      expect(said.has(normalised)).toBe(false);
+      said.add(normalised);
+      seen.set(message.username, said);
+    }
+    expect(out.length).toBeGreaterThan(10);
+  });
+
+  it("treats heyyyy as the same thing as hey", () => {
+    const engine = new SimulationEngine({
+      seed: 7,
+      now: 0,
+      emotes: [],
+      settings: { idleEnabled: false },
+    });
+
+    engine.handleTranscript("hi everyone", 0);
+    engine.supplyReactions(
+      Array.from({ length: 40 }, (_, i) =>
+        i % 2 === 0
+          ? { text: "hey", emotion: "chill" as const }
+          : { text: "heyyyy", emotion: "chill" as const },
+      ),
+      0,
+    );
+
+    const out: ChatMessage[] = [];
+    for (let now = 0; now <= 40_000; now += 250) out.push(...engine.tick(now));
+
+    for (const [, texts] of groupByUser(out)) {
+      const collapsed = texts.map((text) => text.replace(/(.)\1{1,}/g, "$1"));
+      expect(new Set(collapsed).size).toBe(collapsed.length);
+    }
+  });
+
+  it("still lets different viewers say the same thing", () => {
+    const engine = new SimulationEngine({
+      seed: 3,
+      now: 0,
+      emotes: [],
+      settings: { idleEnabled: false },
+    });
+
+    engine.handleTranscript("we just won", 0);
+    engine.supplyReactions(
+      Array.from({ length: 30 }, () => ({ text: "W", emotion: "hype" as const })),
+      0,
+    );
+
+    const out: ChatMessage[] = [];
+    for (let now = 0; now <= 30_000; now += 250) out.push(...engine.tick(now));
+
+    // A pile-on is many people saying one word. That has to survive.
+    expect(out.filter((message) => message.text.includes("W")).length)
+      .toBeGreaterThan(3);
+  });
+});
+
+function groupByUser(messages: ChatMessage[]): Map<string, string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const message of messages) {
+    const texts = grouped.get(message.username) ?? [];
+    texts.push(message.text.toLowerCase());
+    grouped.set(message.username, texts);
+  }
+  return grouped;
+}

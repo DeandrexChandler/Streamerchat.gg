@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createGeminiProvider, parseReactions } from "../gemini";
+import { createGeminiProvider } from "../gemini";
+import { parseReactions } from "../parse";
 import type { CandidateRequest } from "../provider";
 
 const request: CandidateRequest = {

@@ -12,8 +12,23 @@
 
 export type AiMode = "live" | "mock" | "off";
 
+/** Which upstream to call. Configuration, never a rewrite. */
+export type AiProviderId = "openai" | "gemini";
+
+const DEFAULT_MODELS: Record<AiProviderId, string> = {
+  openai: "gpt-4o-mini",
+  gemini: "gemini-3.5-flash-lite",
+};
+
+/** The env var each provider reads its key from. */
+export const KEY_ENV: Record<AiProviderId, string> = {
+  openai: "OPENAI_API_KEY",
+  gemini: "GOOGLE_API_KEY",
+};
+
 export interface AiConfig {
   mode: AiMode;
+  provider: AiProviderId;
   model: string;
   /** Ceilings. The per-minute one is what protects a free-tier daily quota. */
   maxCallsPerMinute: number;
@@ -38,7 +53,10 @@ function num(name: string, fallback: number): number {
 }
 
 export function loadAiConfig(): AiConfig {
-  const hasKey = Boolean(process.env.GOOGLE_API_KEY);
+  const provider: AiProviderId =
+    (process.env.AI_PROVIDER ?? "").toLowerCase() === "gemini" ? "gemini" : "openai";
+
+  const hasKey = Boolean(process.env[KEY_ENV[provider]]);
   const requested = (process.env.AI_MODE ?? "").toLowerCase();
 
   const mode: AiMode =
@@ -51,7 +69,8 @@ export function loadAiConfig(): AiConfig {
 
   return {
     mode,
-    model: process.env.AI_MODEL || "gemini-3.5-flash-lite",
+    provider,
+    model: process.env.AI_MODEL || DEFAULT_MODELS[provider],
     maxCallsPerMinute: num("AI_MAX_CALLS_PER_MINUTE", 6),
     maxCallsPerHour: num("AI_MAX_CALLS_PER_HOUR", 120),
     cooldownMs: num("AI_COOLDOWN_MS", 3_000),

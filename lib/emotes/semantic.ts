@@ -1,4 +1,4 @@
-import type { Emote, EmoteMood, Intent } from "../engine/types";
+import type { Emote, EmoteMood, EmoteTag, Intent } from "../engine/types";
 import type { Rng } from "../engine/rng";
 
 /**
@@ -12,15 +12,37 @@ import type { Rng } from "../engine/rng";
  *
  * Priority, highest first:
  *
- *   1. A name that semantically matches the intent — `hi`, `wave`, `peepoHi`
- *   2. A strong mood match for the intent
- *   3. Unknown-mood wildcards, which are most of any imported pack
- *   4. Anything at all, rarely, so variation survives
+ *   1. A tag the user assigned by hand
+ *   2. A name that semantically matches the intent — `hi`, `wave`, `peepoHi`
+ *   3. A strong mood match for the intent
+ *   4. Unknown-mood wildcards, which are most of any imported pack
+ *   5. Anything at all, rarely, so variation survives
  *
  * Names are matched on a normalised form, because packs are full of `Hi`,
  * `peepoHi`, `helloThere` and `HYPERS` and none of them are typed the way the
  * classifier would guess.
  */
+
+/**
+ * The tag that suits each intent.
+ *
+ * Checked before names and before moods: a user who took the trouble to mark
+ * an emote as a greeting has said something more reliable than any guess we
+ * can make from "GAMBA" or "xqcWOT".
+ */
+const INTENT_TAG: Partial<Record<Intent, EmoteTag>> = {
+  greeting: "greeting",
+  farewell: "farewell",
+  achievement: "achievement",
+  excitement: "hype",
+  directive: "hype",
+  struggle: "struggle",
+  confusion: "confusion",
+  question_to_chat: "question",
+  showing: "showing",
+  story: "story",
+  mundane: "idle",
+};
 
 /**
  * Name fragments that mean each intent, best first.
@@ -101,6 +123,13 @@ export function pickSemanticEmote({
   // A rare escape hatch, so a pack's best match does not become the only thing
   // chat ever posts for a given intent.
   if (rng.chance(WILDCARD_ESCAPE)) return rng.pick([...emotes]);
+
+  // 1. What the user said this emote is for.
+  const wanted = INTENT_TAG[intent];
+  if (wanted) {
+    const tagged = emotes.filter((emote) => emote.tags?.includes(wanted));
+    if (tagged.length > 0) return rng.pick(tagged);
+  }
 
   for (const fragment of SEMANTIC_NAMES[intent] ?? []) {
     const matches = emotes.filter((emote) => nameMatches(emote.name, fragment));

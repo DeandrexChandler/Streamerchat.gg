@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { RateLimiter, clientKey } from "@/lib/http/rate-limit";
 import { createGeminiProvider } from "@/lib/ai/gemini";
+import { createOpenAiProvider } from "@/lib/ai/openai";
 import { createMockProvider } from "@/lib/ai/mock";
-import { AiRateLimiter, loadAiConfig } from "@/lib/ai/config";
+import { AiRateLimiter, KEY_ENV, loadAiConfig } from "@/lib/ai/config";
 import { validateReactions } from "@/lib/ai/validate";
 import { CandidateRequestSchema } from "@/lib/ai/schema";
 
@@ -91,14 +92,19 @@ export async function POST(request: Request) {
     );
   }
 
+  const apiKey = process.env[KEY_ENV[config.provider]] ?? "";
+  const settings = {
+    apiKey,
+    model: model || config.model,
+    maxOutputTokens: config.maxOutputTokens,
+  };
+
   const provider =
     config.mode === "mock"
       ? createMockProvider()
-      : createGeminiProvider({
-          apiKey: process.env.GOOGLE_API_KEY ?? "",
-          model: model || config.model,
-          maxOutputTokens: config.maxOutputTokens,
-        });
+      : config.provider === "gemini"
+        ? createGeminiProvider(settings)
+        : createOpenAiProvider(settings);
 
   console.log(
     `[ai] → ${provider.name} | ctx=${candidateRequest.history.length} | batch=${count} | "${said}"`,

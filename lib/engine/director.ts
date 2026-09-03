@@ -37,6 +37,7 @@ import { pickSemanticEmote } from "../emotes/semantic";
 import type {
   Classification,
   Emote,
+  Intent,
   LengthClass,
   MessageKind,
   PendingMessage,
@@ -170,7 +171,7 @@ function complyWithDirective(
 
   if (!target) {
     // "let me hear it" — no token to post, so the room just gets loud.
-    const emote = pickEmote(emotes, classification.intent, classification.sentiment, rng);
+    const emote = pickSemanticEmote({ emotes, intent: classification.intent, rng });
     if (!emote) return null;
     return Array.from({ length: emoteSpamCount(rng) }, () => emote.name).join(" ");
   }
@@ -192,6 +193,55 @@ function answersFor(
   if (subject === "visual") return VISUAL_ANSWERS;
   if (subject === "presence") return PRESENCE_ANSWERS;
   return null;
+}
+
+/**
+ * How often a message for this intent should be an emote instead of a sentence.
+ *
+ * Some things chat says are not sentences. Nobody types "hello, welcome to the
+ * stream" — they post the wave emote. Nobody answers "spam W" in prose. These
+ * are the moments where a wall of words reads as fake, so most of the room
+ * posts an emote and the rest talk.
+ *
+ * Everything absent here stays text-first: a story or a question deserves an
+ * actual reply.
+ */
+const EMOTE_FORWARD: Partial<Record<Intent, number>> = {
+  greeting: 0.65,
+  farewell: 0.5,
+  directive: 0.75,
+  achievement: 0.5,
+  excitement: 0.45,
+};
+
+/**
+ * An emote-only message, shaped a few different ways.
+ *
+ * The shapes matter more than they look. Forty viewers posting one identical
+ * token is a bot net; the same forty mixing singles, spam and pairs is a room.
+ */
+function emoteReply(
+  emotes: readonly Emote[],
+  intent: Intent,
+  emotion: QueuedReaction["emotion"] | undefined,
+  rng: Rng,
+): string | null {
+  const emote = pickSemanticEmote({ emotes, intent, emotion, rng });
+  if (!emote) return null;
+
+  const roll = rng.next();
+  if (roll < 0.4) return emote.name;
+  if (roll < 0.75) {
+    return Array.from({ length: rng.int(2, 5) }, () => emote.name).join(" ");
+  }
+
+  // A second, independently chosen emote. When the pack only owns one emote
+  // for this moment it comes back the same, and a bare single is the better
+  // line than the same token twice.
+  const second = pickSemanticEmote({ emotes, intent, emotion, rng });
+  return second && second.name !== emote.name
+    ? `${emote.name} ${second.name}`
+    : emote.name;
 }
 
 export interface DirectOptions {
@@ -264,6 +314,8 @@ export interface DirectOneOptions {
   lastTemplate?: string;
   /** Recent speakers as [viewerId, username], for side replies. */
   recentSpeakers: ReadonlyArray<readonly [string, string]>;
+  /** Viewers who may not speak again in this phase. Used during arrival. */
+  excludeSpeakers?: ReadonlySet<string>;
   now: number;
   /** Milliseconds since the streamer last spoke, for idle escalation. */
   silentMs: number;
@@ -355,6 +407,21 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
     source = "ai";
 
     /**
+     * For the moments chat answers with an emote, most of them do.
+     *
+     * The generated line is dropped for this message, not for the batch: the
+     * rest of the room still says the words. And this only runs where a
+     * reaction exists at all, so a provider failure still produces silence
+     * rather than a screen of emotes standing in for an answer.
+     */
+    const forward = EMOTE_FORWARD[classification.intent] ?? 0;
+    const only =
+      settings.emotesEnabled && forward > 0 && rng.chance(forward)
+        ? emoteReply(emotes, classification.intent, reaction.emotion, rng)
+        : null;
+    if (only) text = only;
+
+    /**
      * Emotes chosen from the reaction's own emotion, not at random.
      *
      * The model says how the line feels; the deterministic side picks a 7TV
@@ -362,7 +429,10 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
      * sees an image URL, and a laughing line never picks up a sad emote —
      * which is what random insertion produced.
      */
-    if (settings.emotesEnabled && rng.chance(0.3)) {
+    // Skipped when the message is already nothing but emotes: appending a
+    // second, independently chosen one there is how "peepoBye" turned into
+    // "NOWAYING NOWAYING NOWAYING peepoBye".
+    if (!only && settings.emotesEnabled && rng.chance(0.3)) {
       const emote = pickSemanticEmote({
         emotes,
         intent: classification.intent,
@@ -481,10 +551,28 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
  * conversation happening.
  */
 function pickTopicSpeaker(options: DirectOneOptions) {
-  const { topic, stage, population, now, rng } = options;
+  const { topic, stage, population, now, rng, excludeSpeakers } = options;
+  if (excludeSpeakers && excludeSpeakers.size > 0) {
+    // Hard exclusion, not a weighting: during arrival each viewer gets one
+    // greeting and no more.
+    return population.pickSpeaker(now, new Set(excludeSpeakers));
+  }
   if (!topic) return population.pickSpeaker(now);
 
   const participants = [...topic.participants.keys()];
+
+  /**
+   * Some things you only say once.
+   *
+   * Saying hello twice in the same arrival is the tell that gave the
+   * simulation away — "quinn: sup" followed four lines later by
+   * "quinn: heyyyy". A viewer who has greeted has greeted; if everyone in the
+   * room already has, the topic goes quiet rather than looping.
+   */
+  if (ONE_SHOT_INTENTS.has(topic.intent)) {
+    return population.pickSpeaker(now, new Set(participants));
+  }
+
   const wantsRepeat =
     participants.length > 0 &&
     rng.chance(stage === "reacting" ? 0.1 : stage === "developing" ? 0.35 : 0.5);
@@ -495,6 +583,9 @@ function pickTopicSpeaker(options: DirectOneOptions) {
   }
   return population.pickSpeaker(now, new Set(participants));
 }
+
+/** Intents where one message per viewer is the whole of what a person says. */
+const ONE_SHOT_INTENTS = new Set<Intent>(["greeting", "farewell"]);
 
 /** A topic's classification, or a neutral one for off-topic chatter. */
 function classificationFor(topic: Topic | null): Classification {

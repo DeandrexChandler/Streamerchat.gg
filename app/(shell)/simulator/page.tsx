@@ -293,16 +293,17 @@ export default function SimulatorPage() {
  */
 const AI_STATUS_MESSAGES: Record<string, string> = {
   disabled:
-    "AI is off. Set GOOGLE_API_KEY in .env.local, or AI_MODE, then restart the dev server.",
-  auth: "The API key was rejected. Check GOOGLE_API_KEY in .env.local.",
+    "AI is off. Add an API key to .env.local (or unset AI_MODE) and restart the dev server.",
+  auth: "The API key was rejected. Check the key in .env.local.",
   "model-missing":
-    "That model isn't available to this key. Google retires models — try another in Settings → Chat.",
-  quota: "Gemini is rate limiting or the quota is spent. It should recover shortly.",
-  network: "Couldn't reach Gemini. Check the connection, then try again.",
+    "That model isn't available to this key. Providers retire models — try another in Settings → Chat.",
+  quota: "The provider is rate limiting, or the quota is spent. It should recover shortly.",
+  timeout: "The provider took too long to answer. It usually works on the next try.",
+  network: "Couldn't reach the AI provider. Check the connection, then try again.",
   "bad-response":
-    "Gemini replied in a shape we couldn't read. If this keeps happening it's worth reporting.",
+    "The provider replied in a shape we couldn't read. Worth reporting if it keeps happening.",
   empty:
-    "Gemini returned nothing for that one — usually a safety filter. Rephrasing often clears it.",
+    "The provider returned nothing for that one — usually a safety filter. Rephrasing often clears it.",
   "all-rejected":
     "Responses came back but none passed safety and length checks. Nothing was shown.",
   "per-minute": "Pausing briefly — the per-minute AI limit was reached.",

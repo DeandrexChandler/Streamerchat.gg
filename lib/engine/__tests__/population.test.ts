@@ -160,3 +160,57 @@ describe("Population username vocabulary", () => {
     expect(inUse.size).toBeGreaterThan(0);
   });
 });
+
+describe("speakers do not answer themselves", () => {
+  /**
+   * Reported pattern, where one viewer held both sides of a greeting:
+   *
+   *   quinn: sup
+   *   quinn: heyyyy
+   *
+   * Damping a recent speaker to 8% weight was not enough to stop it.
+   */
+  it("does not pick the same viewer twice in quick succession", () => {
+    const population = new Population(createRng(4), 40);
+    let now = 0;
+    let immediateRepeats = 0;
+    let previous: string | undefined;
+
+    for (let i = 0; i < 200; i += 1) {
+      const speaker = population.pickSpeaker(now);
+      if (!speaker) continue;
+      if (speaker.id === previous) immediateRepeats += 1;
+      population.markSpoke(speaker.id, now);
+      previous = speaker.id;
+      now += 800; // a busy chat, well inside the cooldown
+    }
+
+    expect(immediateRepeats).toBe(0);
+  });
+
+  it("still finds someone when the whole room is tiny", () => {
+    // The lowest speed tier is a three-viewer stream; a cooldown that starved
+    // chat there would be worse than the repetition it prevents.
+    const population = new Population(createRng(9), 3);
+    let now = 0;
+    for (let i = 0; i < 30; i += 1) {
+      const speaker = population.pickSpeaker(now);
+      expect(speaker).toBeDefined();
+      population.markSpoke(speaker!.id, now);
+      now += 500;
+    }
+  });
+
+  it("lets a viewer speak again once the cooldown has passed", () => {
+    const population = new Population(createRng(2), 4);
+    const first = population.pickSpeaker(0)!;
+    population.markSpoke(first.id, 0);
+
+    const seen = new Set<string>();
+    for (let t = 20_000; t < 40_000; t += 1_000) {
+      const speaker = population.pickSpeaker(t);
+      if (speaker) seen.add(speaker.id);
+    }
+    expect(seen.has(first.id)).toBe(true);
+  });
+});

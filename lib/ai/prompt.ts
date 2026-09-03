@@ -89,13 +89,23 @@ export function buildPrompt(request: CandidateRequest): string {
     );
   }
 
+  /**
+   * A JSON *object* wrapping the array, not a bare array.
+   *
+   * OpenAI's json_object response format requires a top-level object and will
+   * not emit a bare array, so asking for one invites the model to improvise a
+   * wrapper name. Asking for the wrapper directly removes the guesswork; the
+   * parser accepts either shape regardless.
+   */
   lines.push(
     "",
-    `Return a JSON array of exactly ${count} objects. No other text. Each object:`,
+    `Return JSON: an object with one key "reactions", holding an array of exactly ${count} objects.`,
+    "Each object:",
     '  { "text": string,',
     '    "emotion": one of hype | funny | sad | confused | love | chill,',
     '    "kind": one of reaction | question | joke | callback | agree | disagree | emote,',
     '    "eagerness": number 0-1, where 1 is a reflexive one-word reply and 0 is someone who took a while to type }',
+    "No other text.",
   );
 
   return lines.join("\n");

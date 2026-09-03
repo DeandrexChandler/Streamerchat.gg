@@ -9,9 +9,16 @@
  *   npm run simulate -- 12345           # fixed seed, reproducible
  *   npm run simulate -- --channel=xqc   # import a channel's emotes
  *   npm run simulate -- --no-emotes     # skip emotes entirely
+ *
+ * Active chat is AI-only, so the harness supplies reactions from the mock
+ * provider. That means the *wording* here is not what a real session produces
+ * — it is fixed shapes — but everything the harness exists to judge (pacing,
+ * gaps, who speaks, emote choice, repetition) is deterministic code and is
+ * exactly what a real session does. No API calls, no quota.
  */
 
 import { SimulationEngine } from "../lib/engine/engine";
+import { createMockProvider } from "../lib/ai/mock";
 import { readFileSync, writeFileSync } from "node:fs";
 import { buildEmoteIndex, isEmoteOnly } from "../lib/data/emotes";
 import {
@@ -95,6 +102,8 @@ const engine = new SimulationEngine({
   settings: { audienceSize: 45, aiShare: 0 }, // aiShare 0 = fully offline run
 });
 
+const provider = createMockProvider();
+
 const clock = (ms: number) => {
   const total = Math.floor(ms / 1000);
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(
@@ -121,6 +130,21 @@ for (let now = 0; now <= DURATION_S * 1000; now += STEP_MS) {
     const [, text, energy] = SCRIPT[scriptIndex++];
     const outcome = engine.handleTranscript(text, now, energy);
     const c = outcome?.classification;
+
+    // Stand in for the AI tier. The engine emits nothing active without it.
+    // Awaited rather than fired off, so the batch lands on this tick — a real
+    // session's latency is a separate concern and not what this measures.
+    if (outcome?.reacted) {
+      const batch = await provider.generate({
+        utterance: text,
+        history: [],
+        classification: outcome.classification,
+        emotes: EMOTES.map((emote) => emote.name),
+        recent: [],
+        count: 14,
+      });
+      engine.supplyReactions(batch.reactions, now);
+    }
     console.log(
       `\n${DIM}${clock(now)}${RESET} ${BOLD}STREAMER:${RESET} ${text}` +
         `\n${DIM}          -> ${c?.intent} / ${c?.sentiment} ` +

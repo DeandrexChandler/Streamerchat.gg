@@ -1,4 +1,9 @@
 import type { Emote } from "../engine/types";
+import {
+  applyEmoteTags,
+  localEmoteTagStore,
+  type EmoteTagMap,
+} from "./emote-tags";
 import type { EmotePack } from "../emotes/seventv";
 
 /**
@@ -82,13 +87,19 @@ export const localEmotePackStore: EmotePackStore = {
  * Later packs win on name collisions, so a channel's own version of a shared
  * emote beats an earlier import — which is what a viewer of that channel
  * would actually see.
+ *
+ * User-assigned tags are folded on here rather than at each call site, because
+ * the one thing that must never happen is a re-import silently dropping them.
  */
-export function mergeEmotes(packs: readonly EmotePack[]): Emote[] {
+export function mergeEmotes(
+  packs: readonly EmotePack[],
+  tags: EmoteTagMap = localEmoteTagStore.load(),
+): Emote[] {
   const byName = new Map<string, Emote>();
   for (const pack of packs) {
     for (const emote of pack.emotes) byName.set(emote.name.toLowerCase(), emote);
   }
-  return [...byName.values()];
+  return applyEmoteTags([...byName.values()], tags);
 }
 
 /** Id of the auto-imported popular pack, so the UI can label it. */

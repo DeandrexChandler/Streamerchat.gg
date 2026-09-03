@@ -12,6 +12,17 @@ import type { Viewer } from "./types";
  * lurk, and the ability for one viewer to reply to another — none of which is
  * expressible if every line comes from a fresh random username.
  */
+/**
+ * How long a viewer is excluded outright after speaking.
+ *
+ * Long enough to break a back-to-back exchange with themselves, short enough
+ * that a regular can still carry a conversation across a burst.
+ */
+const SPEAKER_COOLDOWN_MS = 6_000;
+
+/** Below this many rested viewers, the cooldown is relaxed rather than starving chat. */
+const MIN_SPEAKER_CHOICES = 3;
+
 export class Population {
   private readonly viewers = new Map<string, Viewer>();
   private readonly takenNames = new Set<string>();
@@ -134,7 +145,25 @@ export class Population {
     const eligible = this.all().filter((v) => !exclude.has(v.id));
     if (eligible.length === 0) return undefined;
 
-    return this.rng.weighted(eligible, (viewer) => {
+    /**
+     * A hard cooldown, not just a weighting.
+     *
+     * Damping a recent speaker to 8% still re-picked them constantly, which
+     * produced the giveaway pattern of one viewer answering themselves:
+     *
+     *   quinn: sup
+     *   quinn: heyyyy
+     *
+     * Anyone who spoke very recently is removed outright — unless doing so
+     * leaves too few people to choose between, which is a real case at the
+     * lowest speed tier where the whole room is three viewers.
+     */
+    const rested = eligible.filter(
+      (v) => now - v.lastSpokeAt >= SPEAKER_COOLDOWN_MS,
+    );
+    const pool = rested.length >= MIN_SPEAKER_CHOICES ? rested : eligible;
+
+    return this.rng.weighted(pool, (viewer) => {
       const silentFor = now - viewer.lastSpokeAt;
       // Full weight once ~15s have passed; heavily damped immediately after.
       const recency = Math.min(1, silentFor / 15_000);

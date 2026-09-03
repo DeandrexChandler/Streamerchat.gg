@@ -51,7 +51,8 @@ export type ProviderStatus =
   | "auth"          // key rejected
   | "model-missing" // retired, or not available to this key
   | "quota"         // provider-side rate limit or exhausted quota
-  | "network"       // timeout, DNS, connection reset
+  | "timeout"       // the request ran past its deadline
+  | "network"       // DNS, connection reset, provider 5xx
   | "bad-response"  // 2xx that could not be parsed
   | "empty";        // parsed fine, contained nothing
 

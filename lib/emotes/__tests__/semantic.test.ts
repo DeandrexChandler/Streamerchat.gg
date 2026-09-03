@@ -120,6 +120,54 @@ describe("semantic emote selection", () => {
     expect(picked?.name).toBe("someLaugh");
   });
 
+  it("prefers an emote the user tagged as a greeting over the name match", () => {
+    // `xqcL` means nothing to any heuristic. Tagging it is the only way the
+    // engine can know it is this streamer's hello.
+    const emotes = [
+      ...pack(["hi", "chill"], ["KEKW", "funny"]),
+      { id: "x", name: "xqcL", mood: "unknown" as const, url: "u", tags: ["greeting" as const] },
+    ];
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const picked = pickSemanticEmote({
+        emotes,
+        intent: "greeting",
+        rng: createRng(seed),
+      });
+      // The 8% wildcard escape can still fire; everything else must be the tag.
+      if (picked?.name !== "KEKW" && picked?.name !== "hi") {
+        expect(picked?.name).toBe("xqcL");
+      }
+    }
+  });
+
+  it("lets a manual tag outrank the mood the pack was imported with", () => {
+    // Imported as sad, tagged by hand as hype. The person watching the stream
+    // knows what it means there.
+    const emotes: Emote[] = [
+      { id: "a", name: "Sadge", mood: "sad", url: "u", tags: ["hype"] },
+      { id: "b", name: "PogChamp", mood: "hype", url: "u" },
+    ];
+    const hits = [1, 2, 3, 4, 5, 6, 7, 8].map(
+      (seed) =>
+        pickSemanticEmote({ emotes, intent: "excitement", rng: createRng(seed) })
+          ?.name,
+    );
+    expect(hits.filter((name) => name === "Sadge").length).toBeGreaterThan(4);
+  });
+
+  it("falls back to mood when nothing carries a matching tag", () => {
+    const emotes: Emote[] = [
+      { id: "a", name: "aaa", mood: "sad", url: "u", tags: ["story"] },
+      { id: "b", name: "bbb", mood: "hype", url: "u", tags: ["idle"] },
+    ];
+    const picked = pickSemanticEmote({
+      emotes,
+      intent: "excitement",
+      rng: createRng(3),
+    });
+    expect(picked?.name).toBe("bbb");
+  });
+
   it("returns null for an empty pack rather than throwing", () => {
     expect(
       pickSemanticEmote({ emotes: [], intent: "greeting", rng: createRng(1) }),

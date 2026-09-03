@@ -135,6 +135,24 @@ export interface EngineStats {
   ignored: number;
 }
 
+/** How many past lines are remembered per viewer. */
+const VIEWER_MEMORY = 6;
+
+/**
+ * Collapses a line to what it actually says.
+ *
+ * Repeated letters and punctuation go, because "hey", "heyyyy" and "hey!!"
+ * are one person saying hello three times, not three contributions.
+ */
+function normaliseSaid(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/(.)\1{1,}/g, "$1")
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export class SimulationEngine {
   private settings: SimulationSettings;
   private readonly rng: Rng;
@@ -157,6 +175,14 @@ export class SimulationEngine {
    * from a fixed list.
    */
   private recentTexts: string[] = [];
+
+  /**
+   * What each viewer has said lately, normalised.
+   *
+   * Bounded per viewer, and the map itself is bounded by the population — a
+   * viewer who leaves takes their entry with them on the next reroll.
+   */
+  private viewerTexts = new Map<string, string[]>();
   /**
    * Who said what recently, for the per-viewer repeat cap.
    *
@@ -176,6 +202,17 @@ export class SimulationEngine {
    */
   private reactions: QueuedReaction[] = [];
   private nextBatchId = 0;
+  /**
+   * True from Start until the streamer first says something.
+   *
+   * The room is arriving, not reacting. Intro content is released through the
+   * same scheduler as everything else, but it must not survive the first real
+   * utterance — greetings to an empty stream landing after the streamer has
+   * started talking read as chat being a message behind.
+   */
+  private introducing = false;
+  /** Viewers who already posted an intro line, so nobody arrives twice. */
+  private introSpeakers = new Set<string>();
 
   private previousIntent: Classification["intent"] | undefined;
   /** Normalised previous utterance, for detecting a literal repeat. */
@@ -269,6 +306,25 @@ export class SimulationEngine {
     this.reactions = queued;
   }
 
+  /**
+   * Opens the arrival phase. Called on Start.
+   *
+   * Idempotent, and deliberately separate from supplying the batch: the intro
+   * generation is a network round trip, and the microphone must not wait on it.
+   */
+  beginIntro(now: number): void {
+    this.introducing = true;
+    this.introSpeakers.clear();
+    // A fresh stream is a fresh room. Nothing anyone said last session should
+    // stop them saying it now.
+    this.viewerTexts.clear();
+    this.lastSpeechAt = now;
+  }
+
+  get isIntroducing(): boolean {
+    return this.introducing;
+  }
+
   /** How many reactions are still waiting. Surfaced for the dev trace. */
   get pendingReactions(): number {
     return this.reactions.length;
@@ -313,6 +369,19 @@ export class SimulationEngine {
 
     const previousSpeechAt = this.lastSpeechAt;
     this.lastSpeechAt = now;
+
+    /**
+     * The arrival phase is over the moment the streamer speaks.
+     *
+     * Queued intro lines are dropped rather than drained: "im early" landing
+     * after the first sentence makes chat look a message behind.
+     */
+    if (this.introducing) {
+      this.introducing = false;
+      this.introSpeakers.clear();
+      this.reactions = [];
+      this.scheduler.flush();
+    }
 
     /**
      * A new utterance invalidates the *stale tail* of the previous burst:
@@ -462,6 +531,29 @@ export class SimulationEngine {
   private rememberText(template: string): void {
     this.recentTexts.push(template);
     if (this.recentTexts.length > 40) this.recentTexts.shift();
+  }
+
+  /**
+   * Whether this viewer has already said this, near enough.
+   *
+   * Chat as a whole repeats itself constantly and that is correct — a pile-on
+   * is fifty people saying the same three words. One *person* repeating
+   * themselves is not: "quinn: sup" followed by "quinn: heyyyy" is the moment
+   * a streamer stops believing the room.
+   *
+   * The reaction is deliberately not consumed when this rejects, so the line
+   * survives and someone else says it on the next tick.
+   */
+  private echoesSelf(viewerId: string, text: string): boolean {
+    const said = this.viewerTexts.get(viewerId);
+    return said !== undefined && said.includes(normaliseSaid(text));
+  }
+
+  private rememberSaid(viewerId: string, text: string): void {
+    const said = this.viewerTexts.get(viewerId) ?? [];
+    said.push(normaliseSaid(text));
+    if (said.length > VIEWER_MEMORY) said.shift();
+    this.viewerTexts.set(viewerId, said);
   }
 
   /** Messages released in the last 30s. Drives the fatigue damper. */
@@ -620,6 +712,13 @@ export class SimulationEngine {
       stage,
       band: this.topics.band(topic ? this.topics.momentumOf(topic, at) : 0),
       reaction,
+      /**
+       * During arrival, nobody says hello twice.
+       *
+       * A stream opening with the same three names greeting repeatedly is the
+       * loudest possible tell that the room is generated.
+       */
+      excludeSpeakers: this.introducing ? this.introSpeakers : undefined,
       population: this.population,
       settings: this.settings,
       emotes: this.emotes,
@@ -632,8 +731,11 @@ export class SimulationEngine {
       rng: this.rng,
     });
     if (!result) return;
+    if (this.echoesSelf(result.viewerId, result.message.text)) return;
 
     if (reaction) this.reactions.shift();
+    this.rememberSaid(result.viewerId, result.message.text);
+    if (this.introducing) this.introSpeakers.add(result.viewerId);
     if (result.template) this.rememberText(result.template);
     if (topic) this.topics.recordParticipation(topic, result.viewerId);
     this.scheduler.enqueueAt(result.message, at);
@@ -649,6 +751,9 @@ export class SimulationEngine {
    */
   private idleShare(now: number): number {
     if (!this.settings.idleEnabled) return 0;
+    // Arrival is its own phase; idle chatter about an absent streamer while
+    // people are still saying hello is nonsense.
+    if (this.introducing) return 0;
 
     const silentMs = now - this.lastSpeechAt;
     const startsAt = this.settings.idleAfterSeconds * 1000;
@@ -675,7 +780,9 @@ export class SimulationEngine {
       rng: this.rng,
     });
     if (!result) return;
+    if (this.echoesSelf(result.viewerId, result.message.text)) return;
 
+    this.rememberSaid(result.viewerId, result.message.text);
     if (result.template) this.rememberText(result.template);
     this.scheduler.enqueueAt(result.message, at);
   }
