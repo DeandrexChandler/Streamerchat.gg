@@ -39,15 +39,19 @@ Deterministic code owns: timing, message frequency, usernames, colors, emote
 selection, personalities, idle behaviour, scheduling, rate limiting, settings,
 UI state, analytics.
 
-AI is allowed only where language generation genuinely helps: novel phrasing
-for unusual statements, occasional longer messages, and topping up variety when
-the classifier is unsure. It refills a *candidate pool* that the scheduler
-drains — it is never in the request path for "what is the next message".
+**AI owns the wording of active chat. Deterministic code owns everything
+else.** One batch is generated per streamer utterance — never one call per
+rendered message — and the scheduler releases it over the following seconds.
 
 Consequences that must stay true:
-- The app runs fully, with good output, with **zero API keys set**.
-- An AI outage degrades variety. It never stops chat.
-- No AI call for anything a lookup table or a rule can decide.
+- Active responses come from the AI provider, 100% of the time. Deterministic
+  pools must never quietly stand in for it: a streamer cannot tell canned text
+  from an answer, and silently mixing the two makes the product dishonest.
+- A missing key, an invalid key, a rate limit or a provider failure is
+  **surfaced**, not papered over. Chat goes quiet and the status says why.
+- Idle chatter is the one exception, and only after real silence.
+- No AI call for anything a lookup table or a rule can decide: timing,
+  usernames, colours, viewer counts, emote choice, safety filtering.
 
 ## Avoid both failure modes
 

@@ -28,12 +28,19 @@ export const SimulationSettingsSchema = z.object({
    * instantaneous rate swing well above and below this; the long-run average
    * is what tracks it.
    */
-  messagesPerSecond: z.number().min(0.25).max(4).default(1),
+  messagesPerSecond: z.number().min(0.2).max(4).default(1),
 
   /** Idle chatter when the streamer goes quiet. */
   idleEnabled: z.boolean().default(true),
-  /** Seconds of silence before idle chatter starts. */
-  idleAfterSeconds: z.number().min(5).max(120).default(14),
+  /**
+   * Seconds of silence before idle chatter starts blending in.
+   *
+   * Sixty, not fourteen. Idle is what chat does when the streamer has actually
+   * stopped, and at fourteen seconds it was interrupting ordinary pauses for
+   * breath. Reaching this point does not switch idle on outright — see
+   * IDLE_FULL_AFTER_MS in the engine for the ramp.
+   */
+  idleAfterSeconds: z.number().min(5).max(300).default(60),
 
   /** Probability that a message replies to another viewer instead of the streamer. */
   sideConversationChance: z.number().min(0).max(0.6).default(0.12),

@@ -67,11 +67,22 @@ const TICK_MS = 200;
  */
 const MAX_RENDERED_MESSAGES = 500;
 
+/** Where an utterance came from. Never inferred from the text itself. */
+export type TranscriptSource = "microphone" | "typed";
+
 /** One thing the streamer said, and what the engine made of it. */
 export interface HeardUtterance {
   id: string;
   text: string;
   at: number;
+  source: TranscriptSource;
+  /**
+   * Whether the engine accepted it for response generation.
+   *
+   * Typed input is always heard — the streamer chose to send it, so the
+   * attention gate has no business second-guessing that.
+   */
+  heard: boolean;
   outcome: TranscriptOutcome;
 }
 
@@ -360,14 +371,34 @@ export function useSimulator(
       if (!trimmed) return;
       const engine = ensureEngine();
       const at = Date.now();
-      const outcome = engine.handleTranscript(trimmed, at);
+      const outcome = engine.handleTranscript(trimmed, at, undefined, true);
       if (!outcome) return;
 
       setHeard((previous) => {
-        const next = [...previous, { id: `${at}-typed`, text: trimmed, at, outcome }];
+        const next = [
+          ...previous,
+          {
+            id: `${at}-typed-${trimmed.length}`,
+            text: trimmed,
+            at,
+            source: "typed" as const,
+            // Always. The streamer deliberately sent this.
+            heard: true,
+            outcome,
+          },
+        ];
         return next.length > 30 ? next.slice(-30) : next;
       });
       startTicking();
+      /**
+       * Typing is an unambiguous intent to start.
+       *
+       * The pill means "the simulation is running", which is now true. The
+       * microphone is untouched — micLabel stays empty and the meter stays
+       * flat — so the two states remain distinguishable at a glance, and this
+       * is the only way to use the product without granting mic permission.
+       */
+      setStatus((current) => (current === "running" ? current : "running"));
       void requestReactions(trimmed, outcome, at);
     },
     [ensureEngine, startTicking, requestReactions],
@@ -417,11 +448,22 @@ export function useSimulator(
       if (!outcome) return;
 
       setHeard((previous) => {
-        const next = [...previous, { id: `${at}-${text.length}`, text, at, outcome }];
+        const next = [
+          ...previous,
+          {
+            id: `${at}-mic-${text.length}`,
+            text,
+            at,
+            source: "microphone" as const,
+            heard: outcome.reacted,
+            outcome,
+          },
+        ];
         return next.length > 30 ? next.slice(-30) : next;
       });
 
-      void requestReactions(text, outcome, at);
+      // Only generate for what the engine actually accepted.
+      if (outcome.reacted) void requestReactions(text, outcome, at);
     });
 
     provider.events.on("interim", ({ text }) => setInterim(text));

@@ -38,7 +38,17 @@ import type { SimulatorStatus } from "@/lib/react/use-simulator";
  * drift if the director's burst sizes are retuned — treat them as the label
  * for a measured value, not as a target the engine enforces.
  */
-const SPEED_STEPS = [0.5, 1, 1.5, 2, 4] as const;
+/**
+ * The six tiers, paired one-to-one with SPEED_LABELS below.
+ *
+ * There were five steps against six labels, so CHAOS was unreachable — the
+ * slider could never reach the index that renders it.
+ *
+ * CHAOS is 4/sec because that is the schema ceiling on messagesPerSecond, and
+ * the scheduler's derived rate cap is built from the same number. Its label
+ * deliberately states no rate: it is a mood, not a measurement.
+ */
+const SPEED_STEPS = [0.2, 0.5, 1, 1.5, 2, 4] as const;
 
 /**
  * Labelled in the unit the engine actually uses.
@@ -53,11 +63,12 @@ const SPEED_STEPS = [0.5, 1, 1.5, 2, 4] as const;
  * it rendering as ordinary text.
  */
 const SPEED_LABELS = [
-  "1 every 2s",
-  "~1/sec",
-  "~1.5/sec",
-  "~2/sec",
-  "CHAOS",
+  "~0.2/sec", // 3-11 unique usernames/viewers
+  "~0.5/sec", // 12-24 unique usernames/viewers
+  "~1/sec",   // 25-180 unique usernames/viewers
+  "~1.5/sec", // 181-500 unique usernames/viewers
+  "~2/sec",   // 501-1000 unique usernames/viewers
+  "CHAOS",    // 1000+ unique usernames/viewers (however many engine can handle)
 ] as const;
 
 

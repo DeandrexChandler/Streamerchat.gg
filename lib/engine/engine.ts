@@ -89,7 +89,23 @@ const AMBIENT_WEIGHT = 0.35;
  * synchronised, and a room where every single line answers the streamer reads
  * as a machine. Ten percent is enough to break that.
  */
-const AMBIENT_SHARE = 0.1;
+/**
+ * How long after `idleAfterSeconds` before chat is entirely idle-driven.
+ *
+ * The blend exists because a hard switch is audible: chat answering you one
+ * second and discussing the weather the next reads as a mode change rather
+ * than a room losing interest. Over this window the idle share ramps from
+ * nothing to everything.
+ */
+const IDLE_FULL_AFTER_MS = 90_000;
+
+/**
+ * How readily idle chatter interrupts a batch that is still draining.
+ *
+ * Below one, so answers to what the streamer said keep priority even once the
+ * room has started drifting.
+ */
+const IDLE_INTRUSION = 0.5;
 
 /**
  * How long a generated batch stays usable.
@@ -282,6 +298,15 @@ export class SimulationEngine {
     transcript: string,
     now: number,
     audioEnergy?: number,
+    /**
+     * Bypasses the attention gate.
+     *
+     * Used for typed input: the streamer deliberately sent it, so chat
+     * deciding not to notice is a bug rather than realism. Microphone input
+     * still goes through the gate, because not every muttered sentence is
+     * addressed to anyone.
+     */
+    force = false,
   ): TranscriptOutcome | null {
     const text = transcript.trim();
     if (text.length < 2) return null;
@@ -333,6 +358,7 @@ export class SimulationEngine {
     // is what makes generated chat feel relentless and attention-seeking —
     // real chat ignores most background talk and answers what's aimed at it.
     if (
+      !force &&
       !shouldReact(
         classification,
         {
@@ -461,26 +487,51 @@ export class SimulationEngine {
    * actually behaves — a 10-viewer stream wobbles by ones, a 10,000-viewer
    * stream by tens.
    */
+  /**
+   * Displayed viewer count, drifting inside the band for the selected tier.
+   *
+   * The tier is the primary driver rather than a separate audience setting,
+   * because the two were free to contradict each other: a chat emitting four
+   * messages a second in front of eleven viewers is not a scene that happens.
+   *
+   * This is the *displayed* number and is deliberately allowed far above
+   * MAX_SIMULATED_VIEWERS — a real stream with a thousand viewers has a few
+   * dozen people talking, drawn from a huge silent pool, and simulating a
+   * thousand distinct identities would burn memory and username vocabulary to
+   * produce output indistinguishable from three hundred.
+   */
   private updateViewerCount(now: number): void {
     if (now - this.lastViewerDriftAt < 1200) return;
     this.lastViewerDriftAt = now;
 
-    const target = this.settings.audienceSize;
-    const gap = target - this.viewerCount;
+    const [low, high] = viewerBandFor(this.settings.messagesPerSecond);
 
-    // Pull back toward the target, harder the further away it is.
-    const pull = gap * 0.18;
-    // Churn: how many people plausibly came and went in the last second.
-    const churn = Math.sqrt(Math.max(1, target)) * this.rng.float(-0.4, 0.4);
-
-    const next = Math.round(this.viewerCount + pull + churn);
-    this.viewerCount = Math.max(1, next);
-
-    // Landing exactly on the configured number reads as the setting being
-    // echoed back, so nudge off it when the walk happens to hit it.
-    if (this.viewerCount === target && target > 3) {
-      this.viewerCount += this.rng.chance(0.5) ? -1 : 1;
+    if (this.viewerCount === 0) {
+      // First tick: land somewhere inside the band rather than climbing to it
+      // from zero while the streamer watches.
+      this.viewerCount = Math.round(this.rng.float(low, high));
+      return;
     }
+
+    // Pull toward the middle of the band, so a tier change migrates rather
+    // than snapping, and a random walk cannot wander out of it.
+    const middle = (low + high) / 2;
+    const pull = (middle - this.viewerCount) * 0.06;
+
+    /**
+     * Churn, scaled to the square root of the band.
+     *
+     * Absolute churn would make a 3-11 stream flicker wildly and a 1000+ one
+     * look frozen; the square root keeps the *proportional* movement similar
+     * at every tier, which is what reads as believable.
+     */
+    const churn = Math.sqrt(Math.max(1, middle)) * this.rng.float(-0.55, 0.55);
+
+    // Activity nudges it up: a room that is talking is a room people join.
+    const activity = this.topics.activity(now) * Math.sqrt(Math.max(1, middle)) * 0.12;
+
+    const next = Math.round(this.viewerCount + pull + churn + activity);
+    this.viewerCount = Math.max(low, Math.min(high, next));
   }
 
   /**
@@ -535,15 +586,34 @@ export class SimulationEngine {
     // Peeked, not popped. Consumed only once a message actually exists —
     // pulling it off first meant a tick with no available speaker silently
     // discarded a generated reaction.
-    const reaction =
-      this.reactions.length > 0 && !this.rng.chance(AMBIENT_SHARE)
-        ? this.reactions[0]
-        : undefined;
+    /**
+     * Active chat is AI or nothing.
+     *
+     * Deterministic pools used to fill the gaps around generated reactions,
+     * which meant the streamer was reading canned lines interleaved with
+     * answers to what they actually said — and could not tell which was which.
+     * If the audience has nothing generated to say, the honest outcome is
+     * silence, not filler.
+     */
+    const reaction = this.reactions.length > 0 ? this.reactions[0] : undefined;
 
-    const topic = reaction ? this.currentTopic(at) : this.pickTopic(at);
+    // How much of the room has drifted into idle chatter, 0..1.
+    const idleShare = this.idleShare(at);
+
+    if (!reaction) {
+      // Nothing generated. Only idle chatter may speak, and only as far as the
+      // ramp allows — otherwise the room stays quiet.
+      if (!this.settings.idleEnabled || idleShare <= 0) return;
+      if (!this.rng.chance(idleShare)) return;
+    } else if (idleShare > 0 && this.rng.chance(idleShare * IDLE_INTRUSION)) {
+      // A generated batch is still draining, but the room has started drifting.
+      // Let idle interleave rather than replacing it outright.
+      this.produceIdle(at);
+      return;
+    }
+
+    const topic = reaction ? this.currentTopic(at) : null;
     const stage = topic ? this.topics.stageOf(topic, at) : "developing";
-
-    if (!reaction && topic === null && !this.settings.idleEnabled) return;
 
     const result = directOne({
       topic,
@@ -566,6 +636,47 @@ export class SimulationEngine {
     if (reaction) this.reactions.shift();
     if (result.template) this.rememberText(result.template);
     if (topic) this.topics.recordParticipation(topic, result.viewerId);
+    this.scheduler.enqueueAt(result.message, at);
+  }
+
+  /**
+   * How far the room has drifted into idle chatter, 0..1.
+   *
+   * Zero until `idleAfterSeconds` of silence, then ramping to one over
+   * IDLE_FULL_AFTER_MS. Any accepted input resets `lastSpeechAt`, which drops
+   * this straight back to zero — so speaking again ends idle immediately
+   * rather than waiting for a timer to unwind.
+   */
+  private idleShare(now: number): number {
+    if (!this.settings.idleEnabled) return 0;
+
+    const silentMs = now - this.lastSpeechAt;
+    const startsAt = this.settings.idleAfterSeconds * 1000;
+    if (silentMs < startsAt) return 0;
+
+    return Math.min(1, (silentMs - startsAt) / IDLE_FULL_AFTER_MS);
+  }
+
+  /** One idle message: the only path still allowed to use response pools. */
+  private produceIdle(at: number): void {
+    const result = directOne({
+      topic: null,
+      stage: "developing",
+      band: "low",
+      population: this.population,
+      settings: this.settings,
+      emotes: this.emotes,
+      recentTexts: new Set(this.recentTexts),
+      lastTemplate: this.recentTexts.at(-1),
+      recentSpeakers: this.recentSpeakers,
+      now: at,
+      silentMs: at - this.lastSpeechAt,
+      sequence: this.emitSequence++,
+      rng: this.rng,
+    });
+    if (!result) return;
+
+    if (result.template) this.rememberText(result.template);
     this.scheduler.enqueueAt(result.message, at);
   }
 
@@ -640,4 +751,34 @@ function normaliseUtterance(text: string): string {
     .replace(/[^a-z0-9\s]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Displayed viewer band for each chat-speed tier.
+ *
+ * Chat speed and audience size are two views of the same thing — how busy the
+ * stream is — so the tier owns both rather than letting a separate audience
+ * setting contradict it.
+ *
+ * Bands are inclusive and deliberately wide, so the count has somewhere to
+ * wander and crosses formatting thresholds (999 to 1.0k) on its own.
+ */
+const VIEWER_BANDS: ReadonlyArray<readonly [rate: number, low: number, high: number]> = [
+  [0.2, 3, 11],
+  [0.5, 12, 24],
+  [1, 25, 180],
+  [1.5, 181, 500],
+  [2, 501, 1000],
+  [4, 1001, 4200],
+];
+
+function viewerBandFor(messagesPerSecond: number): readonly [number, number] {
+  // Nearest tier, so a hand-edited setting between two steps still resolves.
+  let best = VIEWER_BANDS[0];
+  for (const band of VIEWER_BANDS) {
+    if (Math.abs(band[0] - messagesPerSecond) < Math.abs(best[0] - messagesPerSecond)) {
+      best = band;
+    }
+  }
+  return [best[1], best[2]];
 }

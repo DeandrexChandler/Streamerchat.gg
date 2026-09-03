@@ -378,6 +378,16 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
     text = maybeEmoteOnly(speaker, emotes, classification, rng);
   }
 
+  /**
+   * Everything below is idle chatter only.
+   *
+   * Active conversation is AI or nothing: when a topic is live but no
+   * generated reaction was supplied, the room stays quiet rather than reaching
+   * for a canned line. Pools filling those gaps is what let deterministic text
+   * dilute and repeat over the top of real answers.
+   */
+  if (text === null && topic !== null) return null;
+
   if (text === null) {
     source = replyTarget ? "template" : "pool";
     const asides =

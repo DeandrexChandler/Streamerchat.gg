@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle, Maximize2, Minimize2 } from "lucide-react";
+import { AlertTriangle, Maximize2, Minimize2, SendHorizontal } from "lucide-react";
 import { ChatList } from "@/app/components/chat/ChatList";
 import { useSimulator } from "@/lib/react/use-simulator";
 import { ControlPanel } from "./ControlPanel";
@@ -29,6 +29,24 @@ function Simulator() {
   const started = live || status === "paused";
 
   const [chatOnly, setChatOnly] = useState(false);
+  const [typed, setTyped] = useState("");
+
+  /**
+   * Sends typed text down the same path as a finished microphone utterance.
+   *
+   * Starts the session if it is not running, rather than showing a disabled
+   * field. Typing a sentence and pressing Enter is an unambiguous intent to
+   * begin, and making someone press Play first to satisfy a state machine is
+   * the kind of friction that has no defender. It does not touch the
+   * microphone — `say()` needs no audio — so this is also the only way to use
+   * the product without granting mic permission.
+   */
+  const submitTyped = useCallback(() => {
+    const text = typed.trim();
+    if (!text) return;
+    simulator.say(text);
+    setTyped("");
+  }, [typed, simulator]);
 
   /**
    * The browser's own fullscreen state is the source of truth.
@@ -122,6 +140,8 @@ function Simulator() {
           </div>
         )}
 
+        <AiStatusBanner status={simulator.aiStatus} />
+
         <EmoteBanner emoteCount={simulator.emotes.length} />
 
         {/* The same component the OBS overlay renders. */}
@@ -154,10 +174,30 @@ function Simulator() {
           <div className="flex gap-2">
             <input
               type="text"
-              placeholder="Press Play and start speaking..."
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter submits. Shift+Enter is left alone so the field can
+                // grow into a textarea later without changing the muscle memory.
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submitTyped();
+                }
+              }}
+              placeholder="Say something, or type it here..."
+              aria-label="Send a message as the streamer"
               className="min-w-0 flex-1 rounded bg-[#464649] px-3 py-2 text-sm text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:outline-none"
-              disabled
             />
+            <button
+              type="button"
+              onClick={submitTyped}
+              disabled={!typed.trim()}
+              aria-label="Send"
+              title="Send as if you had said it"
+              className="rounded border-2 border-gray-600 px-3 py-2 text-sm text-gray-300 transition-colors hover:border-purple-500 hover:text-white disabled:opacity-40 disabled:hover:border-gray-600 disabled:hover:text-gray-300"
+            >
+              <SendHorizontal className="size-4" />
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -211,6 +251,40 @@ export default function SimulatorPage() {
     <Suspense fallback={null}>
       <Simulator />
     </Suspense>
+  );
+}
+
+/**
+ * Why chat is quiet, when it is.
+ *
+ * Active responses are AI-only by design, so a missing key or an exhausted
+ * quota means an empty chat rather than a degraded one. That has to be
+ * legible: without this the product looks broken in exactly the case where it
+ * is working as specified.
+ */
+const AI_STATUS_MESSAGES: Record<string, string> = {
+  disabled: "AI is off — no GOOGLE_API_KEY set, or AI_MODE=off. Chat will stay quiet until you speak with it configured.",
+  "per-minute": "AI rate limit reached (per minute) — chat will resume shortly.",
+  "per-hour": "AI rate limit reached (per hour) — chat will resume when the window rolls over.",
+  cooldown: "Waiting out the AI cooldown between requests.",
+  empty: "The AI returned nothing usable for that one. Try saying something longer.",
+  error: "Couldn't reach the AI provider. Check the key and your connection.",
+  "http-rate-limited": "Too many requests too quickly — slowing down.",
+  invalid: "The generation request was rejected as malformed. This is a bug worth reporting.",
+};
+
+function AiStatusBanner({ status }: { status: string }) {
+  const message = AI_STATUS_MESSAGES[status];
+  if (!message) return null;
+
+  return (
+    <div
+      role="status"
+      className="flex flex-shrink-0 items-start gap-2 border-b border-amber-900/50 bg-amber-950/40 px-3 py-2 text-xs text-amber-200"
+    >
+      <AlertTriangle size={14} className="mt-px shrink-0" />
+      <p>{message}</p>
+    </div>
   );
 }
 
