@@ -142,8 +142,6 @@ function Simulator() {
           </div>
         )}
 
-        <AiStatusBanner status={simulator.aiStatus} />
-
         <EmoteBanner emoteCount={simulator.emotes.length} />
 
         {/* The same component the OBS overlay renders. */}
@@ -284,62 +282,18 @@ export default function SimulatorPage() {
 }
 
 /**
- * Why chat is quiet, when it is.
+ * Provider failures are deliberately invisible here.
  *
- * Active responses are AI-only by design, so a missing key or an exhausted
- * quota means an empty chat rather than a degraded one. That has to be
- * legible: without this the product looks broken in exactly the case where it
- * is working as specified.
+ * There used to be a banner naming the cause — a retired model, a rejected
+ * key, a spent quota — on the theory that an empty chat needs explaining.
+ * In practice it put infrastructure vocabulary on screen mid-stream, in front
+ * of someone who cannot act on it while live and never chose a model in the
+ * first place. Arrival and idle chat now carry the room on their own, so a
+ * failed generation costs the active reply and nothing else.
+ *
+ * The statuses still exist and are still logged server-side in
+ * app/api/chat-candidates/route.ts, which is where debugging belongs.
  */
-const AI_STATUS_MESSAGES: Record<string, string> = {
-  disabled:
-    "AI is off. Add an API key to .env.local (or unset AI_MODE) and restart the dev server.",
-  auth: "The API key was rejected. Check the key in .env.local.",
-  "model-missing":
-    "That model isn't available to this key. Providers retire models — try another in Settings → Chat.",
-  quota: "The provider is rate limiting, or the quota is spent. It should recover shortly.",
-  timeout: "The provider took too long to answer. It usually works on the next try.",
-  network: "Couldn't reach the AI provider. Check the connection, then try again.",
-  "bad-response":
-    "The provider replied in a shape we couldn't read. Worth reporting if it keeps happening.",
-  empty:
-    "The provider returned nothing for that one — usually a safety filter. Rephrasing often clears it.",
-  "all-rejected":
-    "Responses came back but none passed safety and length checks. Nothing was shown.",
-  "per-minute": "Pausing briefly — the per-minute AI limit was reached.",
-  "per-hour": "Pausing — the per-hour AI limit was reached.",
-  cooldown: "Waiting out the short cooldown between AI requests.",
-  "http-rate-limited": "Too many requests at once. Slowing down.",
-  invalid: "The generation request was malformed. This one is a bug — worth reporting.",
-};
-
-/**
- * Why chat is quiet, when it is.
- *
- * Active responses are AI-only by design, so a failure means an empty chat
- * rather than a degraded one. That has to be legible, and it has to name a
- * cause the streamer can act on.
- *
- * The previous copy said the AI "returned nothing usable" and suggested saying
- * something longer, which was wrong twice over: it blamed the streamer for a
- * parser that could not read a valid response, and it named the same cause for
- * a rejected key, a spent quota and a retired model.
- */
-function AiStatusBanner({ status }: { status: string }) {
-  const message = AI_STATUS_MESSAGES[status];
-  if (!message) return null;
-
-  return (
-    <div
-      role="status"
-      className="flex flex-shrink-0 items-start gap-2 border-b border-amber-900/50 bg-amber-950/40 px-3 py-2 text-xs text-amber-200"
-    >
-      <AlertTriangle size={14} className="mt-px shrink-0" />
-      <p>{message}</p>
-    </div>
-  );
-}
-
 const STATUS_STYLES = {
   running: { dot: "bg-green-500", text: "text-green-400", label: "Connected" },
   paused: { dot: "bg-orange-500", text: "text-orange-400", label: "Paused" },

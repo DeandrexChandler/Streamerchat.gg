@@ -53,8 +53,16 @@ function num(name: string, fallback: number): number {
 }
 
 export function loadAiConfig(): AiConfig {
+  /**
+   * Gemini is the product. OpenAI is a temporary testing override.
+   *
+   * Flipped back after a testing phase left `openai` as the default, which
+   * meant a correctly configured GOOGLE_API_KEY was ignored and the streamer
+   * got a model error for a provider they had never chosen. Anything other
+   * than an explicit `AI_PROVIDER=openai` means Gemini.
+   */
   const provider: AiProviderId =
-    (process.env.AI_PROVIDER ?? "").toLowerCase() === "gemini" ? "gemini" : "openai";
+    (process.env.AI_PROVIDER ?? "").toLowerCase() === "openai" ? "openai" : "gemini";
 
   const hasKey = Boolean(process.env[KEY_ENV[provider]]);
   const requested = (process.env.AI_MODE ?? "").toLowerCase();

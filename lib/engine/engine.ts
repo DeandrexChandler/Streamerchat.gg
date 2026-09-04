@@ -167,6 +167,19 @@ const ACTION_COOLDOWN_MS: Partial<Record<Intent, number>> = {
 const SPEAKER_ATTEMPTS = 4;
 
 /**
+ * How long arrival lasts if the streamer never says anything.
+ *
+ * Bounded so the phase cannot strand the room: once everyone has said hello,
+ * arrival has nothing left to produce, and leaving the flag up would suppress
+ * idle chatter forever. After this the engine behaves normally, which means
+ * the usual idle ramp measured from Start.
+ */
+const INTRO_WINDOW_MS = 25_000;
+
+/** And a ceiling on how many people bother saying hello at all. */
+const INTRO_MESSAGES = 12;
+
+/**
  * Collapses a line to what it actually says.
  *
  * Repeated letters and punctuation go, because "hey", "heyyyy" and "hey!!"
@@ -245,6 +258,9 @@ export class SimulationEngine {
    * started talking read as chat being a message behind.
    */
   private introducing = false;
+
+  /** When arrival began, so the phase can close itself. */
+  private introStartedAt = 0;
   /** Viewers who already posted an intro line, so nobody arrives twice. */
   private introSpeakers = new Set<string>();
 
@@ -352,6 +368,7 @@ export class SimulationEngine {
    */
   beginIntro(now: number): void {
     this.introducing = true;
+    this.introStartedAt = now;
     this.introSpeakers.clear();
     // A fresh stream is a fresh room. Nothing anyone said last session should
     // stop them saying it now.
@@ -734,6 +751,26 @@ export class SimulationEngine {
     this.expireStaleReactions(at);
 
     /**
+     * Arrival takes precedence, and needs nothing from a provider.
+     *
+     * Start used to leave the room silent: intro content was requested from
+     * the AI, so a failed or slow call meant no messages at all, and idle was
+     * suppressed during the phase on top of that. A stream coming up is the
+     * one moment where nobody has said anything for a model to react to, so
+     * a pool is the honest tool.
+     */
+    if (this.introducing) {
+      const done =
+        at - this.introStartedAt >= INTRO_WINDOW_MS ||
+        this.introSpeakers.size >= INTRO_MESSAGES;
+      if (done) this.introducing = false;
+      else {
+        this.produceArrival(at);
+        return;
+      }
+    }
+
+    /**
      * The 90/10 split, and the centre of the product.
      *
      * If the audience has something to say about what the streamer just said,
@@ -867,6 +904,49 @@ export class SimulationEngine {
     if (silentMs < startsAt) return 0;
 
     return Math.min(1, (silentMs - startsAt) / IDLE_FULL_AFTER_MS);
+  }
+
+  /**
+   * One arrival message.
+   *
+   * Same retry-and-remember discipline as everything else, plus the hard
+   * one-line-per-viewer rule: a room filling up is many people saying hello
+   * once, never three people saying it four times.
+   */
+  private produceArrival(at: number): void {
+    const barred = new Set(this.introSpeakers);
+
+    for (let attempt = 0; attempt < SPEAKER_ATTEMPTS; attempt += 1) {
+      const result = directOne({
+        topic: null,
+        stage: "reacting",
+        band: "low",
+        arriving: true,
+        excludeSpeakers: barred,
+        population: this.population,
+        settings: this.settings,
+        emotes: this.emotes,
+        recentTexts: new Set(this.recentTexts),
+        lastTemplate: this.recentTexts.at(-1),
+        recentSpeakers: this.recentSpeakers,
+        now: at,
+        silentMs: at - this.lastSpeechAt,
+        sequence: this.emitSequence++,
+        rng: this.rng,
+      });
+      if (!result) return;
+
+      if (this.echoesSelf(result.viewerId, result.message.text)) {
+        barred.add(result.viewerId);
+        continue;
+      }
+
+      this.introSpeakers.add(result.viewerId);
+      this.rememberSaid(result.viewerId, result.message.text, "greeting", at);
+      if (result.template) this.rememberText(result.template);
+      this.scheduler.enqueueAt(result.message, at);
+      return;
+    }
   }
 
   /** One idle message: the only path still allowed to use response pools. */

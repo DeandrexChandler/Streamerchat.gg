@@ -857,3 +857,106 @@ describe("per-viewer repetition, session scope", () => {
     expect(second.length).toBeGreaterThan(0);
   });
 });
+
+describe("startup arrival", () => {
+  const startEngine = (settings = {}) => {
+    const engine = new SimulationEngine({
+      seed: 5,
+      now: 0,
+      emotes: FIXTURE_EMOTES,
+      settings,
+    });
+    engine.beginIntro(0);
+    return engine;
+  };
+
+  /** Ticks a started engine without ever feeding it a transcript. */
+  const arrive = (engine: SimulationEngine, untilMs = 20_000) => {
+    const out: ChatMessage[] = [];
+    for (let now = 0; now <= untilMs; now += 250) out.push(...engine.tick(now));
+    return out;
+  };
+
+  it("produces chat before the streamer has said anything", () => {
+    // The reported bug: Start left the room completely silent, because intro
+    // content was an AI request and nothing else was allowed to speak.
+    const messages = arrive(startEngine());
+    expect(messages.length).toBeGreaterThan(4);
+  });
+
+  it("needs no AI batch at all", () => {
+    // Nothing supplies reactions here. Arrival is deterministic by design.
+    const messages = arrive(startEngine());
+    expect(messages.every((message) => message.source === "pool")).toBe(true);
+  });
+
+  it("releases them over time rather than dumping them at once", () => {
+    const engine = startEngine();
+    const firstTick = engine.tick(0);
+    const rest = arrive(engine);
+
+    expect(firstTick.length).toBeLessThan(4);
+    expect(rest.length).toBeGreaterThan(firstTick.length);
+  });
+
+  it("uses a different viewer for every arrival line", () => {
+    const names = arrive(startEngine()).map((message) => message.username);
+    expect(names.length).toBeGreaterThan(4);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("says the kind of thing someone says walking in", () => {
+    const texts = arrive(startEngine({ emotesEnabled: false })).map((m) => m.text);
+    // Not an exact-match list — the pool is meant to grow — but arrival must
+    // read as arrival, not as a reaction to something nobody said.
+    const arrivalish = texts.filter((text) =>
+      /hi|yo|hey|early|first|here|live|made it|tim(e|ing)|sup|aye|waiting|get it|stream|boot/i.test(
+        text,
+      ),
+    );
+    expect(arrivalish.length).toBe(texts.length);
+  });
+
+  it("stops the moment the streamer speaks", () => {
+    const engine = startEngine();
+    for (let now = 0; now <= 3_000; now += 250) engine.tick(now);
+
+    engine.handleTranscript("okay hey chat", 3_000);
+    const after: ChatMessage[] = [];
+    for (let now = 3_250; now <= 12_000; now += 250) after.push(...engine.tick(now));
+
+    // Nothing generated was supplied, so with arrival cancelled the room has
+    // nothing to say. Anything here would be arrival leaking past its phase.
+    expect(after).toHaveLength(0);
+  });
+
+  it("stops for typed input too, which takes the same path", () => {
+    const engine = startEngine();
+    for (let now = 0; now <= 3_000; now += 250) engine.tick(now);
+
+    engine.handleTranscript("typing this instead", 3_000, 0);
+    const after: ChatMessage[] = [];
+    for (let now = 3_250; now <= 12_000; now += 250) after.push(...engine.tick(now));
+    expect(after).toHaveLength(0);
+  });
+
+  it("closes itself if the streamer never speaks", () => {
+    // Otherwise arrival suppresses idle forever and the room dies at Start.
+    const engine = startEngine();
+    arrive(engine, 30_000);
+    expect(engine.isIntroducing).toBe(false);
+  });
+
+  it("gives a fresh arrival after a clear and restart", () => {
+    const engine = startEngine();
+    const first = arrive(engine);
+    expect(first.length).toBeGreaterThan(4);
+
+    engine.beginIntro(100_000);
+    const second: ChatMessage[] = [];
+    for (let now = 100_000; now <= 120_000; now += 250) {
+      second.push(...engine.tick(now));
+    }
+    expect(second.length).toBeGreaterThan(4);
+  });
+});

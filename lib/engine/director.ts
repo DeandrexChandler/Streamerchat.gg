@@ -1,4 +1,5 @@
 import { AMBIENT, IDLE_AMBIENT } from "../data/responses/ambient";
+import { ARRIVAL } from "../data/responses/arrival";
 import { REACTIONS } from "../data/responses/reactions";
 import {
   IDLE_NOTICING,
@@ -27,7 +28,6 @@ import {
   emoteSpamCount,
   generateFromPool,
   measureLength,
-  pickEmote,
 } from "./generators/pool";
 import type { Population } from "./population";
 import type { Rng } from "./rng";
@@ -316,6 +316,15 @@ export interface DirectOneOptions {
   recentSpeakers: ReadonlyArray<readonly [string, string]>;
   /** Viewers who may not speak again in this phase. Used during arrival. */
   excludeSpeakers?: ReadonlySet<string>;
+  /**
+   * Arrival: the stream just came up and nobody has spoken.
+   *
+   * The one deterministic exception to AI-only active chat, because there is
+   * no utterance to react to yet. Deliberately not routed through the normal
+   * pool branch — that branch is idle chatter, which is a different thing
+   * from a room filling up.
+   */
+  arriving?: boolean;
   now: number;
   /** Milliseconds since the streamer last spoke, for idle escalation. */
   silentMs: number;
@@ -362,7 +371,9 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
       ? rng.pick(replyCandidates)
       : undefined;
 
-  const classification = classificationFor(topic);
+  const classification = options.arriving
+    ? ARRIVAL_CLASSIFICATION
+    : classificationFor(topic);
   const depth = pickDepth(
     { viewer: speaker, energy: classification.energy, position: stage === "reacting" ? 0 : 3 },
     rng,
@@ -375,6 +386,41 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
   if (settings.emoteOnlyMode) {
     text = forcedEmoteOnly(emotes, classification, rng);
     if (text === null) return null;
+  }
+
+  /**
+   * Arrival lines, straight from the pool.
+   *
+   * Placed before every AI-aware branch: during arrival there is no reaction
+   * to drain and no topic to be quiet about, so the checks below would all
+   * fall through to "return null" and leave the streamer looking at an empty
+   * chat — which is exactly the bug this fixes.
+   */
+  if (text === null && options.arriving) {
+    source = "pool";
+    const generated = generateFromPool(
+      ARRIVAL,
+      speaker,
+      population.tagBias(speaker),
+      {
+        keywords: [],
+        emotes,
+        streamer: settings.streamerName || undefined,
+        topic: settings.streamTopic || undefined,
+        recentTexts: options.recentTexts,
+        lastTemplate: options.lastTemplate,
+      },
+      rng,
+    );
+    if (generated === null) return null;
+    text = generated.text;
+    template = generated.template;
+
+    // Some people just post the wave emote instead of typing hello.
+    if (settings.emotesEnabled && rng.chance(0.35)) {
+      const emote = pickSemanticEmote({ emotes, intent: "greeting", rng });
+      if (emote) text = rng.chance(0.4) ? emote.name : `${text} ${emote.name}`;
+    }
   }
 
   /**
@@ -515,15 +561,17 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
     }
   }
 
-  const kind: MessageKind = replyTarget
-    ? "reply"
-    : topic === null
-      ? "idle"
-      : topic.intent === "greeting"
-        ? "greeting"
-        : topic.intent === "question_to_chat"
-          ? "question"
-          : "reaction";
+  const kind: MessageKind = options.arriving
+    ? "greeting"
+    : replyTarget
+      ? "reply"
+      : topic === null
+        ? "idle"
+        : topic.intent === "greeting"
+          ? "greeting"
+          : topic.intent === "question_to_chat"
+            ? "question"
+            : "reaction";
 
   return {
     viewerId: speaker.id,
@@ -592,6 +640,15 @@ function pickTopicSpeaker(options: DirectOneOptions) {
   for (const id of participants) barred.add(id);
   return population.pickSpeaker(now, barred);
 }
+
+/** What arrival looks like to everything downstream: a room saying hello. */
+const ARRIVAL_CLASSIFICATION: Classification = {
+  intent: "greeting",
+  sentiment: "positive",
+  energy: 0.3,
+  keywords: [],
+  confidence: 1,
+};
 
 /** Intents where one message per viewer is the whole of what a person says. */
 const ONE_SHOT_INTENTS = new Set<Intent>(["greeting", "farewell"]);

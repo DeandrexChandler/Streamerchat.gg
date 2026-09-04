@@ -21,14 +21,6 @@ import { MAX_EMOTES_IN_PROMPT } from "../ai/prompt";
  * server-side by AI_MAX_BATCH_SIZE so a UI slider can never drive spend past
  * a known ceiling.
  */
-/**
- * What the intro batch is generated against.
- *
- * Not a real utterance — nobody said it — but the generator needs something to
- * react to, and describing the moment produces arrivals rather than replies.
- */
-const INTRO_UTTERANCE =
-  "The stream just went live. Nobody has said anything yet. Viewers are arriving.";
 
 function reactionCountFor(messagesPerSecond: number): number {
   return Math.round(Math.min(28, 14 + messagesPerSecond * 3.5));
@@ -345,7 +337,9 @@ export function useSimulator(
             recent: recentTextsRef.current,
             streamer: settingsRef.current.streamerName || undefined,
             topic: settingsRef.current.streamTopic || undefined,
-            model: settingsRef.current.aiModel,
+            // No model from the client. The server owns which one it calls;
+            // a stale value in a browser that once had a model picker must not
+            // be able to aim requests at something the key cannot use.
             count: reactionCountFor(settingsRef.current.messagesPerSecond),
           }),
         });
@@ -377,67 +371,12 @@ export function useSimulator(
   /**
    * Asks for the arrival batch that plays while the stream is coming up.
    *
-   * Deliberately not awaited by start(): the microphone must come up whether
-   * or not the provider answers, and a UI that waits on a network round trip
-   * before showing anything reads as frozen.
+   * Deterministic and synchronous. Arrival used to be an AI request, which
+   * meant a slow or failing provider produced a completely empty chat at the
+   * exact moment the streamer was looking for proof the thing works.
    */
-  const requestIntro = useCallback(async () => {
-    const engine = engineRef.current;
-    if (!engine) return;
-
-    const at = Date.now();
-    engine.beginIntro(at);
-    setAiStatus("requesting");
-
-    try {
-      const response = await fetch("/api/chat-candidates", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          utterance: INTRO_UTTERANCE,
-          history: [],
-          classification: {
-            intent: "greeting",
-            sentiment: "positive",
-            energy: 0.35,
-            keywords: [],
-            confidence: 1,
-          },
-          emotes: emotesRef.current
-            .slice(0, MAX_EMOTES_IN_PROMPT)
-            .map((emote) => emote.name),
-          recent: [],
-          streamer: settingsRef.current.streamerName || undefined,
-          topic: settingsRef.current.streamTopic || undefined,
-          model: settingsRef.current.aiModel,
-          count: 14,
-        }),
-      });
-
-      const body = (await response.json()) as {
-        reactions?: Reaction[];
-        status?: string;
-      };
-
-      if (!response.ok || !body.reactions?.length) {
-        const why = body.status ?? `http ${response.status}`;
-        console.warn(`[ai] no intro (${why})`);
-        setAiStatus(why);
-        return;
-      }
-
-      // The streamer may already have spoken while this was in flight, in
-      // which case the arrival phase is over and this batch is stale.
-      if (!engine.isIntroducing) return;
-
-      console.log(`[ai] intro: ${body.reactions.length} arrivals queued`);
-      setAiStatus("ok");
-      engine.supplyReactions(body.reactions, Date.now());
-    } catch (error) {
-      console.warn("[ai] intro request failed", error);
-      setAiStatus("error");
-    }
+  const beginIntro = useCallback(() => {
+    engineRef.current?.beginIntro(Date.now());
   }, []);
 
   /**
@@ -567,8 +506,8 @@ export function useSimulator(
     setStatus("running");
 
     // Fire and forget: the room starts arriving while the microphone comes up.
-    void requestIntro();
-  }, [status, providerId, isDemo, ensureEngine, startTicking, requestReactions, requestIntro]);
+    beginIntro();
+  }, [status, providerId, isDemo, ensureEngine, startTicking, requestReactions, beginIntro]);
 
   const stop = useCallback(() => {
     stopTicking();

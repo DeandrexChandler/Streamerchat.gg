@@ -151,31 +151,6 @@ export default function ChatSettingsPage() {
             </select>
           </Field>
 
-          <Separator />
-
-          <Field
-            id="ai-model"
-            label="Model"
-            hint="Flash-Lite runs about $1-2 per 80 stream hours. The prompt matters more than the model here, so try both and pick by ear."
-          >
-            <select
-              id="ai-model"
-              value={settings.aiModel}
-              onChange={(e) =>
-                update({
-                  aiModel: e.target.value as SimulationSettings["aiModel"],
-                })
-              }
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-            >
-              <option value="gemini-3.5-flash-lite">
-                Gemini 3.5 Flash-Lite — cheapest (default)
-              </option>
-              <option value="gemini-3.6-flash">
-                Gemini 3.6 Flash — better, ~2x the cost
-              </option>
-            </select>
-          </Field>
         </CardContent>
       </Card>
 
