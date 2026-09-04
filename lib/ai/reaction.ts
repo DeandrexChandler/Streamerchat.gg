@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { EmoteMood } from "../engine/types";
+import type { EmoteMood, Intent } from "../engine/types";
 
 /**
  * One audience reaction, as the model returns it.
@@ -58,4 +58,13 @@ export interface QueuedReaction extends Reaction {
   batchId: number;
   /** When the batch was created. */
   createdAt: number;
+  /**
+   * What the streamer was doing when this batch was generated.
+   *
+   * Carried on the reaction because a batch outlives the topic it answers —
+   * topics die on momentum decay, a batch drains on its own timer — and the
+   * per-viewer action rules still need to know that a line released late is
+   * part of the greeting, not idle chatter.
+   */
+  intent?: Intent;
 }

@@ -552,12 +552,18 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
  */
 function pickTopicSpeaker(options: DirectOneOptions) {
   const { topic, stage, population, now, rng, excludeSpeakers } = options;
-  if (excludeSpeakers && excludeSpeakers.size > 0) {
-    // Hard exclusion, not a weighting: during arrival each viewer gets one
-    // greeting and no more.
-    return population.pickSpeaker(now, new Set(excludeSpeakers));
-  }
-  if (!topic) return population.pickSpeaker(now);
+
+  /**
+   * Viewers barred from this message.
+   *
+   * Composed rather than short-circuiting: the caller's exclusions are the
+   * engine saying "not this person" — they already said this, or they already
+   * greeted — and that has to hold *alongside* the topic's own speaker
+   * choice, not instead of it. Replacing the topic logic whenever an
+   * exclusion existed is how a retry lost its conversation.
+   */
+  const barred = new Set(excludeSpeakers ?? []);
+  if (!topic) return population.pickSpeaker(now, barred);
 
   const participants = [...topic.participants.keys()];
 
@@ -570,18 +576,21 @@ function pickTopicSpeaker(options: DirectOneOptions) {
    * room already has, the topic goes quiet rather than looping.
    */
   if (ONE_SHOT_INTENTS.has(topic.intent)) {
-    return population.pickSpeaker(now, new Set(participants));
+    for (const id of participants) barred.add(id);
+    return population.pickSpeaker(now, barred);
   }
 
+  const repeatable = participants.filter((id) => !barred.has(id));
   const wantsRepeat =
-    participants.length > 0 &&
+    repeatable.length > 0 &&
     rng.chance(stage === "reacting" ? 0.1 : stage === "developing" ? 0.35 : 0.5);
 
   if (wantsRepeat) {
-    const viewer = population.get(rng.pick(participants));
+    const viewer = population.get(rng.pick(repeatable));
     if (viewer) return viewer;
   }
-  return population.pickSpeaker(now, new Set(participants));
+  for (const id of participants) barred.add(id);
+  return population.pickSpeaker(now, barred);
 }
 
 /** Intents where one message per viewer is the whole of what a person says. */

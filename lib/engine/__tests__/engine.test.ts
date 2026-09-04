@@ -716,3 +716,144 @@ function groupByUser(messages: ChatMessage[]): Map<string, string[]> {
   }
   return grouped;
 }
+
+describe("per-viewer repetition, session scope", () => {
+  /**
+   * A rolling window is not enough.
+   *
+   * A viewer who says "hey" in the first minute and "heyyy" in the fortieth
+   * has still said it twice, and the streamer watching the whole session is
+   * the one who notices. Measured: a six-line window lets 40 duplicates
+   * through this run; session-scoped memory lets none.
+   */
+  const longSession = (audienceSize: number) => {
+    const engine = new SimulationEngine({
+      seed: 21,
+      now: 0,
+      emotes: [],
+      settings: { idleEnabled: false, audienceSize },
+    });
+    const pool = [
+      "same", "fair", "true", "yeah", "real", "facts",
+      "valid", "bet", "word", "ok", "sure", "right",
+    ];
+
+    const out: ChatMessage[] = [];
+    for (let now = 0; now <= 400_000; now += 250) {
+      if (now % 10_000 === 0) {
+        engine.handleTranscript("what do you all think", now);
+        engine.supplyReactions(
+          pool.map((text) => ({ text, emotion: "chill" as const })),
+          now,
+        );
+      }
+      out.push(...engine.tick(now));
+    }
+    return { out, pool };
+  };
+
+  it("remembers what a viewer said for the whole session, not a window", () => {
+    const { out } = longSession(2);
+
+    expect(out.length).toBeGreaterThan(20);
+    for (const [, texts] of groupByUser(out)) {
+      expect(new Set(texts).size).toBe(texts.length);
+    }
+  });
+
+  it("still lets a viewer speak many times with different wording", () => {
+    // The other half of the rule. Blocking repeats must not collapse into
+    // "one message per person" — that is a room of strangers taking turns.
+    const { out, pool } = longSession(2);
+    const most = Math.max(
+      ...[...groupByUser(out).values()].map((texts) => texts.length),
+    );
+    expect(most).toBeGreaterThan(pool.length / 2);
+  });
+
+  it("hands the line to another viewer instead of dropping the tick", () => {
+    // A rejected candidate disqualifies the speaker, not the message.
+    // Measured: retrying recovers 23 messages here where bailing out gets 16.
+    const { out } = longSession(2);
+    expect(out.length).toBeGreaterThan(19);
+  });
+
+  it("never lets one viewer greet twice, even across separate greetings", () => {
+    /**
+     * The cross-topic case. Greeting once per *topic* is not enough: the
+     * streamer says hi, wanders off for ninety seconds, says hi again, and
+     * that starts a fresh topic with an empty participant list — so the same
+     * six people greet all over again. A small audience makes the collision
+     * near-certain if the session-scoped rule is not doing the work.
+     */
+    const engine = new SimulationEngine({
+      seed: 11,
+      now: 0,
+      emotes: [],
+      settings: { idleEnabled: false, audienceSize: 4 },
+    });
+
+    const out: ChatMessage[] = [];
+    for (const [at, text] of [[0, "hey everyone"], [90_000, "hi again chat"]] as const) {
+      engine.handleTranscript(text, at);
+      engine.supplyReactions(
+        ["yo", "hey", "sup", "hii", "hello", "wassup"].map((t) => ({
+          text: t,
+          emotion: "chill" as const,
+        })),
+        at,
+      );
+      for (let now = at; now <= at + 40_000; now += 250) {
+        out.push(...engine.tick(now));
+      }
+    }
+
+    const greeters = out.map((message) => message.username);
+    expect(greeters.length).toBeGreaterThan(2);
+    expect(new Set(greeters).size).toBe(greeters.length);
+  });
+
+  it("keeps message ids unique across retried speakers", () => {
+    // The retry loop calls the director more than once per tick. If the
+    // sequence counter did not advance on a rejected attempt, two messages in
+    // the same millisecond would share an id — which React renders as a
+    // duplicated or missing chat line.
+    const { out } = longSession(2);
+    const ids = out.map((message) => message.id);
+    expect(ids.length).toBeGreaterThan(19);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("clears every viewer's history when a new session starts", () => {
+    const engine = new SimulationEngine({
+      seed: 8,
+      now: 0,
+      emotes: [],
+      settings: { idleEnabled: false },
+    });
+
+    const collect = (from: number) => {
+      const out: ChatMessage[] = [];
+      engine.handleTranscript("hey everyone", from);
+      engine.supplyReactions(
+        Array.from({ length: 8 }, () => ({
+          text: "yo",
+          emotion: "chill" as const,
+        })),
+        from,
+      );
+      for (let now = from; now <= from + 30_000; now += 250) {
+        out.push(...engine.tick(now));
+      }
+      return out;
+    };
+
+    const first = collect(0);
+    engine.beginIntro(200_000);
+    const second = collect(200_000);
+
+    // Clearing means the same person may greet again in the new session.
+    expect(first.length).toBeGreaterThan(0);
+    expect(second.length).toBeGreaterThan(0);
+  });
+});

@@ -9,7 +9,7 @@ import { Population } from "./population";
 import { createFilter, type Filter } from "./profanity";
 import { createRng, type Rng } from "./rng";
 import { Scheduler } from "./scheduler";
-import type { ChatMessage, Classification, Emote } from "./types";
+import type { ChatMessage, Classification, Emote, Intent } from "./types";
 
 /**
  * The simulation engine.
@@ -135,8 +135,36 @@ export interface EngineStats {
   ignored: number;
 }
 
-/** How many past lines are remembered per viewer. */
-const VIEWER_MEMORY = 6;
+/**
+ * How long before a viewer may repeat a conversational action.
+ *
+ * Not about wording — about *doing the same thing twice*. "hey BlacBushido"
+ * and "hey man !" share no words and are still one person greeting twice,
+ * which is the half of the reported bug that text matching cannot see.
+ *
+ * Greeting and farewell are once per session: you arrive once and you leave
+ * once.
+ *
+ * Nothing else is listed, and that is the point. Reacting twice to a fight,
+ * or firing off two lines while typing fast, is what people actually do —
+ * a blanket cooldown here reads as a room of strangers taking turns. Wording
+ * is governed separately, by exact-text memory, and pacing by the population's
+ * own speaker cooldown.
+ */
+const ACTION_COOLDOWN_MS: Partial<Record<Intent, number>> = {
+  greeting: Number.POSITIVE_INFINITY,
+  farewell: Number.POSITIVE_INFINITY,
+};
+
+/**
+ * How many speakers to try before giving the tick up.
+ *
+ * A rejected candidate means "not this person", not "not this message" — the
+ * generated line is still good and someone else should say it. Bounded so a
+ * room that has genuinely run out of eligible speakers goes quiet instead of
+ * spinning.
+ */
+const SPEAKER_ATTEMPTS = 4;
 
 /**
  * Collapses a line to what it actually says.
@@ -177,12 +205,18 @@ export class SimulationEngine {
   private recentTexts: string[] = [];
 
   /**
-   * What each viewer has said lately, normalised.
+   * Every line each viewer has said this session, normalised.
    *
-   * Bounded per viewer, and the map itself is bounded by the population — a
-   * viewer who leaves takes their entry with them on the next reroll.
+   * Deliberately unbounded within a session rather than a rolling window: a
+   * viewer who says "hey" in minute one and "heyyy" in minute forty has still
+   * said it twice, and a window that forgets is a window that lets it through.
+   * Bounded in practice by how much any one viewer speaks, and cleared when a
+   * new session starts.
    */
-  private viewerTexts = new Map<string, string[]>();
+  private viewerTexts = new Map<string, Set<string>>();
+
+  /** Per viewer, when they last performed each conversational action. */
+  private viewerActions = new Map<string, Map<Intent, number>>();
   /**
    * Who said what recently, for the per-viewer repeat cap.
    *
@@ -294,10 +328,14 @@ export class SimulationEngine {
    */
   supplyReactions(batch: readonly Reaction[], now: number): void {
     const batchId = this.nextBatchId++;
+    // Stamped now, while the topic that prompted this batch is still alive.
+    const intent: Intent =
+      this.currentTopic(now)?.intent ?? (this.introducing ? "greeting" : "mundane");
     const queued: QueuedReaction[] = batch.map((reaction) => ({
       ...reaction,
       batchId,
       createdAt: now,
+      intent,
     }));
 
     // Most eager first. Absent eagerness sorts to the middle rather than the
@@ -317,7 +355,7 @@ export class SimulationEngine {
     this.introSpeakers.clear();
     // A fresh stream is a fresh room. Nothing anyone said last session should
     // stop them saying it now.
-    this.viewerTexts.clear();
+    this.forgetViewerHistory();
     this.lastSpeechAt = now;
   }
 
@@ -545,15 +583,45 @@ export class SimulationEngine {
    * survives and someone else says it on the next tick.
    */
   private echoesSelf(viewerId: string, text: string): boolean {
-    const said = this.viewerTexts.get(viewerId);
-    return said !== undefined && said.includes(normaliseSaid(text));
+    return this.viewerTexts.get(viewerId)?.has(normaliseSaid(text)) === true;
   }
 
-  private rememberSaid(viewerId: string, text: string): void {
-    const said = this.viewerTexts.get(viewerId) ?? [];
-    said.push(normaliseSaid(text));
-    if (said.length > VIEWER_MEMORY) said.shift();
+  /**
+   * Viewers who may not perform this action yet.
+   *
+   * Computed before the director runs, so the exclusion reaches speaker
+   * selection rather than throwing away a message after the fact.
+   */
+  private restedFor(intent: Intent, now: number): Set<string> {
+    const cooldown = ACTION_COOLDOWN_MS[intent];
+    const barred = new Set<string>();
+    if (cooldown === undefined) return barred;
+    for (const [viewerId, actions] of this.viewerActions) {
+      const last = actions.get(intent);
+      if (last !== undefined && now - last < cooldown) barred.add(viewerId);
+    }
+    return barred;
+  }
+
+  private rememberSaid(
+    viewerId: string,
+    text: string,
+    intent: Intent,
+    now: number,
+  ): void {
+    const said = this.viewerTexts.get(viewerId) ?? new Set<string>();
+    said.add(normaliseSaid(text));
     this.viewerTexts.set(viewerId, said);
+
+    const actions = this.viewerActions.get(viewerId) ?? new Map<Intent, number>();
+    actions.set(intent, now);
+    this.viewerActions.set(viewerId, actions);
+  }
+
+  /** A new session is a new room: nobody is on cooldown for anything. */
+  private forgetViewerHistory(): void {
+    this.viewerTexts.clear();
+    this.viewerActions.clear();
   }
 
   /** Messages released in the last 30s. Drives the fatigue damper. */
@@ -705,40 +773,79 @@ export class SimulationEngine {
     }
 
     const topic = reaction ? this.currentTopic(at) : null;
+
     const stage = topic ? this.topics.stageOf(topic, at) : "developing";
 
-    const result = directOne({
-      topic,
-      stage,
-      band: this.topics.band(topic ? this.topics.momentumOf(topic, at) : 0),
-      reaction,
-      /**
-       * During arrival, nobody says hello twice.
-       *
-       * A stream opening with the same three names greeting repeatedly is the
-       * loudest possible tell that the room is generated.
-       */
-      excludeSpeakers: this.introducing ? this.introSpeakers : undefined,
-      population: this.population,
-      settings: this.settings,
-      emotes: this.emotes,
-      recentTexts: new Set(this.recentTexts),
-      lastTemplate: this.recentTexts.at(-1),
-      recentSpeakers: this.recentSpeakers,
-      now: at,
-      silentMs: at - this.lastSpeechAt,
-      sequence: this.emitSequence++,
-      rng: this.rng,
-    });
-    if (!result) return;
-    if (this.echoesSelf(result.viewerId, result.message.text)) return;
+    /**
+     * What this message is *doing*, for the per-viewer action rules.
+     *
+     * Taken from the reaction's own batch before the topic, because a batch
+     * outlives the topic it answers: topics die on momentum decay while a
+     * batch drains on a 45s timer, so the tail of an opening greeting was
+     * arriving with no topic attached, relabelled as idle, and dodging the
+     * once-per-session greeting rule entirely. That is how the same four
+     * people said "yo / hey / sup" twice.
+     */
+    const intent: Intent =
+      reaction?.intent ??
+      topic?.intent ??
+      (this.introducing ? "greeting" : "mundane");
 
-    if (reaction) this.reactions.shift();
-    this.rememberSaid(result.viewerId, result.message.text);
-    if (this.introducing) this.introSpeakers.add(result.viewerId);
-    if (result.template) this.rememberText(result.template);
-    if (topic) this.topics.recordParticipation(topic, result.viewerId);
-    this.scheduler.enqueueAt(result.message, at);
+    /**
+     * Who may not speak this message.
+     *
+     * During arrival, nobody says hello twice — a stream opening with the same
+     * three names greeting repeatedly is the loudest possible tell that the
+     * room is generated. Beyond that, anyone still on cooldown for this
+     * particular action is out.
+     */
+    const barred = this.restedFor(intent, at);
+    if (this.introducing) {
+      for (const id of this.introSpeakers) barred.add(id);
+    }
+
+    /**
+     * Retried rather than dropped.
+     *
+     * A viewer who would be repeating themselves disqualifies the *speaker*,
+     * not the line. Returning here instead of trying someone else is what made
+     * a busy moment go quiet: the generated reaction was still sitting in the
+     * queue with forty other people available to say it.
+     */
+    for (let attempt = 0; attempt < SPEAKER_ATTEMPTS; attempt += 1) {
+      const result = directOne({
+        topic,
+        stage,
+        band: this.topics.band(topic ? this.topics.momentumOf(topic, at) : 0),
+        reaction,
+        excludeSpeakers: barred,
+        population: this.population,
+        settings: this.settings,
+        emotes: this.emotes,
+        recentTexts: new Set(this.recentTexts),
+        lastTemplate: this.recentTexts.at(-1),
+        recentSpeakers: this.recentSpeakers,
+        now: at,
+        silentMs: at - this.lastSpeechAt,
+        sequence: this.emitSequence++,
+        rng: this.rng,
+      });
+      if (!result) return;
+
+      if (this.echoesSelf(result.viewerId, result.message.text)) {
+        // This person has said this. Someone else may not have.
+        barred.add(result.viewerId);
+        continue;
+      }
+
+      if (reaction) this.reactions.shift();
+      this.rememberSaid(result.viewerId, result.message.text, intent, at);
+      if (this.introducing) this.introSpeakers.add(result.viewerId);
+      if (result.template) this.rememberText(result.template);
+      if (topic) this.topics.recordParticipation(topic, result.viewerId);
+      this.scheduler.enqueueAt(result.message, at);
+      return;
+    }
   }
 
   /**
@@ -764,27 +871,40 @@ export class SimulationEngine {
 
   /** One idle message: the only path still allowed to use response pools. */
   private produceIdle(at: number): void {
-    const result = directOne({
-      topic: null,
-      stage: "developing",
-      band: "low",
-      population: this.population,
-      settings: this.settings,
-      emotes: this.emotes,
-      recentTexts: new Set(this.recentTexts),
-      lastTemplate: this.recentTexts.at(-1),
-      recentSpeakers: this.recentSpeakers,
-      now: at,
-      silentMs: at - this.lastSpeechAt,
-      sequence: this.emitSequence++,
-      rng: this.rng,
-    });
-    if (!result) return;
-    if (this.echoesSelf(result.viewerId, result.message.text)) return;
+    // Off-topic by definition, so it carries no action cooldown. The retry
+    // loop below is what matters here: it stops one viewer filling a silence
+    // by repeating a line they already used.
+    const barred = this.restedFor("mundane", at);
 
-    this.rememberSaid(result.viewerId, result.message.text);
-    if (result.template) this.rememberText(result.template);
-    this.scheduler.enqueueAt(result.message, at);
+    for (let attempt = 0; attempt < SPEAKER_ATTEMPTS; attempt += 1) {
+      const result = directOne({
+        topic: null,
+        stage: "developing",
+        band: "low",
+        excludeSpeakers: barred,
+        population: this.population,
+        settings: this.settings,
+        emotes: this.emotes,
+        recentTexts: new Set(this.recentTexts),
+        lastTemplate: this.recentTexts.at(-1),
+        recentSpeakers: this.recentSpeakers,
+        now: at,
+        silentMs: at - this.lastSpeechAt,
+        sequence: this.emitSequence++,
+        rng: this.rng,
+      });
+      if (!result) return;
+
+      if (this.echoesSelf(result.viewerId, result.message.text)) {
+        barred.add(result.viewerId);
+        continue;
+      }
+
+      this.rememberSaid(result.viewerId, result.message.text, "mundane", at);
+      if (result.template) this.rememberText(result.template);
+      this.scheduler.enqueueAt(result.message, at);
+      return;
+    }
   }
 
   /**
