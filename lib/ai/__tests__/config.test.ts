@@ -34,7 +34,7 @@ describe("AI configuration", () => {
   });
 
   it("has no provider or model switch to flip", () => {
-    const config = loadAiConfig() as Record<string, unknown>;
+    const config = loadAiConfig() as unknown as Record<string, unknown>;
     expect(config).not.toHaveProperty("provider");
     expect(config).not.toHaveProperty("mode");
   });
