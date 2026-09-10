@@ -10,7 +10,7 @@ function pending(id: string, offset: number): PendingMessage {
     color: "#fff",
     text: id,
     kind: "reaction",
-    source: "pool",
+    source: "ai",
     offset,
   };
 }

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { directOne } from "../director";
+import { directOne, type DirectOneOptions } from "../director";
 import { Population } from "../population";
 import { createRng } from "../rng";
 import { DEFAULT_SETTINGS } from "../../config/settings";
 import type { Emote, Intent } from "../types";
 import type { Topic } from "../topics";
 import type { QueuedReaction } from "../../ai/reaction";
+import type { GenerationPhase } from "../../ai/provider";
 
 /**
  * Emote-forward behaviour.
@@ -18,6 +19,7 @@ const EMOTES: Emote[] = [
   { id: "1", name: "peepoHi", mood: "chill", url: "u", tags: ["greeting"] },
   { id: "2", name: "PogChamp", mood: "hype", url: "u", tags: ["hype"] },
   { id: "3", name: "Sadge", mood: "sad", url: "u" },
+  { id: "4", name: "peepoAFK", mood: "chill", url: "u" },
 ];
 
 function topic(intent: Intent, extra: Partial<Topic> = {}): Topic {
@@ -37,34 +39,44 @@ function topic(intent: Intent, extra: Partial<Topic> = {}): Topic {
   };
 }
 
-function reaction(text: string): QueuedReaction {
-  return { text, emotion: "hype", batchId: 1, createdAt: 0 };
+function reaction(text: string, intent: Intent, extra: Partial<QueuedReaction> = {}): QueuedReaction {
+  return { text, emotion: "hype", batchId: 1, createdAt: 0, intent, phase: "active", ...extra };
+}
+
+function direct(
+  seed: number,
+  overrides: Partial<DirectOneOptions> & { intent?: Intent; phase?: GenerationPhase } = {},
+) {
+  const { intent = "greeting", phase = "active", ...rest } = overrides;
+  return directOne({
+    topic: phase === "active" ? topic(intent) : null,
+    stage: "reacting",
+    band: "viral",
+    population: new Population(createRng(seed + 1000), 20),
+    settings: { ...DEFAULT_SETTINGS, emotesEnabled: true },
+    emotes: EMOTES,
+    reaction: reaction("some generated sentence", intent, { phase }),
+    phase,
+    recentSpeakers: [],
+    now: 1_000,
+    sequence: seed,
+    rng: createRng(seed),
+    ...rest,
+  });
 }
 
 /** Runs the director many times and reports what fraction was emotes only. */
-function emoteShare(intent: Intent, emotes = EMOTES, runs = 120): number {
-  const names = new Set(emotes.map((emote) => emote.name));
+function emoteShare(
+  intent: Intent,
+  overrides: Partial<DirectOneOptions> & { phase?: GenerationPhase } = {},
+  runs = 120,
+): number {
+  const names = new Set(EMOTES.map((emote) => emote.name));
   let emoteOnly = 0;
   let produced = 0;
 
   for (let seed = 0; seed < runs; seed += 1) {
-    const rng = createRng(seed);
-    const population = new Population(createRng(seed + 1000), 20);
-    const result = directOne({
-      topic: topic(intent),
-      stage: "reacting",
-      band: "viral",
-      population,
-      settings: { ...DEFAULT_SETTINGS, emotesEnabled: true },
-      emotes,
-      reaction: reaction("some generated sentence"),
-      recentTexts: new Set(),
-      recentSpeakers: [],
-      now: 1_000,
-      silentMs: 0,
-      sequence: seed,
-      rng,
-    });
+    const result = direct(seed, { intent, ...overrides });
     if (!result) continue;
     produced += 1;
     const words = result.message.text.split(" ");
@@ -90,23 +102,26 @@ describe("emote-forward responses", () => {
     expect(emoteShare("story")).toBeLessThan(0.15);
   });
 
+  it("posts the occasional idle emote during idle, not a wall of them", () => {
+    const share = emoteShare("mundane", { phase: "idle" });
+    expect(share).toBeGreaterThan(0.03);
+    expect(share).toBeLessThan(0.3);
+  });
+
+  it("reaches for an AFK emote when idle, not a greeting", () => {
+    let afk = 0;
+    let hi = 0;
+    for (let seed = 0; seed < 200; seed += 1) {
+      const text = direct(seed, { intent: "mundane", phase: "idle" })?.message.text ?? "";
+      if (text.includes("peepoAFK")) afk += 1;
+      if (text.includes("peepoHi")) hi += 1;
+    }
+    expect(afk).toBeGreaterThan(hi);
+  });
+
   it("uses only emotes related to the moment", () => {
     for (let seed = 0; seed < 60; seed += 1) {
-      const result = directOne({
-        topic: topic("greeting"),
-        stage: "reacting",
-        band: "viral",
-        population: new Population(createRng(seed + 1000), 20),
-        settings: { ...DEFAULT_SETTINGS, emotesEnabled: true },
-        emotes: EMOTES,
-        reaction: reaction("hey"),
-        recentTexts: new Set(),
-        recentSpeakers: [],
-        now: 1_000,
-        silentMs: 0,
-        sequence: seed,
-        rng: createRng(seed),
-      });
+      const result = direct(seed, { reaction: reaction("hey", "greeting") });
       // Sadge is tagged for nothing and reads as sad; a greeting must not
       // reach for it beyond the deliberate wildcard escape.
       if (result?.message.text.includes("Sadge")) {
@@ -115,72 +130,115 @@ describe("emote-forward responses", () => {
     }
   });
 
+  it("honours the emote the model asked for when the pack has it", () => {
+    let honoured = 0;
+    for (let seed = 0; seed < 60; seed += 1) {
+      const result = direct(seed, {
+        intent: "story",
+        reaction: reaction("no way that happened", "story", { emote: "Sadge" }),
+      });
+      if (result?.message.text.includes("Sadge")) honoured += 1;
+    }
+    // Every worded story line with a stated preference should carry it,
+    // minus the wildcard escape.
+    expect(honoured).toBeGreaterThan(45);
+  });
+
+  it("ignores an emote the model invented", () => {
+    for (let seed = 0; seed < 40; seed += 1) {
+      const result = direct(seed, {
+        intent: "story",
+        reaction: reaction("no way", "story", { emote: "NotARealEmote" }),
+      });
+      expect(result?.message.text ?? "").not.toContain("NotARealEmote");
+    }
+  });
+
   it("leaves the generated line alone when emotes are switched off", () => {
-    expect(emoteShareWithEmotesOff()).toBe(0);
+    for (let seed = 0; seed < 60; seed += 1) {
+      const result = direct(seed, {
+        settings: { ...DEFAULT_SETTINGS, emotesEnabled: false },
+        reaction: reaction("hey there", "greeting"),
+      });
+      if (result) expect(result.message.text).toBe("hey there");
+    }
   });
 
   it("never posts emotes when the pack is empty", () => {
     for (let seed = 0; seed < 40; seed += 1) {
-      const result = directOne({
-        topic: topic("greeting"),
-        stage: "reacting",
-        band: "viral",
-        population: new Population(createRng(seed + 1000), 20),
-        settings: { ...DEFAULT_SETTINGS, emotesEnabled: true },
-        emotes: [],
-        reaction: reaction("hey"),
-        recentTexts: new Set(),
-        recentSpeakers: [],
-        now: 1_000,
-        silentMs: 0,
-        sequence: seed,
-        rng: createRng(seed),
-      });
+      const result = direct(seed, { emotes: [], reaction: reaction("hey", "greeting") });
       if (result) expect(result.message.text).toBe("hey");
     }
   });
 
+  it("labels the source honestly", () => {
+    const sources = new Set<string>();
+    for (let seed = 0; seed < 80; seed += 1) {
+      const result = direct(seed);
+      if (result) sources.add(result.message.source);
+    }
+    expect(sources).toEqual(new Set(["ai", "emote"]));
+  });
+
   it("is reproducible for a given seed", () => {
     const run = () =>
-      directOne({
-        topic: topic("greeting"),
-        stage: "reacting",
-        band: "viral",
+      direct(42, {
         population: new Population(createRng(7), 20),
-        settings: { ...DEFAULT_SETTINGS, emotesEnabled: true },
-        emotes: EMOTES,
-        reaction: reaction("hey"),
-        recentTexts: new Set(),
-        recentSpeakers: [],
-        now: 1_000,
-        silentMs: 0,
+        reaction: reaction("hey", "greeting"),
         sequence: 1,
-        rng: createRng(42),
       })?.message.text;
     expect(run()).toBe(run());
   });
 });
 
-/** Greetings with emotes disabled: counts lines the director altered. */
-function emoteShareWithEmotesOff(): number {
-  let emoteOnly = 0;
-  for (let seed = 0; seed < 60; seed += 1) {
-    const result = directOne({
-      topic: topic("greeting"),
-      stage: "reacting",
-      band: "viral",
-      population: new Population(createRng(seed + 1000), 20),
-      settings: { ...DEFAULT_SETTINGS, emotesEnabled: false },
-      emotes: EMOTES,
-      reaction: reaction("hey there"),
-      recentTexts: new Set(),
-      recentSpeakers: [],
-      now: 1_000,
-      silentMs: 0,
-      sequence: seed,
-      rng: createRng(seed),
-    });
-    if (result && result.message.text !== "hey there") emoteOnly += 1;
-  }
-  return emoteOnly;
-}
+describe("directives", () => {
+  it("spams the requested token while the moment is hot", () => {
+    let complied = 0;
+    for (let seed = 0; seed < 100; seed += 1) {
+      const result = direct(seed, {
+        intent: "directive",
+        topic: topic("directive", { directiveTarget: "W" }),
+        reaction: reaction("ok chat W", "directive"),
+      });
+      if (result && /^(W ?)+$/.test(result.message.text)) complied += 1;
+    }
+    expect(complied).toBeGreaterThan(60);
+  });
+
+  it("marks the token as a directive, not as the model's words", () => {
+    for (let seed = 0; seed < 40; seed += 1) {
+      const result = direct(seed, {
+        intent: "directive",
+        topic: topic("directive", { directiveTarget: "W" }),
+        reaction: reaction("ok chat", "directive"),
+      });
+      if (result && /^(W ?)+$/.test(result.message.text)) {
+        expect(result.message.source).toBe("directive");
+      }
+    }
+  });
+});
+
+describe("emote-only mode", () => {
+  it("renders every line as emotes", () => {
+    for (let seed = 0; seed < 40; seed += 1) {
+      const result = direct(seed, {
+        intent: "story",
+        settings: { ...DEFAULT_SETTINGS, emoteOnlyMode: true },
+        reaction: reaction("a whole sentence", "story"),
+      });
+      if (!result) continue;
+      const names = new Set(EMOTES.map((e) => e.name));
+      expect(result.message.text.split(" ").every((w) => names.has(w))).toBe(true);
+      expect(result.message.source).toBe("emote");
+    }
+  });
+
+  it("waits rather than posting blanks with no emotes loaded", () => {
+    for (let seed = 0; seed < 20; seed += 1) {
+      expect(
+        direct(seed, { emotes: [], settings: { ...DEFAULT_SETTINGS, emoteOnlyMode: true } }),
+      ).toBeNull();
+    }
+  });
+});

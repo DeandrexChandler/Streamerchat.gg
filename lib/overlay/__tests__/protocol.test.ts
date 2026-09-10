@@ -16,7 +16,7 @@ function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
     color: "#ff8800",
     text: "hello",
     kind: "reaction",
-    source: "pool",
+    source: "ai",
     at: 1_700_000_000_000,
     ...overrides,
   };

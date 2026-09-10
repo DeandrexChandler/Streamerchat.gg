@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { EmoteMood, Intent } from "../engine/types";
+import type { GenerationPhase } from "./provider";
 
 /**
  * One audience reaction, as the model returns it.
@@ -46,11 +47,19 @@ export const ReactionSchema = z.object({
    * a sentence, which is what makes a batch read as a room rather than a list.
    */
   eagerness: z.number().min(0).max(1).optional(),
+  /**
+   * The emote the model thinks this line wants, by name.
+   *
+   * A preference, not a decision: the deterministic side checks it against
+   * what is actually loaded and falls back to its own selection when the
+   * name is not in the pack. The model never picks an image.
+   */
+  emote: z.string().max(60).optional(),
 });
 
 export type Reaction = z.infer<typeof ReactionSchema>;
 
-export const ReactionBatchSchema = z.array(ReactionSchema).max(40);
+export const ReactionBatchSchema = z.array(ReactionSchema).max(60);
 
 /** A reaction plus the bookkeeping the queue needs. */
 export interface QueuedReaction extends Reaction {
@@ -67,4 +76,8 @@ export interface QueuedReaction extends Reaction {
    * part of the greeting, not idle chatter.
    */
   intent?: Intent;
+  /** Which phase asked for it, so the director can shape it accordingly. */
+  phase?: GenerationPhase;
+  /** Times nobody eligible could say it. Two and it is dropped. */
+  attempts?: number;
 }

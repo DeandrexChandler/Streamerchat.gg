@@ -1,4 +1,4 @@
-import type { Classification, Intent, Viewer } from "./types";
+import type { Classification, Intent } from "./types";
 import type { Rng } from "./rng";
 
 /**
@@ -127,73 +127,3 @@ export function shouldReact(
 }
 
 // ----------------------------------------------------------------- the depth
-
-/**
- * How much effort one viewer puts into one message.
- *
- *   ambient   an emote or a single word — "W", "LOL", "oof", "💀"
- *   light     two or three words
- *   engaged   a short statement
- *   invested  an actual sentence
- */
-export type Depth = "ambient" | "light" | "engaged" | "invested";
-
-/**
- * Target mix.
- *
- * Previously ambient 0.50 / light 0.28, which put 78% of the weight on one to
- * three words before anything else applied. Measured output was 77% of
- * messages at three words or fewer, mean 2.5 — a wall of "W" and "hm" that
- * read as a bot rather than a room.
- *
- * Short lines are still the largest single bucket and still dominate during a
- * pile-on, where `pickDepth` skews them further. They just no longer crowd out
- * ordinary conversation.
- */
-const BASE_MIX: Record<Depth, number> = {
-  ambient: 0.24,
-  light: 0.28,
-  engaged: 0.28,
-  invested: 0.16,
-};
-
-export interface DepthContext {
-  viewer: Viewer;
-  energy: number;
-  /** Index within the burst. Early responders are reflexive. */
-  position: number;
-}
-
-export function pickDepth(context: DepthContext, rng: Rng): Depth {
-  const { viewer, energy, position } = context;
-
-  const weights: Record<Depth, number> = { ...BASE_MIX };
-
-  // Verbosity is the main lever: a lurker posts emotes, a chatty regular
-  // writes sentences.
-  weights.ambient *= 1.8 - viewer.verbosity * 1.4;
-  weights.light *= 1.1 - viewer.verbosity * 0.2;
-  weights.engaged *= 0.35 + viewer.verbosity * 1.5;
-  weights.invested *= 0.1 + viewer.verbosity * 2.2;
-
-  // High-energy moments produce MORE short reflexive reactions, not fewer —
-  // nobody writes a paragraph while shouting.
-  // Softened from 0.8/0.6: at the old strength an exciting topic came back
-  // almost entirely as one-word replies, and excitement is exactly when
-  // somebody also wants to say something about it.
-  weights.ambient *= 1 + energy * 0.45;
-  weights.invested *= 1 - energy * 0.35;
-
-  // The first people to respond are reacting, not composing.
-  if (position === 0) {
-    weights.ambient *= 1.35;
-    weights.invested *= 0.5;
-  } else if (position >= 3) {
-    // Later arrivals had time to type something.
-    weights.engaged *= 1.3;
-    weights.invested *= 1.5;
-  }
-
-  const entries = Object.entries(weights) as Array<[Depth, number]>;
-  return rng.weighted(entries, ([, weight]) => Math.max(0, weight))[0];
-}

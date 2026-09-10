@@ -1,216 +1,496 @@
 import { describe, expect, it } from "vitest";
 import { SimulationEngine } from "../engine";
-import { buildEmoteIndex, isEmoteOnly } from "../../data/emotes";
+import { createMockProvider } from "../../ai/mock";
 import { FIXTURE_EMOTES } from "../../data/__fixtures__/emotes";
-
-const emoteIndex = buildEmoteIndex(FIXTURE_EMOTES);
+import type { CandidateProvider, CandidateRequest } from "../../ai/provider";
 import type { ChatMessage } from "../types";
 import type { SimulationSettings } from "../../config/settings";
+import { IDLE_AFTER_MS } from "../generation";
 
-/** Runs the engine over a virtual clock and collects everything it emits. */
-function run(
-  engine: SimulationEngine,
-  durationMs: number,
-  script: Array<[ms: number, text: string]> = [],
-  stepMs = 250,
-): ChatMessage[] {
-  const out: ChatMessage[] = [];
-  let next = 0;
-  for (let now = 0; now <= durationMs; now += stepMs) {
-    while (next < script.length && script[next][0] <= now) {
-      engine.handleTranscript(script[next][1], now);
-      next++;
-    }
-    out.push(...engine.tick(now));
-  }
-  return out;
+/**
+ * The engine, driven the way the app drives it.
+ *
+ * Every tick asks the engine what it needs and serves it from a scripted
+ * provider on the spot. Nothing here touches the network; the mock is the
+ * only provider these tests know about.
+ */
+
+interface Session {
+  engine: SimulationEngine;
+  messages: ChatMessage[];
+  /** Every request the engine made, in order. */
+  requests: CandidateRequest[];
 }
 
-const make = (settings: Partial<SimulationSettings> = {}, seed = 1234) =>
-  new SimulationEngine({
-    seed,
+interface DriveOptions {
+  seed?: number;
+  settings?: Partial<SimulationSettings>;
+  emotes?: readonly typeof FIXTURE_EMOTES[number][];
+  provider?: CandidateProvider;
+  /** [ms, text] — what the streamer says and when. */
+  script?: ReadonlyArray<readonly [number, string]>;
+  /** Called on every tick, after the pump. */
+  onTick?: (session: Session, now: number) => void;
+}
+
+/**
+ * Runs a session over a virtual clock.
+ *
+ * The provider is awaited so a batch lands on the tick it was requested —
+ * latency is a separate concern and not what these measure.
+ */
+async function drive(durationMs: number, options: DriveOptions = {}): Promise<Session> {
+  const engine = new SimulationEngine({
+    seed: options.seed ?? 1234,
     now: 0,
-    emotes: FIXTURE_EMOTES,
-    settings: { aiShare: 0, ...settings },
+    emotes: options.emotes ?? FIXTURE_EMOTES,
+    settings: options.settings,
   });
+  const provider = options.provider ?? createMockProvider();
+  const session: Session = { engine, messages: [], requests: [] };
+  const script = [...(options.script ?? [])];
+
+  engine.beginSession(0);
+  for (let now = 0; now <= durationMs; now += 250) {
+    while (script.length > 0 && script[0][0] <= now) {
+      engine.handleTranscript(script.shift()![1], now, undefined, true);
+    }
+    const request = engine.nextGeneration(now);
+    if (request) {
+      session.requests.push(request);
+      const result = await provider.generate(request);
+      if (result.status === "ok" && result.reactions.length > 0) {
+        engine.supplyReactions(result.reactions, now);
+      } else {
+        engine.generationFailed(now);
+      }
+    }
+    session.messages.push(...engine.tick(now));
+    options.onTick?.(session, now);
+  }
+  return session;
+}
+
+/** A provider that never answers. */
+const dead: CandidateProvider = {
+  name: "dead",
+  async generate() {
+    return { reactions: [], status: "network", detail: "ECONNREFUSED" };
+  },
+};
+
+/** A provider that answers with exactly these lines, every time. */
+function saying(texts: string[]): CandidateProvider {
+  return {
+    name: "saying",
+    async generate() {
+      return { reactions: texts.map((text) => ({ text })), status: "ok" };
+    },
+  };
+}
+
+function byUser(messages: ChatMessage[]): Map<string, ChatMessage[]> {
+  const grouped = new Map<string, ChatMessage[]>();
+  for (const message of messages) {
+    grouped.set(message.username, [...(grouped.get(message.username) ?? []), message]);
+  }
+  return grouped;
+}
+
+// ---------------------------------------------------------------- invariants
 
 describe("SimulationEngine", () => {
-
-
-
-
-
-
-  it("never emits messages with the same timestamp out of order", () => {
-    const messages = run(make(), 60_000, [[1000, "let's go"]]);
+  it("never emits messages out of order", async () => {
+    const { messages } = await drive(60_000, { script: [[1000, "let's go"]] });
     for (let i = 1; i < messages.length; i++) {
       expect(messages[i].at).toBeGreaterThanOrEqual(messages[i - 1].at);
     }
   });
 
-
-
+  it("keeps every message id unique", async () => {
+    const { messages } = await drive(120_000, {
+      script: [[1000, "hey chat"], [30_000, "what do you think"]],
+    });
+    expect(messages.length).toBeGreaterThan(20);
+    expect(new Set(messages.map((m) => m.id)).size).toBe(messages.length);
+  });
 
   it("ignores transcripts that are too short to be speech", () => {
-    const engine = make();
+    const engine = new SimulationEngine({ seed: 1, now: 0 });
     expect(engine.handleTranscript("a", 1000)).toBeNull();
     expect(engine.handleTranscript("  ", 1000)).toBeNull();
   });
 
-  it("produces idle chatter during silence", () => {
-    const messages = run(make({ idleAfterSeconds: 10 }), 90_000);
-    expect(messages.filter((m) => m.kind === "idle").length).toBeGreaterThan(0);
+  it("reuses viewers rather than inventing a name per message", async () => {
+    const { messages } = await drive(180_000, {
+      settings: { audienceSize: 12 },
+      script: [[1000, "hey everyone"], [40_000, "chat what should i build"]],
+    });
+    const names = new Set(messages.map((m) => m.username));
+    expect(messages.length).toBeGreaterThan(30);
+    expect(names.size).toBeLessThan(messages.length / 2);
   });
 
-  it("produces no idle chatter when disabled", () => {
-    const messages = run(make({ idleEnabled: false }), 120_000);
-    expect(messages.filter((m) => m.kind === "idle")).toHaveLength(0);
-  });
-
-  it("does not repeat the same message text back to back", () => {
-    // Regression: chat used to say "that's so pretty" three times in six
-    // seconds, which is the loudest possible tell that lines come from a list.
-    const messages = run(make(), 180_000, [
-      [1000, "look at this, check it out"],
-      [30_000, "chat what do you think"],
-      [60_000, "let's go we did it"],
-    ]);
-    for (let i = 1; i < messages.length; i++) {
-      expect(messages[i].text).not.toBe(messages[i - 1].text);
+  it("gives a viewer a stable colour across their messages", async () => {
+    const { messages } = await drive(180_000, {
+      settings: { audienceSize: 8 },
+      script: [[1000, "hey everyone"], [40_000, "chat what should i build"]],
+    });
+    for (const [, lines] of byUser(messages)) {
+      expect(new Set(lines.map((m) => m.color)).size).toBe(1);
     }
   });
 
-  it("keeps verbatim repeats rare across a whole session", () => {
-    const messages = run(make(), 240_000, [[1000, "hey everyone welcome in"]]);
-    const counts = new Map<string, number>();
-    for (const m of messages) counts.set(m.text, (counts.get(m.text) ?? 0) + 1);
-    const worst = Math.max(...counts.values());
-    expect(worst / messages.length).toBeLessThan(0.15);
-  });
-
-  it("never has a viewer reply to themselves", () => {
-    // Regression: idle side-replies used to target the speaker's own name.
-    const messages = run(make({ sideConversationChance: 0.6 }), 180_000, [
-      [1000, "hey everyone"],
-      [40_000, "chat what do you think"],
-    ]);
-    const replies = messages.filter((m) => m.replyTo);
-    expect(replies.length).toBeGreaterThan(0);
-    for (const reply of replies) {
-      expect(reply.replyTo).not.toBe(reply.username);
-    }
-  });
-
-  it("reuses viewers rather than inventing a name per message", () => {
-    // Persistent identities are what make chat feel like a room of people.
-    const messages = run(make({ audienceSize: 25 }), 180_000, [
-      [1000, "hey everyone welcome in"],
-      [30_000, "let's go"],
-    ]);
-    const unique = new Set(messages.map((m) => m.username)).size;
-    expect(messages.length).toBeGreaterThan(unique);
-    expect(unique).toBeLessThanOrEqual(25);
-  });
-
-  it("gives a viewer a stable colour across their messages", () => {
-    const messages = run(make(), 120_000, [[1000, "hey everyone"]]);
-    const colors = new Map<string, string>();
-    for (const m of messages) {
-      if (colors.has(m.username)) expect(colors.get(m.username)).toBe(m.color);
-      colors.set(m.username, m.color);
-    }
-  });
-
-
-
-
-  it("drops messages blocked by the profanity filter", () => {
-    const engine = make({ profanityMode: "filter", blockedWords: ["hi", "yo", "hey", "hello"] });
-    const messages = run(engine, 20_000, [[1000, "hey everyone welcome in"]]);
-    for (const m of messages) {
-      expect(m.text.toLowerCase()).not.toMatch(/\b(hi|yo|hey|hello)\b/);
-    }
-  });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  it("reports coherent stats", () => {
-    const engine = make();
-    const messages = run(engine, 60_000, [[1000, "hey everyone"]]);
-    const stats = engine.stats();
-    expect(stats.released).toBe(messages.length);
-    expect(stats.audience).toBeGreaterThan(0);
-    expect(
-      Object.values(stats.bySource).reduce((a, b) => a + b, 0),
-    ).toBe(messages.length);
+  it("drops messages blocked by the profanity filter", async () => {
+    const { messages } = await drive(30_000, {
+      settings: { profanityMode: "filter" },
+      provider: saying(["this is shit", "clean line"]),
+    });
+    expect(messages.length).toBeGreaterThan(0);
+    expect(messages.every((m) => !/shit/.test(m.text))).toBe(true);
   });
 
   it("applies updated settings without a restart", () => {
-    const engine = make({ idleEnabled: true, idleAfterSeconds: 5 });
-    engine.updateSettings({ idleEnabled: false });
-    const messages = run(engine, 120_000);
-    expect(messages.filter((m) => m.kind === "idle")).toHaveLength(0);
+    const engine = new SimulationEngine({ seed: 1, now: 0 });
+    engine.updateSettings({ messagesPerSecond: 4 });
+    expect(() => engine.tick(1000)).not.toThrow();
   });
 
-  it("survives a tick with no emotes configured", () => {
-    const engine = new SimulationEngine({ seed: 5, now: 0, emotes: [], settings: { aiShare: 0 } });
-    expect(() => run(engine, 60_000, [[1000, "hey everyone"]])).not.toThrow();
+  it("survives a tick with no emotes configured", async () => {
+    const { messages } = await drive(20_000, { emotes: [] });
+    expect(messages.length).toBeGreaterThan(0);
   });
 
-  it("holds a steady message rate over a long session", () => {
-    const messages = run(make({ idleAfterSeconds: 12 }), 600_000);
-    const perMinute = messages.length / 10;
-    // Idle-only chat should stay conversational, not silent and not a flood.
-    expect(perMinute).toBeGreaterThan(3);
-    expect(perMinute).toBeLessThan(60);
+  it("reports coherent stats", async () => {
+    const { engine, messages } = await drive(30_000, { script: [[1000, "hi chat"]] });
+    const stats = engine.stats();
+    expect(stats.released).toBe(messages.length);
+    expect(stats.audience).toBeGreaterThan(0);
+    expect(stats.phase).toBe("active");
   });
 });
 
-describe("SimulationEngine pacing", () => {
-  /** Inter-message gaps in ms across a scripted session. */
-  function gaps(seed: number): number[] {
-    const engine = make({ idleAfterSeconds: 12 }, seed);
-    const messages = run(engine, 300_000, [
-      [1000, "hey everyone welcome in"],
-      [40_000, "chat what do you think about the roof"],
-      [80_000, "LET'S GO that was insane!"],
-      [140_000, "look at this, check it out"],
-      [200_000, "come on, this is so annoying"],
-    ]);
+// ------------------------------------------------------------------ startup
+
+describe("startup", () => {
+  it("asks for an arrival batch as soon as the session begins", () => {
+    const engine = new SimulationEngine({ seed: 5, now: 0 });
+    engine.beginSession(0);
+    const request = engine.nextGeneration(0);
+    expect(request?.phase).toBe("startup");
+    expect(request?.utterance).toBe("");
+    expect(request?.continuation).toBe(false);
+  });
+
+  it("shows chat before the streamer has said anything", async () => {
+    // The reported bug, twice over: Start used to leave the room silent.
+    const { messages, requests } = await drive(20_000);
+    expect(requests[0]?.phase).toBe("startup");
+    expect(messages.length).toBeGreaterThan(5);
+    expect(messages.every((m) => m.kind === "greeting")).toBe(true);
+  });
+
+  it("releases arrival over time rather than all at once", async () => {
+    const { engine } = await drive(0);
+    const firstTick = engine.tick(0).length;
+    const { messages } = await drive(20_000);
+    expect(firstTick).toBeLessThan(4);
+    expect(messages.length).toBeGreaterThan(firstTick);
+  });
+
+  it("says nothing at all when the provider is down", async () => {
+    // AI or nothing. There is no pool to fall back on, and that is the point.
+    const { messages } = await drive(30_000, { provider: dead });
+    expect(messages).toHaveLength(0);
+  });
+
+  it("greets once per viewer in the first wave", async () => {
+    const { messages } = await drive(12_000, { settings: { audienceSize: 40 } });
+    const names = messages.map((m) => m.username);
+    expect(names.length).toBeGreaterThan(5);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("keeps the room going after the first wave, as chatter", async () => {
+    const { requests } = await drive(50_000, { settings: { messagesPerSecond: 2 } });
+    const startup = requests.filter((r) => r.phase === "startup");
+    expect(startup.length).toBeGreaterThan(1);
+    expect(startup[0].continuation).toBe(false);
+    expect(startup.slice(1).every((r) => r.continuation)).toBe(true);
+  });
+
+  it("ends the moment the streamer speaks, dropping what was queued", async () => {
+    const { engine, requests } = await drive(3_000);
+    expect(engine.currentPhase).toBe("startup");
+    expect(engine.pendingReactions).toBeGreaterThan(0);
+
+    engine.handleTranscript("okay hey chat", 3_000, undefined, true);
+    expect(engine.currentPhase).toBe("active");
+    expect(engine.pendingReactions).toBe(0);
+
+    const next = engine.nextGeneration(3_250);
+    expect(next?.phase).toBe("active");
+    expect(next?.utterance).toBe("okay hey chat");
+    expect(requests.every((r) => r.phase === "startup")).toBe(true);
+  });
+
+  it("ends by itself when the silence threshold is reached", async () => {
+    const { engine, requests } = await drive(IDLE_AFTER_MS + 5_000);
+    expect(engine.currentPhase).toBe("idle");
+    expect(requests.some((r) => r.phase === "idle")).toBe(true);
+  });
+
+  it("starts fresh after a clear and restart", async () => {
+    const { engine } = await drive(20_000);
+    engine.beginSession(100_000);
+    expect(engine.currentPhase).toBe("startup");
+    expect(engine.pendingReactions).toBe(0);
+    expect(engine.nextGeneration(100_000)?.phase).toBe("startup");
+  });
+});
+
+// ------------------------------------------------------------------- active
+
+describe("active generation", () => {
+  it("requests a reaction batch carrying what the streamer said", async () => {
+    const { requests } = await drive(5_000, { script: [[1000, "look at this roof"]] });
+    const active = requests.find((r) => r.phase === "active");
+    expect(active?.utterance).toBe("look at this roof");
+    expect(active?.continuation).toBe(false);
+    expect(active?.classification.intent).toBeDefined();
+  });
+
+  it("carries recent streamer inputs as compact history", async () => {
+    const { requests } = await drive(30_000, {
+      script: [[1000, "i think i'll play minecraft"], [10_000, "actually valorant"]],
+    });
+    const second = requests.filter((r) => r.utterance === "actually valorant")[0];
+    expect(second?.history).toEqual(["i think i'll play minecraft"]);
+  });
+
+  it("carries recent chat lines so a refill does not echo them", async () => {
+    const { requests } = await drive(40_000, { script: [[1000, "hey chat"]] });
+    const later = requests[requests.length - 1];
+    expect(later.recent.length).toBeGreaterThan(0);
+    expect(later.recent.length).toBeLessThanOrEqual(20);
+  });
+
+  it("refills before the queue runs dry", async () => {
+    let dry = 0;
+    let ticks = 0;
+    await drive(60_000, {
+      script: [[1000, "hey chat"]],
+      onTick: ({ engine }, now) => {
+        if (now < 2000) return;
+        ticks += 1;
+        if (engine.pendingReactions === 0) dry += 1;
+      },
+    });
+    // Momentary, at most: the tick the last line is consumed.
+    expect(dry / ticks).toBeLessThan(0.05);
+  });
+
+  it("continues the conversation when a batch drains and nobody spoke", async () => {
+    const { requests } = await drive(50_000, { script: [[1000, "look at this roof"]] });
+    const continuations = requests.filter((r) => r.phase === "active" && r.continuation);
+    expect(continuations.length).toBeGreaterThan(0);
+    expect(continuations[0].utterance).toBe("look at this roof");
+    expect(continuations[0].silenceSeconds).toBeGreaterThan(5);
+  });
+
+  it("never asks twice while a request is unresolved", () => {
+    const engine = new SimulationEngine({ seed: 3, now: 0 });
+    engine.beginSession(0);
+    expect(engine.nextGeneration(0)).not.toBeNull();
+    expect(engine.nextGeneration(250)).toBeNull();
+    expect(engine.nextGeneration(5_000)).toBeNull();
+    engine.generationFailed(5_000);
+    expect(engine.nextGeneration(20_000)).not.toBeNull();
+  });
+
+  it("flushes the previous moment when the streamer says something new", async () => {
+    const { engine } = await drive(5_000, { script: [[1000, "i'll play minecraft"]] });
+    const before = engine.pendingReactions;
+    expect(before).toBeGreaterThan(0);
+    engine.handleTranscript("actually valorant", 5_000, undefined, true);
+    expect(engine.pendingReactions).toBe(0);
+  });
+
+  it("keeps what was already released", async () => {
+    const { messages } = await drive(20_000, {
+      script: [[1000, "i'll play minecraft"], [8_000, "actually valorant"]],
+    });
+    const before = messages.filter((m) => m.at < 8_000);
+    expect(before.length).toBeGreaterThan(0);
+  });
+
+  it("discards a batch that arrives for a moment that has passed", () => {
+    const engine = new SimulationEngine({ seed: 3, now: 0 });
+    engine.beginSession(0);
+    engine.handleTranscript("first thing", 0, undefined, true);
+    const request = engine.nextGeneration(0);
+    expect(request?.utterance).toBe("first thing");
+
+    // The streamer moves on while the request is in flight.
+    engine.handleTranscript("second thing", 500, undefined, true);
+    engine.supplyReactions([{ text: "about the first thing" }], 1_000);
+    expect(engine.pendingReactions).toBe(0);
+
+    expect(engine.nextGeneration(1_250)?.utterance).toBe("second thing");
+  });
+
+  it("goes quiet, not canned, when the provider fails", async () => {
+    const { messages } = await drive(40_000, { provider: dead, script: [[1000, "hey chat"]] });
+    expect(messages).toHaveLength(0);
+  });
+
+  it("backs off after a failure rather than hammering", async () => {
+    const { requests } = await drive(60_000, { provider: dead, script: [[1000, "hey chat"]] });
+    // 60s at an 8s backoff is at most about eight attempts.
+    expect(requests.length).toBeLessThan(10);
+    expect(requests.length).toBeGreaterThan(2);
+  });
+
+  it("recovers on its own once the provider is back", async () => {
+    let calls = 0;
+    const flaky: CandidateProvider = {
+      name: "flaky",
+      async generate(request) {
+        calls += 1;
+        if (calls <= 2) return { reactions: [], status: "timeout" };
+        return createMockProvider().generate(request);
+      },
+    };
+    const { messages } = await drive(60_000, { provider: flaky, script: [[1000, "hey chat"]] });
+    expect(messages.length).toBeGreaterThan(5);
+  });
+});
+
+// --------------------------------------------------------------------- idle
+
+describe("idle", () => {
+  const lastWord = 2_000;
+
+  it("does not start before the threshold", async () => {
+    const { requests } = await drive(lastWord + IDLE_AFTER_MS - 1_000, {
+      script: [[lastWord, "okay building now"]],
+    });
+    expect(requests.every((r) => r.phase !== "idle")).toBe(true);
+  });
+
+  it("starts at the threshold with the silence in the request", async () => {
+    const { requests, engine } = await drive(lastWord + IDLE_AFTER_MS + 2_000, {
+      script: [[lastWord, "okay building now"]],
+    });
+    const idle = requests.find((r) => r.phase === "idle");
+    expect(idle).toBeDefined();
+    expect(idle?.idleStage).toBe(1);
+    expect(idle?.silenceSeconds).toBeGreaterThanOrEqual(60);
+    expect(engine.currentPhase).toBe("idle");
+  });
+
+  it("keeps flowing at the configured speed while idle", async () => {
+    const { messages } = await drive(lastWord + IDLE_AFTER_MS + 60_000, {
+      settings: { messagesPerSecond: 1 },
+      script: [[lastWord, "okay building now"]],
+    });
+    const idle = messages.filter((m) => m.kind === "idle");
+    // Sixty seconds of idle at one a second.
+    expect(idle.length).toBeGreaterThan(35);
+    expect(idle.length).toBeLessThan(95);
+  });
+
+  it("escalates through the stages as silence continues", async () => {
+    const { requests } = await drive(lastWord + 620_000, {
+      script: [[lastWord, "okay building now"]],
+    });
+    const stages = [...new Set(requests.filter((r) => r.phase === "idle").map((r) => r.idleStage))];
+    expect(stages).toEqual([1, 2, 3, 4]);
+  });
+
+  it("drops the old stage's lines when the stage advances", async () => {
+    let queuedAtBoundary = -1;
+    await drive(lastWord + 150_000 + 500, {
+      script: [[lastWord, "okay building now"]],
+      onTick: ({ engine }, now) => {
+        if (now === lastWord + 150_000) queuedAtBoundary = engine.pendingReactions;
+      },
+    });
+    // At the exact boundary tick the stage-1 queue was dropped and the
+    // stage-2 batch supplied in its place, so the queue holds only new lines.
+    expect(queuedAtBoundary).toBeGreaterThan(0);
+  });
+
+  it("ends the instant the streamer speaks", async () => {
+    const { engine } = await drive(lastWord + IDLE_AFTER_MS + 10_000, {
+      script: [[lastWord, "okay building now"]],
+    });
+    expect(engine.currentPhase).toBe("idle");
+    engine.handleTranscript("sorry chat i'm back", lastWord + IDLE_AFTER_MS + 10_000, undefined, true);
+    expect(engine.currentPhase).toBe("active");
+    expect(engine.pendingReactions).toBe(0);
+    const next = engine.nextGeneration(lastWord + IDLE_AFTER_MS + 10_250);
+    expect(next?.phase).toBe("active");
+    expect(next?.continuation).toBe(false);
+  });
+
+  it("uses only the AI for idle lines", async () => {
+    const { messages } = await drive(lastWord + IDLE_AFTER_MS + 30_000, {
+      provider: dead,
+      script: [[lastWord, "okay building now"]],
+    });
+    expect(messages.filter((m) => m.kind === "idle")).toHaveLength(0);
+  });
+});
+
+// -------------------------------------------------------------- lifecycle
+
+describe("pause and resume", () => {
+  it("drops the queue on pause and restarts the silence clock on resume", async () => {
+    const { engine } = await drive(10_000, { script: [[1000, "hey chat"]] });
+    expect(engine.pendingReactions).toBeGreaterThan(0);
+
+    engine.pause();
+    expect(engine.pendingReactions).toBe(0);
+    expect(engine.nextGeneration(11_000)).toBeNull();
+
+    engine.resume(500_000);
+    const request = engine.nextGeneration(500_000);
+    expect(request?.phase).toBe("active");
+    expect(request?.silenceSeconds).toBe(0);
+  });
+});
+
+// ----------------------------------------------------------------- pacing
+
+describe("pacing", () => {
+  async function gaps(seed: number, settings: Partial<SimulationSettings> = {}): Promise<number[]> {
+    const { messages } = await drive(300_000, {
+      seed,
+      settings,
+      script: [
+        [1000, "hey everyone welcome in"],
+        [40_000, "chat what do you think about the roof"],
+        [80_000, "LET'S GO that was insane!"],
+        [140_000, "look at this, check it out"],
+        [200_000, "come on, this is so annoying"],
+      ],
+    });
     const out: number[] = [];
-    for (let i = 1; i < messages.length; i++) {
-      out.push(messages[i].at - messages[i - 1].at);
-    }
+    for (let i = 1; i < messages.length; i++) out.push(messages[i].at - messages[i - 1].at);
     return out;
   }
 
-  it("produces tight clusters of near-simultaneous messages", () => {
-    // Real chat piles on: two people hit enter within a few hundred ms.
-    const tight = gaps(4242).filter((g) => g <= 500).length;
-    expect(tight).toBeGreaterThan(0);
+  it("produces tight clusters of near-simultaneous messages", async () => {
+    expect((await gaps(4242)).filter((g) => g <= 500).length).toBeGreaterThan(0);
   });
 
-  it("produces long pauses as well as clusters", () => {
-    const slow = gaps(4242).filter((g) => g >= 3000).length;
-    expect(slow).toBeGreaterThan(0);
+  it("produces long pauses as well as clusters", async () => {
+    expect((await gaps(4242)).filter((g) => g >= 3000).length).toBeGreaterThan(0);
   });
 
-  it("is not metronomic — gaps spread across multiple buckets", () => {
-    // Regression: an eased-curve scheduler produced a near-constant ~2s gap,
-    // which read as machine-generated even though the message text was fine.
-    const all = gaps(4242);
+  it("is not metronomic — gaps spread across multiple buckets", async () => {
+    const all = await gaps(4242);
     const buckets = [
       all.filter((g) => g < 500).length,
       all.filter((g) => g >= 500 && g < 1500).length,
@@ -218,745 +498,160 @@ describe("SimulationEngine pacing", () => {
       all.filter((g) => g >= 3000).length,
     ];
     expect(buckets.filter((n) => n > 0).length).toBeGreaterThanOrEqual(3);
-    // No single bucket may dominate.
     expect(Math.max(...buckets) / all.length).toBeLessThan(0.7);
   });
 
-
-});
-
-describe("username generation", () => {
-  it("keeps usernames unique", () => {
-    const engine = make({ audienceSize: 60 }, 5150);
-    const messages = run(engine, 200_000, [[1000, "hey everyone"]]);
-    const byName = new Map<string, string>();
-    for (const m of messages) {
-      // Same name must always mean the same viewer.
-      if (byName.has(m.username)) expect(byName.get(m.username)).toBe(m.viewerId);
-      byName.set(m.username, m.viewerId);
-    }
-  });
-});
-
-describe("SimulationEngine message shape", () => {
-  /** Word-count histogram over a long multi-seed session. */
-  function lengthMix(seeds: number[]) {
-    const counts = { one: 0, few: 0, medium: 0, long: 0, total: 0 };
-
-    for (const seed of seeds) {
-      const engine = make({ idleAfterSeconds: 12 }, seed);
-      const messages = run(engine, 400_000, [
-        [1_000, "hey everyone welcome in"],
-        [30_000, "chat what do you think about the roof or the walls"],
-        [70_000, "LET'S GO that was insane!"],
-        [110_000, "look at this, check out how it turned out"],
-        [160_000, "come on, this is so annoying, not again"],
-        [210_000, "so yesterday this really funny thing happened at work"],
-        [260_000, "finally, we did it, got it"],
-        [310_000, "I have no idea how this works, I'm lost"],
-      ]);
-
-      for (const m of messages) {
-        const words = m.text.trim().split(/\s+/).filter(Boolean).length;
-        counts.total++;
-        // Emote spam counts as the shortest kind of message regardless of
-        // token count — see isEmoteOnly().
-        if (words <= 1 || isEmoteOnly(m.text, emoteIndex)) counts.one++;
-        else if (words <= 3) counts.few++;
-        else if (words <= 6) counts.medium++;
-        else counts.long++;
-      }
-    }
-
-    return counts;
-  }
-
-  const SEEDS = [11, 22, 33, 44, 55, 66, 77, 88];
-
-  /**
-   * These replace three tests that asserted the opposite: that one-word
-   * messages exceeded 40%, medium statements stayed under 25%, and full
-   * sentences were rare. That shape measured out as 77% of output at three
-   * words or fewer with a mean of 2.5 words and nothing above twelve — a wall
-   * of "W" and "hm" rather than a room of people.
-   *
-   * Asserted as a distribution, never per message: short lines are still
-   * useful and still the bulk of a pile-on.
-   */
-  it("no longer lets tiny comments dominate", () => {
-    const mix = lengthMix(SEEDS);
-    expect(mix.one / mix.total).toBeLessThan(0.55);
+  it.each([0.2, 0.5, 1, 1.5, 2, 4])("tracks the %s/sec tier", async (rate) => {
+    const all = await gaps(99, { messagesPerSecond: rate });
+    const seconds = 300;
+    const measured = (all.length + 1) / seconds;
+    // Momentum lifts a talkative script above the setting; the long-run
+    // average must still be recognisably the tier.
+    expect(measured).toBeGreaterThan(rate * 0.7);
+    expect(measured).toBeLessThan(rate * 1.9);
   });
 
-  it("makes real replies common rather than exceptional", () => {
-    const mix = lengthMix(SEEDS);
-    expect((mix.medium + mix.long) / mix.total).toBeGreaterThan(0.3);
-  });
-
-  it("still produces plenty of short reactions", () => {
-    // The other failure mode: every viewer composing a paragraph.
-    const mix = lengthMix(SEEDS);
-    expect(mix.one / mix.total).toBeGreaterThan(0.2);
-  });
-
-
-
-
-
-  it("does not post reply-shaped affirmations into silence", () => {
-    // "true", "gotcha", "makes sense" only mean something as a response;
-    // posted into an empty chat they read as agreeing with nobody.
-    const engine = make({ idleAfterSeconds: 10 }, 8080);
-    const messages = run(engine, 300_000);
-    const idleTexts = messages
-      .filter((m) => m.kind === "idle")
-      .map((m) => m.text.toLowerCase());
-
-    expect(idleTexts.length).toBeGreaterThan(5);
-    for (const text of idleTexts) {
-      expect(["true", "gotcha", "i see", "makes sense", "fair", "sure"]).not.toContain(text);
-    }
-  });
-})
-
-describe("SimulationEngine audience size", () => {
-  /** Distinct usernames seen over a long idle session. */
-  function distinctNames(audienceSize: number, seed: number): number {
-    const engine = make({ audienceSize, idleAfterSeconds: 10 }, seed);
-    const messages = run(engine, 600_000);
-    return new Set(messages.map((m) => m.username)).size;
-  }
-
-  it("keeps a small audience to a consistent roster", () => {
-    // A small stream should feel like the same handful of people. Churn is
-    // deliberately slow at this size so you learn who the regulars are.
-    const engine = make({ audienceSize: 10, idleAfterSeconds: 10 }, 606);
-    const messages = run(engine, 600_000);
-    const names = new Set(messages.map((m) => m.username));
-    expect(messages.length).toBeGreaterThan(50);
-    expect(names.size).toBeLessThan(22);
-  });
-
-  it("shows more unique names as the audience grows", () => {
-    const seeds = [3, 14, 15];
-    const small = seeds.map((s) => distinctNames(10, s));
-    const large = seeds.map((s) => distinctNames(200, s));
-    const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
-    expect(avg(large)).toBeGreaterThan(avg(small) * 2);
-  });
-
-  it("grows the population toward a raised audience setting", () => {
-    const engine = make({ audienceSize: 10, idleAfterSeconds: 10 }, 77);
-    run(engine, 30_000);
-    engine.updateSettings({ audienceSize: 60 });
-    run(engine, 400_000);
-    expect(engine.stats().audience).toBeGreaterThan(40);
-  });
-
-
-
-  it("keeps every username unique through churn", () => {
-    // Churn frees a departed viewer's vocabulary for reuse; that must never
-    // produce two live viewers sharing a name.
-    const engine = make({ audienceSize: 150, idleAfterSeconds: 10 }, 99);
-    const messages = run(engine, 500_000);
-    const byName = new Map<string, string>();
-    for (const m of messages) {
-      const existing = byName.get(m.username);
-      if (existing) expect(existing).toBe(m.viewerId);
-      byName.set(m.username, m.viewerId);
-    }
-  });
-});
-
-describe("SimulationEngine viewer count", () => {
-  /** Viewer counts sampled across a session. */
-  function samples(target: number, seed: number): number[] {
-    const engine = make({ audienceSize: target, idleAfterSeconds: 10 }, seed);
-    const out: number[] = [];
-    for (let t = 0; t <= 180_000; t += 250) {
-      engine.tick(t);
-      if (t % 3000 === 0) out.push(engine.stats().audience);
-    }
-    return out;
-  }
-
-
-
-  it("keeps moving rather than settling on a number", () => {
-    // A viewer count frozen on a number reads as the setting echoed back, not
-    // as an audience. The property that matters is that it changes between
-    // samples — a bounded random walk naturally revisits values, so counting
-    // distinct ones would be asserting the wrong thing.
-    const values = samples(500, 12);
-    let unchanged = 0;
-    for (let i = 1; i < values.length; i++) {
-      if (values[i] === values[i - 1]) unchanged++;
-    }
-    expect(unchanged / values.length).toBeLessThan(0.1);
-  });
-
-  it("rarely lands exactly on the configured number", () => {
-    const values = samples(500, 13);
-    const exact = values.filter((v) => v === 500).length;
-    expect(exact / values.length).toBeLessThan(0.05);
-  });
-
-  it("scales its wobble with audience size", () => {
-    // Counting noise grows with the square root of the count: a 10-viewer
-    // stream moves by ones, a 10,000-viewer stream by tens.
-    const spread = (target: number) => {
-      const values = samples(target, 14);
-      return Math.max(...values) - Math.min(...values);
+  it("asks for bigger batches at faster tiers", () => {
+    const at = (rate: number) => {
+      const engine = new SimulationEngine({ seed: 1, now: 0, settings: { messagesPerSecond: rate } });
+      engine.beginSession(0);
+      return engine.nextGeneration(0)!.count;
     };
-    expect(spread(8000)).toBeGreaterThan(spread(25) * 5);
+    expect(at(0.2)).toBeLessThan(at(1));
+    expect(at(1)).toBeLessThan(at(4));
+    expect(at(4)).toBeLessThanOrEqual(60);
   });
 
-
-
-  it("never reports fewer than one viewer", () => {
-    const engine = make({ audienceSize: 5, idleAfterSeconds: 10 }, 16);
-    for (let t = 0; t <= 120_000; t += 250) {
-      engine.tick(t);
-      expect(engine.stats().audience).toBeGreaterThanOrEqual(1);
+  it("stays inside a sane call budget at every tier", async () => {
+    for (const rate of [0.2, 1, 4]) {
+      const { requests } = await drive(300_000, {
+        settings: { messagesPerSecond: rate },
+        script: [[1000, "hey chat"], [60_000, "what do you think"], [120_000, "let's go"]],
+      });
+      expect(requests.length / 5).toBeLessThan(8); // per minute
     }
   });
 });
 
+// ------------------------------------------------------------ viewer count
 
-describe("SimulationEngine repeat cap", () => {
-  /**
-   * Most times any single viewer repeated one exact text inside the engine's
-   * lookback window.
-   *
-   * Windowed, because the cap is windowed: over a long session a viewer may
-   * legitimately reach the limit, have it age out, and reach it again. A
-   * lifetime count would be asserting a guarantee the engine never made.
-   */
-  function worstPerViewer(messages: ChatMessage[], window = 250): number {
-    let worst = 0;
-    for (let i = 0; i < messages.length; i++) {
-      const slice = messages.slice(Math.max(0, i - window + 1), i + 1);
-      const counts = new Map<string, number>();
-      for (const m of slice) {
-        const key = `${m.viewerId}\u0000${m.text}`;
-        const n = (counts.get(key) ?? 0) + 1;
-        counts.set(key, n);
-        if (n > worst) worst = n;
-      }
-    }
-    return worst;
-  }
-
-  it("never lets one viewer repeat a message more than three times", () => {
-    const messages = run(make({ idleAfterSeconds: 10 }, 555), 400_000, [
-      [1_000, "hey everyone welcome in"],
-      [60_000, "LET'S GO that was insane!"],
-      [140_000, "chat what do you think"],
-    ]);
-    expect(messages.length).toBeGreaterThan(80);
-    expect(worstPerViewer(messages)).toBeLessThanOrEqual(3);
-  });
-
-
-  it("DOES let a crowd pile onto the same reaction", () => {
-    // The whole point of making the cap per-viewer. Many different people
-    // posting "W" at the same moment is real chat, and capping it globally
-    // made hype moments feel damped.
-    const messages = run(make({ messagesPerSecond: 4, idleAfterSeconds: 10 }, 557), 200_000);
-
-    const byText = new Map<string, Set<string>>();
-    for (const m of messages) {
-      const viewers = byText.get(m.text) ?? new Set<string>();
-      viewers.add(m.viewerId);
-      byText.set(m.text, viewers);
-    }
-
-    const widest = Math.max(...[...byText.values()].map((v) => v.size));
-    expect(widest).toBeGreaterThan(3);
-  });
-
-  it("keeps emote spam inside one message untouched", () => {
-    // Repeated emotes within a single line are encouraged, not capped — that
-    // is what real emote spam looks like.
-    const messages = run(make({ messagesPerSecond: 4, idleAfterSeconds: 10 }, 558), 200_000);
-    const spammed = messages.filter(
-      (m) => isEmoteOnly(m.text, emoteIndex) && m.text.split(/\s+/).length >= 4,
-    );
-    expect(spammed.length).toBeGreaterThan(5);
-  });
-
-
-  it("lets a viewer fire off several different lines in a row, rarely", () => {
-    const messages = run(make({ idleAfterSeconds: 10 }, 560), 500_000, [
-      [1_000, "hey everyone welcome in"],
-      [80_000, "LET'S GO that was insane!"],
-      [200_000, "chat what do you think about this"],
-      [320_000, "look at this, check it out"],
-    ]);
-
-    let runs = 0;
-    for (let i = 1; i < messages.length; i++) {
-      if (messages[i].viewerId === messages[i - 1].viewerId) runs++;
-    }
-
-    expect(runs).toBeGreaterThan(0);
-    // Rare: this should read as someone typing fast, not as a tiny audience.
-    expect(runs / messages.length).toBeLessThan(0.15);
-  });
-});
-
-describe("SimulationEngine viewer count", () => {
-  /** Viewer counts sampled across a session. */
-  function samples(target: number, seed: number): number[] {
-    const engine = make({ audienceSize: target, idleAfterSeconds: 10 }, seed);
+describe("viewer count", () => {
+  async function samples(rate: number, seed: number): Promise<number[]> {
     const out: number[] = [];
-    for (let t = 0; t <= 180_000; t += 250) {
-      engine.tick(t);
-      if (t % 3000 === 0) out.push(engine.stats().audience);
-    }
-    return out;
-  }
-
-
-
-  it("keeps moving rather than settling on a number", () => {
-    // A viewer count frozen on a number reads as the setting echoed back, not
-    // as an audience. The property that matters is that it changes between
-    // samples — a bounded random walk naturally revisits values, so counting
-    // distinct ones would be asserting the wrong thing.
-    const values = samples(500, 12);
-    let unchanged = 0;
-    for (let i = 1; i < values.length; i++) {
-      if (values[i] === values[i - 1]) unchanged++;
-    }
-    expect(unchanged / values.length).toBeLessThan(0.1);
-  });
-
-  it("rarely lands exactly on the configured number", () => {
-    const values = samples(500, 13);
-    const exact = values.filter((v) => v === 500).length;
-    expect(exact / values.length).toBeLessThan(0.05);
-  });
-
-  it("scales its wobble with audience size", () => {
-    // Counting noise grows with the square root of the count: a 10-viewer
-    // stream moves by ones, a 10,000-viewer stream by tens.
-    const spread = (target: number) => {
-      const values = samples(target, 14);
-      return Math.max(...values) - Math.min(...values);
-    };
-    expect(spread(8000)).toBeGreaterThan(spread(25) * 5);
-  });
-
-
-
-  it("never reports fewer than one viewer", () => {
-    const engine = make({ audienceSize: 5, idleAfterSeconds: 10 }, 16);
-    for (let t = 0; t <= 120_000; t += 250) {
-      engine.tick(t);
-      expect(engine.stats().audience).toBeGreaterThanOrEqual(1);
-    }
-  });
-});
-
-
-
-describe("emote-only mode", () => {
-
-  function run(emotes: readonly typeof FIXTURE_EMOTES[number][]): string[] {
-    const engine = new SimulationEngine({
-      seed: 7,
-      now: 0,
-      emotes,
-      settings: { audienceSize: 40, aiShare: 0, emoteOnlyMode: true },
+    await drive(180_000, {
+      seed,
+      settings: { messagesPerSecond: rate },
+      onTick: ({ engine }, now) => {
+        if (now % 3000 === 0) out.push(engine.stats().audience);
+      },
     });
-    engine.handleTranscript("let's go that was amazing", 0, 0.8);
-
-    const released: string[] = [];
-    for (let t = 0; t <= 60_000; t += 250) {
-      for (const m of engine.tick(t)) released.push(m.text);
-    }
-    return released;
+    return out;
   }
 
-
-
-  it("emits nothing rather than blanks when there are no emotes", () => {
-    expect(run([])).toHaveLength(0);
+  it("keeps moving rather than settling on a number", async () => {
+    const values = await samples(2, 12);
+    let unchanged = 0;
+    for (let i = 1; i < values.length; i++) if (values[i] === values[i - 1]) unchanged++;
+    expect(unchanged / values.length).toBeLessThan(0.15);
   });
 
+  it("stays inside the tier's band", async () => {
+    const values = await samples(0.2, 13);
+    expect(Math.min(...values)).toBeGreaterThanOrEqual(3);
+    expect(Math.max(...values)).toBeLessThanOrEqual(11);
+  });
 
+  it("scales its wobble with the tier", async () => {
+    const spread = async (rate: number) => {
+      const values = await samples(rate, 14);
+      return Math.max(...values) - Math.min(...values);
+    };
+    expect(await spread(4)).toBeGreaterThan((await spread(0.2)) * 5);
+  });
+
+  it("never reports fewer than one viewer", async () => {
+    const values = await samples(0.2, 16);
+    expect(Math.min(...values)).toBeGreaterThanOrEqual(1);
+  });
 });
 
-
-
-/**
- * Regression: React logged "two children with the same key" during real use.
- *
- * Idle message ids were `i${now}-${speakerId}` with no per-attempt index,
- * unlike the reaction path which already carried one. That was survivable
- * while idle fired at most once per poll — raising the background flow rate
- * made same-tick collisions from one speaker routine, and duplicate keys make
- * React duplicate or omit messages outright.
- */
-
-/**
- * Regression: chat could not tell an instruction from background talk.
- *
- * "spam W", "chat can you hear me" and "everyone say pog" all classified as
- * `mundane` at 0.15 confidence and produced byte-identical filler — "?", "hm",
- * "just got here", "real". The streamer was talking directly to chat and chat
- * answered with noise.
- */
+// ------------------------------------------------------------- repetition
 
 describe("viewers do not repeat themselves", () => {
-  /**
-   * The reported bug, verbatim:
-   *
-   *   quinn: sup
-   *   sillyDrift53: hey BlacBushido
-   *   quinn: heyyyy
-   *   sillyDrift53: hey man !
-   *
-   * One person greeting twice is the tell. Chat as a whole repeating a phrase
-   * is fine and stays allowed.
-   */
-  it("never lets one viewer post the same line twice", () => {
-    const engine = new SimulationEngine({
-      seed: 99,
-      now: 0,
-      emotes: FIXTURE_EMOTES,
-      settings: { idleEnabled: false },
+  it("never lets one viewer post the same line twice in a session", async () => {
+    const { messages } = await drive(300_000, {
+      settings: { audienceSize: 6 },
+      provider: saying(["same", "fair", "true", "yeah", "real", "facts"]),
+      script: [[1000, "hey"], [60_000, "hmm"], [120_000, "ok"], [180_000, "well"], [240_000, "so"]],
     });
-
-    const out: ChatMessage[] = [];
-    for (let now = 0; now <= 60_000; now += 250) {
-      if (now % 5_000 === 0) {
-        engine.handleTranscript("hey what's up chat", now);
-        engine.supplyReactions(
-          [
-            { text: "hey", emotion: "chill" },
-            { text: "sup", emotion: "chill" },
-            { text: "yo", emotion: "chill" },
-          ],
-          now,
-        );
-      }
-      out.push(...engine.tick(now));
-    }
-
-    const seen = new Map<string, Set<string>>();
-    for (const message of out) {
-      const said = seen.get(message.username) ?? new Set<string>();
-      const normalised = message.text.toLowerCase().replace(/[^a-z0-9 ]/g, "");
-      expect(said.has(normalised)).toBe(false);
-      said.add(normalised);
-      seen.set(message.username, said);
-    }
-    expect(out.length).toBeGreaterThan(10);
-  });
-
-  it("treats heyyyy as the same thing as hey", () => {
-    const engine = new SimulationEngine({
-      seed: 7,
-      now: 0,
-      emotes: [],
-      settings: { idleEnabled: false },
-    });
-
-    engine.handleTranscript("hi everyone", 0);
-    engine.supplyReactions(
-      Array.from({ length: 40 }, (_, i) =>
-        i % 2 === 0
-          ? { text: "hey", emotion: "chill" as const }
-          : { text: "heyyyy", emotion: "chill" as const },
-      ),
-      0,
-    );
-
-    const out: ChatMessage[] = [];
-    for (let now = 0; now <= 40_000; now += 250) out.push(...engine.tick(now));
-
-    for (const [, texts] of groupByUser(out)) {
-      const collapsed = texts.map((text) => text.replace(/(.)\1{1,}/g, "$1"));
-      expect(new Set(collapsed).size).toBe(collapsed.length);
-    }
-  });
-
-  it("still lets different viewers say the same thing", () => {
-    const engine = new SimulationEngine({
-      seed: 3,
-      now: 0,
-      emotes: [],
-      settings: { idleEnabled: false },
-    });
-
-    engine.handleTranscript("we just won", 0);
-    engine.supplyReactions(
-      Array.from({ length: 30 }, () => ({ text: "W", emotion: "hype" as const })),
-      0,
-    );
-
-    const out: ChatMessage[] = [];
-    for (let now = 0; now <= 30_000; now += 250) out.push(...engine.tick(now));
-
-    // A pile-on is many people saying one word. That has to survive.
-    expect(out.filter((message) => message.text.includes("W")).length)
-      .toBeGreaterThan(3);
-  });
-});
-
-function groupByUser(messages: ChatMessage[]): Map<string, string[]> {
-  const grouped = new Map<string, string[]>();
-  for (const message of messages) {
-    const texts = grouped.get(message.username) ?? [];
-    texts.push(message.text.toLowerCase());
-    grouped.set(message.username, texts);
-  }
-  return grouped;
-}
-
-describe("per-viewer repetition, session scope", () => {
-  /**
-   * A rolling window is not enough.
-   *
-   * A viewer who says "hey" in the first minute and "heyyy" in the fortieth
-   * has still said it twice, and the streamer watching the whole session is
-   * the one who notices. Measured: a six-line window lets 40 duplicates
-   * through this run; session-scoped memory lets none.
-   */
-  const longSession = (audienceSize: number) => {
-    const engine = new SimulationEngine({
-      seed: 21,
-      now: 0,
-      emotes: [],
-      settings: { idleEnabled: false, audienceSize },
-    });
-    const pool = [
-      "same", "fair", "true", "yeah", "real", "facts",
-      "valid", "bet", "word", "ok", "sure", "right",
-    ];
-
-    const out: ChatMessage[] = [];
-    for (let now = 0; now <= 400_000; now += 250) {
-      if (now % 10_000 === 0) {
-        engine.handleTranscript("what do you all think", now);
-        engine.supplyReactions(
-          pool.map((text) => ({ text, emotion: "chill" as const })),
-          now,
-        );
-      }
-      out.push(...engine.tick(now));
-    }
-    return { out, pool };
-  };
-
-  it("remembers what a viewer said for the whole session, not a window", () => {
-    const { out } = longSession(2);
-
-    expect(out.length).toBeGreaterThan(20);
-    for (const [, texts] of groupByUser(out)) {
+    expect(messages.length).toBeGreaterThan(15);
+    for (const [, lines] of byUser(messages)) {
+      const texts = lines.map((m) => m.text);
       expect(new Set(texts).size).toBe(texts.length);
     }
   });
 
-  it("still lets a viewer speak many times with different wording", () => {
-    // The other half of the rule. Blocking repeats must not collapse into
-    // "one message per person" — that is a room of strangers taking turns.
-    const { out, pool } = longSession(2);
-    const most = Math.max(
-      ...[...groupByUser(out).values()].map((texts) => texts.length),
-    );
-    expect(most).toBeGreaterThan(pool.length / 2);
-  });
-
-  it("hands the line to another viewer instead of dropping the tick", () => {
-    // A rejected candidate disqualifies the speaker, not the message.
-    // Measured: retrying recovers 23 messages here where bailing out gets 16.
-    const { out } = longSession(2);
-    expect(out.length).toBeGreaterThan(19);
-  });
-
-  it("never lets one viewer greet twice, even across separate greetings", () => {
-    /**
-     * The cross-topic case. Greeting once per *topic* is not enough: the
-     * streamer says hi, wanders off for ninety seconds, says hi again, and
-     * that starts a fresh topic with an empty participant list — so the same
-     * six people greet all over again. A small audience makes the collision
-     * near-certain if the session-scoped rule is not doing the work.
-     */
-    const engine = new SimulationEngine({
-      seed: 11,
-      now: 0,
-      emotes: [],
-      settings: { idleEnabled: false, audienceSize: 4 },
+  it("treats hii, heyyy and hey!! as the same thing from one person", async () => {
+    const { messages } = await drive(120_000, {
+      settings: { audienceSize: 4 },
+      provider: saying(["hey", "heyyy", "hey!!", "hii", "hi"]),
+      script: [[1000, "hey chat"], [40_000, "hi again"], [80_000, "hello hello"]],
     });
-
-    const out: ChatMessage[] = [];
-    for (const [at, text] of [[0, "hey everyone"], [90_000, "hi again chat"]] as const) {
-      engine.handleTranscript(text, at);
-      engine.supplyReactions(
-        ["yo", "hey", "sup", "hii", "hello", "wassup"].map((t) => ({
-          text: t,
-          emotion: "chill" as const,
-        })),
-        at,
-      );
-      for (let now = at; now <= at + 40_000; now += 250) {
-        out.push(...engine.tick(now));
-      }
+    for (const [, lines] of byUser(messages)) {
+      const collapsed = lines.map((m) => m.text.toLowerCase().replace(/(.)\1+/g, "$1").replace(/[^a-z]/g, ""));
+      expect(new Set(collapsed).size).toBe(collapsed.length);
     }
+  });
 
-    const greeters = out.map((message) => message.username);
+  it("never lets one viewer post the same emote block twice", async () => {
+    const { messages } = await drive(120_000, {
+      settings: { audienceSize: 4 },
+      provider: saying(["KEKW", "KEKW KEKW", "KEKW KEKW KEKW"]),
+      script: [[1000, "lmao"], [40_000, "lol"], [80_000, "haha"]],
+    });
+    for (const [, lines] of byUser(messages)) {
+      const blocks = lines.map((m) => m.text.split(" ")[0]);
+      expect(new Set(blocks).size).toBe(blocks.length);
+    }
+  });
+
+  it("never lets one viewer greet twice, even across separate greetings", async () => {
+    const { messages } = await drive(140_000, {
+      settings: { audienceSize: 4 },
+      provider: saying(["yo", "hey", "sup", "hii", "hello", "wassup"]),
+      script: [[1000, "hey everyone"], [90_000, "hi again chat"]],
+    });
+    const greeters = messages.filter((m) => m.kind === "greeting").map((m) => m.username);
     expect(greeters.length).toBeGreaterThan(2);
     expect(new Set(greeters).size).toBe(greeters.length);
   });
 
-  it("keeps message ids unique across retried speakers", () => {
-    // The retry loop calls the director more than once per tick. If the
-    // sequence counter did not advance on a rejected attempt, two messages in
-    // the same millisecond would share an id — which React renders as a
-    // duplicated or missing chat line.
-    const { out } = longSession(2);
-    const ids = out.map((message) => message.id);
-    expect(ids.length).toBeGreaterThan(19);
-    expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  it("clears every viewer's history when a new session starts", () => {
-    const engine = new SimulationEngine({
-      seed: 8,
-      now: 0,
-      emotes: [],
-      settings: { idleEnabled: false },
+  it("still lets different viewers say the same thing", async () => {
+    const { messages } = await drive(30_000, {
+      provider: saying(["W"]),
+      script: [[1000, "we just won"]],
     });
-
-    const collect = (from: number) => {
-      const out: ChatMessage[] = [];
-      engine.handleTranscript("hey everyone", from);
-      engine.supplyReactions(
-        Array.from({ length: 8 }, () => ({
-          text: "yo",
-          emotion: "chill" as const,
-        })),
-        from,
-      );
-      for (let now = from; now <= from + 30_000; now += 250) {
-        out.push(...engine.tick(now));
-      }
-      return out;
-    };
-
-    const first = collect(0);
-    engine.beginIntro(200_000);
-    const second = collect(200_000);
-
-    // Clearing means the same person may greet again in the new session.
-    expect(first.length).toBeGreaterThan(0);
-    expect(second.length).toBeGreaterThan(0);
+    // A pile-on is many people saying one word. That has to survive.
+    expect(messages.filter((m) => m.text.includes("W")).length).toBeGreaterThan(3);
   });
-});
 
-describe("startup arrival", () => {
-  const startEngine = (settings = {}) => {
-    const engine = new SimulationEngine({
-      seed: 5,
-      now: 0,
-      emotes: FIXTURE_EMOTES,
-      settings,
+  it("still lets a viewer come back later with something new", async () => {
+    const { messages } = await drive(300_000, {
+      settings: { audienceSize: 6 },
+      script: [[1000, "hey"], [100_000, "what do you all think"], [200_000, "okay moving on"]],
     });
-    engine.beginIntro(0);
-    return engine;
-  };
-
-  /** Ticks a started engine without ever feeding it a transcript. */
-  const arrive = (engine: SimulationEngine, untilMs = 20_000) => {
-    const out: ChatMessage[] = [];
-    for (let now = 0; now <= untilMs; now += 250) out.push(...engine.tick(now));
-    return out;
-  };
-
-  it("produces chat before the streamer has said anything", () => {
-    // The reported bug: Start left the room completely silent, because intro
-    // content was an AI request and nothing else was allowed to speak.
-    const messages = arrive(startEngine());
-    expect(messages.length).toBeGreaterThan(4);
+    const most = Math.max(...[...byUser(messages).values()].map((lines) => lines.length));
+    expect(most).toBeGreaterThan(5);
   });
 
-  it("needs no AI batch at all", () => {
-    // Nothing supplies reactions here. Arrival is deterministic by design.
-    const messages = arrive(startEngine());
-    expect(messages.every((message) => message.source === "pool")).toBe(true);
-  });
-
-  it("releases them over time rather than dumping them at once", () => {
-    const engine = startEngine();
-    const firstTick = engine.tick(0);
-    const rest = arrive(engine);
-
-    expect(firstTick.length).toBeLessThan(4);
-    expect(rest.length).toBeGreaterThan(firstTick.length);
-  });
-
-  it("uses a different viewer for every arrival line", () => {
-    const names = arrive(startEngine()).map((message) => message.username);
-    expect(names.length).toBeGreaterThan(4);
-    expect(new Set(names).size).toBe(names.length);
-  });
-
-  it("says the kind of thing someone says walking in", () => {
-    const texts = arrive(startEngine({ emotesEnabled: false })).map((m) => m.text);
-    // Not an exact-match list — the pool is meant to grow — but arrival must
-    // read as arrival, not as a reaction to something nobody said.
-    const arrivalish = texts.filter((text) =>
-      /hi|yo|hey|early|first|here|live|made it|tim(e|ing)|sup|aye|waiting|get it|stream|boot/i.test(
-        text,
-      ),
-    );
-    expect(arrivalish.length).toBe(texts.length);
-  });
-
-  it("stops the moment the streamer speaks", () => {
-    const engine = startEngine();
-    for (let now = 0; now <= 3_000; now += 250) engine.tick(now);
-
-    engine.handleTranscript("okay hey chat", 3_000);
-    const after: ChatMessage[] = [];
-    for (let now = 3_250; now <= 12_000; now += 250) after.push(...engine.tick(now));
-
-    // Nothing generated was supplied, so with arrival cancelled the room has
-    // nothing to say. Anything here would be arrival leaking past its phase.
-    expect(after).toHaveLength(0);
-  });
-
-  it("stops for typed input too, which takes the same path", () => {
-    const engine = startEngine();
-    for (let now = 0; now <= 3_000; now += 250) engine.tick(now);
-
-    engine.handleTranscript("typing this instead", 3_000, 0);
-    const after: ChatMessage[] = [];
-    for (let now = 3_250; now <= 12_000; now += 250) after.push(...engine.tick(now));
-    expect(after).toHaveLength(0);
-  });
-
-  it("closes itself if the streamer never speaks", () => {
-    // Otherwise arrival suppresses idle forever and the room dies at Start.
-    const engine = startEngine();
-    arrive(engine, 30_000);
-    expect(engine.isIntroducing).toBe(false);
-  });
-
-  it("gives a fresh arrival after a clear and restart", () => {
-    const engine = startEngine();
-    const first = arrive(engine);
-    expect(first.length).toBeGreaterThan(4);
-
-    engine.beginIntro(100_000);
-    const second: ChatMessage[] = [];
-    for (let now = 100_000; now <= 120_000; now += 250) {
-      second.push(...engine.tick(now));
-    }
-    expect(second.length).toBeGreaterThan(4);
+  it("delays rather than violates when nobody eligible is left", async () => {
+    // Four viewers, one line. Four say it, then the room waits for a new
+    // line rather than letting anyone say it twice.
+    const { messages } = await drive(60_000, {
+      settings: { audienceSize: 4 },
+      provider: saying(["insane"]),
+      script: [[1000, "we just won"]],
+    });
+    expect(messages.filter((m) => m.text.includes("insane")).length).toBeLessThanOrEqual(4);
   });
 });

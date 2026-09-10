@@ -1,232 +1,82 @@
-import { AMBIENT, IDLE_AMBIENT } from "../data/responses/ambient";
-import { ARRIVAL } from "../data/responses/arrival";
-import { REACTIONS } from "../data/responses/reactions";
-import {
-  IDLE_NOTICING,
-  IDLE_RESTLESS,
-  IDLE_SETTLING,
-  SIDE_REPLIES,
-} from "../data/responses/idle";
-import {
-  AUDIO_ANSWERS,
-  DIRECTIVE_ASIDES,
-  PRESENCE_ANSWERS,
-  VISUAL_ANSWERS,
-} from "../data/responses/answers";
-import {
-  COMPOSED_AMBIENT,
-  COMPOSED_CALLBACK,
-  COMPOSED_CURIOUS,
-  COMPOSED_HYPE,
-  COMPOSED_LIGHT,
-  COMPOSED_STRUGGLE,
-} from "../data/composers";
 import type { SimulationSettings } from "../config/settings";
-import { pickDepth, type Depth } from "./attention";
-import {
-  decorateWithEmotes,
-  emoteSpamCount,
-  generateFromPool,
-  measureLength,
-} from "./generators/pool";
+import type { GenerationPhase } from "../ai/provider";
+import type { QueuedReaction } from "../ai/reaction";
+import { pickSemanticEmote, type EmoteMoment } from "../emotes/semantic";
 import type { Population } from "./population";
 import type { Rng } from "./rng";
 import type { MomentumBand, Topic, TopicStage } from "./topics";
-import type { QueuedReaction } from "../ai/reaction";
-import { pickSemanticEmote } from "../emotes/semantic";
 import type {
-  Classification,
   Emote,
   Intent,
-  LengthClass,
   MessageKind,
-  PendingMessage,
   MessageSource,
-  ResponseEntry,
+  PendingMessage,
   Viewer,
 } from "./types";
 
 /**
- * The director decides *what a moment is worth* — how many people react, over
- * how long, and in what order. The scheduler decides when each lands.
+ * The director turns one generated line into one chat message.
  *
- * Keeping these separate prevents the classic failure mode where a model
- * returns twelve comments and the UI dumps all twelve at once. The director
- * never touches the clock; it only produces offsets.
+ * It decides who says it, whether they say it in words or with an emote,
+ * and which emote. It does not decide *what* is said — that arrived from
+ * the AI — and it does not decide when; the engine's rate governor asked
+ * for this message and the scheduler will release it.
+ *
+ * There is no pool of text in here. If the caller has no generated line,
+ * there is no message.
  */
 
-
-
-
-/** Length classes each depth is willing to draw from. */
-const DEPTH_LENGTHS: Record<Exclude<Depth, "ambient">, readonly LengthClass[]> = {
-  light: ["tiny", "short"],
-  engaged: ["short", "medium"],
-  invested: ["medium", "long"],
-};
-
 /**
- * Resolves a depth into the entries it may draw from.
+ * How often a message for this intent should be an emote instead of a
+ * sentence.
  *
- * `ambient` short-circuits to the one-word pools rather than filtering the
- * reaction pools, because those pools contain almost nothing that short — the
- * ambient tier is a separate vocabulary, not a subset of the same one.
- */
-function entriesForDepth(
-  depth: Depth,
-  intentPool: readonly ResponseEntry[],
-  classification: Classification,
-  ambientPool?: readonly ResponseEntry[],
-): readonly ResponseEntry[] {
-  const ambient = ambientPool ?? AMBIENT[classification.sentiment];
-  if (depth === "ambient") return ambient;
-
-  const allowed = DEPTH_LENGTHS[depth];
-  const filtered = intentPool.filter((entry) =>
-    allowed.includes(measureLength(entry.text)),
-  );
-
-  // Not every intent has entries at every length; fall back rather than
-  // dropping the message entirely.
-  if (filtered.length > 0) return filtered;
-  return depth === "invested" ? intentPool : ambient;
-}
-
-/**
- * Emote-only messages, the cheapest and most common thing in real chat.
- *
- * Handled here rather than in decorateWithEmotes so that ambient-depth
- * messages from emote-happy viewers can bypass text generation completely.
- */
-function maybeEmoteOnly(
-  viewer: Viewer,
-  emotes: readonly Emote[],
-  classification: Classification,
-  rng: Rng,
-): string | null {
-  if (emotes.length === 0) return null;
-  if (!rng.chance(viewer.emoteAffinity * 0.55)) return null;
-
-  const emote = pickSemanticEmote({
-    emotes,
-    intent: classification.intent,
-    rng,
-  });
-  if (!emote) return null;
-
-  // Repeats one emote rather than mixing several — "KEKW KEKW KEKW", not
-  // three different emotes in a row.
-  const count = emoteSpamCount(rng);
-  return Array.from({ length: count }, () => emote.name).join(" ");
-}
-
-/**
- * Emote-only mode: every message, every speaker, regardless of depth or
- * emote affinity.
- *
- * Returns null when there are no emotes, which callers must treat as "skip
- * this speaker". A blank message on a live stream is worse than a missing one,
- * and the UI gate alone cannot be trusted — a stale localStorage blob could
- * turn this on with an empty pack.
- */
-function forcedEmoteOnly(
-  emotes: readonly Emote[],
-  classification: Classification,
-  rng: Rng,
-): string | null {
-  if (emotes.length === 0) return null;
-
-  // Semantic first here too: told to post emotes after saying hi, chat should
-  // reach for the `hi` emote rather than whatever the mood table suggests.
-  const emote = pickSemanticEmote({
-    emotes,
-    intent: classification.intent,
-    rng,
-  });
-  if (!emote) return null;
-
-  const count = emoteSpamCount(rng);
-  return Array.from({ length: count }, () => emote.name).join(" ");
-}
-
-/**
- * What one viewer posts when chat has been told to do something.
- *
- * Most people just do it, with the natural variation of a real room: some post
- * the token once, some spam it, a few say something about it instead. The
- * spam is what makes a "spam W" actually look like chat obeying rather than
- * chat discussing.
- */
-function complyWithDirective(
-  target: string | undefined,
-  viewer: Viewer,
-  emotes: readonly Emote[],
-  classification: Classification,
-  rng: Rng,
-): string | null {
-  // A minority comments instead of complying. Small — the point of a
-  // directive is that chat mostly does it — but never zero, because a room
-  // obeying in perfect unison reads as scripted.
-  if (rng.chance(0.12)) return null;
-
-  if (!target) {
-    // "let me hear it" — no token to post, so the room just gets loud.
-    const emote = pickSemanticEmote({ emotes, intent: classification.intent, rng });
-    if (!emote) return null;
-    return Array.from({ length: emoteSpamCount(rng) }, () => emote.name).join(" ");
-  }
-
-  // Repeat count tracks how emote-happy the viewer is, so the same instruction
-  // produces a ragged wall rather than forty identical lines.
-  const repeats = rng.chance(0.45 + viewer.emoteAffinity * 0.4)
-    ? rng.int(2, 6)
-    : 1;
-
-  return Array.from({ length: repeats }, () => target).join(" ");
-}
-
-/** The answer pool for a question that actually has an answer. */
-function answersFor(
-  subject: Classification["subject"],
-): readonly ResponseEntry[] | null {
-  if (subject === "audio") return AUDIO_ANSWERS;
-  if (subject === "visual") return VISUAL_ANSWERS;
-  if (subject === "presence") return PRESENCE_ANSWERS;
-  return null;
-}
-
-/**
- * How often a message for this intent should be an emote instead of a sentence.
- *
- * Some things chat says are not sentences. Nobody types "hello, welcome to the
- * stream" — they post the wave emote. Nobody answers "spam W" in prose. These
- * are the moments where a wall of words reads as fake, so most of the room
- * posts an emote and the rest talk.
+ * Some things chat says are not sentences. Nobody types "hello, welcome to
+ * the stream" — they post the wave emote. Nobody answers "spam W" in prose.
+ * These are the moments where a wall of words reads as fake, so most of the
+ * room posts an emote and the rest talk.
  *
  * Everything absent here stays text-first: a story or a question deserves an
  * actual reply.
  */
-const EMOTE_FORWARD: Partial<Record<Intent, number>> = {
-  greeting: 0.65,
+const EMOTE_FORWARD: Partial<Record<EmoteMoment, number>> = {
+  greeting: 0.6,
   farewell: 0.5,
   directive: 0.75,
   achievement: 0.5,
   excitement: 0.45,
+  idle: 0.12,
 };
 
+/** Chance a worded line gets an emote appended, when one fits. */
+const EMOTE_TRAILER = 0.3;
+
+/** How many times an emote is repeated in an emote-only line. */
+function emoteSpamCount(rng: Rng): number {
+  const roll = rng.next();
+  if (roll < 0.55) return 1;
+  if (roll < 0.85) return rng.int(2, 3);
+  return rng.int(4, 6);
+}
+
 /**
- * An emote-only message, shaped a few different ways.
+ * An emote-only line, shaped a few different ways.
  *
  * The shapes matter more than they look. Forty viewers posting one identical
  * token is a bot net; the same forty mixing singles, spam and pairs is a room.
  */
 function emoteReply(
   emotes: readonly Emote[],
-  intent: Intent,
-  emotion: QueuedReaction["emotion"] | undefined,
+  moment: EmoteMoment,
+  reaction: QueuedReaction,
   rng: Rng,
 ): string | null {
-  const emote = pickSemanticEmote({ emotes, intent, emotion, rng });
+  const emote = pickSemanticEmote({
+    emotes,
+    intent: moment,
+    emotion: reaction.emotion,
+    preferred: reaction.emote,
+    rng,
+  });
   if (!emote) return null;
 
   const roll = rng.next();
@@ -238,96 +88,56 @@ function emoteReply(
   // A second, independently chosen emote. When the pack only owns one emote
   // for this moment it comes back the same, and a bare single is the better
   // line than the same token twice.
-  const second = pickSemanticEmote({ emotes, intent, emotion, rng });
+  const second = pickSemanticEmote({ emotes, intent: moment, emotion: reaction.emotion, rng });
   return second && second.name !== emote.name
     ? `${emote.name} ${second.name}`
     : emote.name;
 }
 
-export interface DirectOptions {
-  classification: Classification;
-  population: Population;
-  settings: SimulationSettings;
-  emotes: readonly Emote[];
-  /** Candidate lines pre-generated by the AI tier, drained as available. */
-  /** Templates used recently, held back to avoid verbatim repeats. */
-  recentTexts: ReadonlySet<string>;
-  /** The most recent template, never repeated immediately. */
-  lastTemplate?: string;
-  now: number;
-  rng: Rng;
+/**
+ * What one viewer posts when chat has been told to do something.
+ *
+ * Most people just do it, with the natural variation of a real room: some
+ * post the token once, some spam it. The spam is what makes a "spam W"
+ * actually look like chat obeying rather than chat discussing.
+ *
+ * This is the one place a message's words do not come from the model, and
+ * it is the streamer's own words: the token they asked for.
+ */
+function complyWithDirective(
+  target: string | undefined,
+  viewer: Viewer,
+  emotes: readonly Emote[],
+  reaction: QueuedReaction,
+  rng: Rng,
+): string | null {
+  if (!target) {
+    // "let me hear it" — no token to post, so the room just gets loud.
+    return emoteReply(emotes, "directive", reaction, rng);
+  }
+
+  // Repeat count tracks how emote-happy the viewer is, so the same
+  // instruction produces a ragged wall rather than forty identical lines.
+  const repeats = rng.chance(0.45 + viewer.emoteAffinity * 0.4) ? rng.int(2, 6) : 1;
+  return Array.from({ length: repeats }, () => target).join(" ");
 }
-
-export interface DirectResult {
-  messages: PendingMessage[];
-  /** Templates consumed, for the caller to fold into its recent-text memory. */
-  templates: string[];
-}
-
-
-
-export interface IdleOptions {
-  silentMs: number;
-  /**
-   * Attempt index within this poll.
-   *
-   * Part of the message id. Several idle messages can be produced in one tick
-   * and the same viewer can be picked twice, so without this two messages
-   * share an id — which React turns into duplicated or omitted chat lines.
-   */
-  attempt?: number;
-  population: Population;
-  settings: SimulationSettings;
-  emotes: readonly Emote[];
-  /** Recent speakers, as [viewerId, username], for side replies. */
-  recentSpeakers: ReadonlyArray<readonly [string, string]>;
-  recentTexts: ReadonlySet<string>;
-  lastTemplate?: string;
-  now: number;
-  rng: Rng;
-}
-
-export interface IdleResult {
-  message: PendingMessage;
-  template: string;
-}
-
-
-
-// ------------------------------------------------------------- single message
 
 export interface DirectOneOptions {
-  /** The conversation this message belongs to, or null for off-topic chatter. */
+  /** The conversation this message belongs to, or null outside active chat. */
   topic: Topic | null;
   stage: TopicStage;
   band: MomentumBand;
   population: Population;
   settings: SimulationSettings;
   emotes: readonly Emote[];
-  /**
-   * A generated reaction to use for this message, if the engine chose one.
-   *
-   * The engine owns the 90/10 split — this only renders what it was handed.
-   */
-  reaction?: QueuedReaction;
-  recentTexts: ReadonlySet<string>;
-  lastTemplate?: string;
-  /** Recent speakers as [viewerId, username], for side replies. */
+  /** The generated line this message renders. Required: no line, no message. */
+  reaction: QueuedReaction;
+  phase: GenerationPhase;
+  /** Recent speakers as [viewerId, username]. */
   recentSpeakers: ReadonlyArray<readonly [string, string]>;
-  /** Viewers who may not speak again in this phase. Used during arrival. */
+  /** Viewers who may not speak this message. */
   excludeSpeakers?: ReadonlySet<string>;
-  /**
-   * Arrival: the stream just came up and nobody has spoken.
-   *
-   * The one deterministic exception to AI-only active chat, because there is
-   * no utterance to react to yet. Deliberately not routed through the normal
-   * pool branch — that branch is idle chatter, which is a different thing
-   * from a room filling up.
-   */
-  arriving?: boolean;
   now: number;
-  /** Milliseconds since the streamer last spoke, for idle escalation. */
-  silentMs: number;
   /** Monotonic counter, so two messages in one millisecond cannot share an id. */
   sequence: number;
   rng: Rng;
@@ -335,92 +145,41 @@ export interface DirectOneOptions {
 
 export interface DirectOneResult {
   message: PendingMessage;
-  /** Template consumed, for the caller's recent-text memory. Empty if none. */
-  template: string;
   /** Viewer who spoke, so the caller can record participation. */
   viewerId: string;
 }
 
-/**
- * Produces exactly one message.
- *
- * This replaces the old burst model. Generation used to happen once per
- * utterance, emitting a fixed count and then forgetting the event — which is
- * why a clutch win and fetching a glass of water produced interchangeable
- * output. Now the engine asks for one message at a time, whenever its rate
- * governor says one should happen, and this decides who says what based on
- * where the conversation actually is.
- */
 export function directOne(options: DirectOneOptions): DirectOneResult | null {
-  const {
-    topic, stage, population, settings, emotes,
-    reaction, recentSpeakers, now, sequence, rng,
-  } = options;
+  const { topic, stage, settings, emotes, reaction, phase, now, sequence, rng } = options;
 
   const speaker = pickTopicSpeaker(options);
   if (!speaker) return null;
 
-  /**
-   * Replies target someone who has actually spoken recently, rather than
-   * another message in the same burst — bursts no longer exist, so the
-   * conversation partner has to come from the room's memory.
-   */
-  const replyCandidates = recentSpeakers.filter(([id]) => id !== speaker.id);
-  const replyTarget =
-    replyCandidates.length > 0 && rng.chance(settings.sideConversationChance)
-      ? rng.pick(replyCandidates)
-      : undefined;
-
-  const classification = options.arriving
-    ? ARRIVAL_CLASSIFICATION
-    : classificationFor(topic);
-  const depth = pickDepth(
-    { viewer: speaker, energy: classification.energy, position: stage === "reacting" ? 0 : 3 },
-    rng,
-  );
+  const intent: Intent = reaction.intent ?? topic?.intent ?? "mundane";
+  const moment: EmoteMoment = phase === "idle" ? "idle" : intent;
 
   let text: string | null = null;
-  let source: MessageSource = "pool";
-  let template = "";
-
-  if (settings.emoteOnlyMode) {
-    text = forcedEmoteOnly(emotes, classification, rng);
-    if (text === null) return null;
-  }
+  let source: MessageSource = "ai";
 
   /**
-   * Arrival lines, straight from the pool.
+   * Emote-only mode: every message, every speaker.
    *
-   * Placed before every AI-aware branch: during arrival there is no reaction
-   * to drain and no topic to be quiet about, so the checks below would all
-   * fall through to "return null" and leave the streamer looking at an empty
-   * chat — which is exactly the bug this fixes.
+   * Returns null when there are no emotes, which the caller treats as "wait".
+   * A blank message on a live stream is worse than a missing one, and the UI
+   * gate alone cannot be trusted — a stale localStorage blob could turn this
+   * on with an empty pack.
    */
-  if (text === null && options.arriving) {
-    source = "pool";
-    const generated = generateFromPool(
-      ARRIVAL,
-      speaker,
-      population.tagBias(speaker),
-      {
-        keywords: [],
-        emotes,
-        streamer: settings.streamerName || undefined,
-        topic: settings.streamTopic || undefined,
-        recentTexts: options.recentTexts,
-        lastTemplate: options.lastTemplate,
-      },
+  if (settings.emoteOnlyMode) {
+    const emote = pickSemanticEmote({
+      emotes,
+      intent: moment,
+      emotion: reaction.emotion,
+      preferred: reaction.emote,
       rng,
-    );
-    if (generated === null) return null;
-    text = generated.text;
-    template = generated.template;
-
-    // Some people just post the wave emote instead of typing hello.
-    if (settings.emotesEnabled && rng.chance(0.35)) {
-      const emote = pickSemanticEmote({ emotes, intent: "greeting", rng });
-      if (emote) text = rng.chance(0.4) ? emote.name : `${text} ${emote.name}`;
-    }
+    });
+    if (!emote) return null;
+    text = Array.from({ length: emoteSpamCount(rng) }, () => emote.name).join(" ");
+    source = "emote";
   }
 
   /**
@@ -433,162 +192,94 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
   if (
     text === null &&
     topic?.intent === "directive" &&
-    !replyTarget &&
     rng.chance(stage === "reacting" ? 0.85 : stage === "developing" ? 0.45 : 0.15)
   ) {
-    text = complyWithDirective(topic.directiveTarget, speaker, emotes, classification, rng);
+    const complied = complyWithDirective(topic.directiveTarget, speaker, emotes, reaction, rng);
+    if (complied) {
+      text = complied;
+      source = "directive";
+    }
   }
 
-  const answers = topic && !replyTarget ? answersFor(topic.subject) : null;
-
-  /**
-   * A generated reaction, when the engine picked one for this message.
-   *
-   * Taken before anything else can claim the slot: this is what the audience
-   * actually said about what the streamer actually said, and every other tier
-   * exists to fill the gaps around it.
-   */
-  if (text === null && reaction) {
+  if (text === null) {
     text = reaction.text;
-    source = "ai";
 
     /**
      * For the moments chat answers with an emote, most of them do.
      *
      * The generated line is dropped for this message, not for the batch: the
-     * rest of the room still says the words. And this only runs where a
-     * reaction exists at all, so a provider failure still produces silence
-     * rather than a screen of emotes standing in for an answer.
+     * rest of the room still says the words.
      */
-    const forward = EMOTE_FORWARD[classification.intent] ?? 0;
-    const only =
-      settings.emotesEnabled && forward > 0 && rng.chance(forward)
-        ? emoteReply(emotes, classification.intent, reaction.emotion, rng)
-        : null;
-    if (only) text = only;
+    const forward = settings.emotesEnabled ? (EMOTE_FORWARD[moment] ?? 0) : 0;
+    const only = forward > 0 && rng.chance(forward) ? emoteReply(emotes, moment, reaction, rng) : null;
 
-    /**
-     * Emotes chosen from the reaction's own emotion, not at random.
-     *
-     * The model says how the line feels; the deterministic side picks a 7TV
-     * emote matching that mood from whatever pack is loaded. The model never
-     * sees an image URL, and a laughing line never picks up a sad emote —
-     * which is what random insertion produced.
-     */
-    // Skipped when the message is already nothing but emotes: appending a
-    // second, independently chosen one there is how "peepoBye" turned into
-    // "NOWAYING NOWAYING NOWAYING peepoBye".
-    if (!only && settings.emotesEnabled && rng.chance(0.3)) {
+    if (only) {
+      text = only;
+      source = "emote";
+    } else if (
+      settings.emotesEnabled &&
+      !isEmoteOnly(text, emotes) &&
+      (reaction.emote || rng.chance(EMOTE_TRAILER))
+    ) {
+      /**
+       * Emotes chosen from the reaction's own emotion, not at random.
+       *
+       * The model says how the line feels, or names the emote it wants; the
+       * deterministic side picks a real one from whatever pack is loaded.
+       * The model never sees an image URL, and a laughing line never picks
+       * up a sad emote.
+       */
       const emote = pickSemanticEmote({
         emotes,
-        intent: classification.intent,
+        intent: moment,
         emotion: reaction.emotion,
+        preferred: reaction.emote,
         rng,
       });
-      if (emote) text = `${text} ${emote.name}`;
+      if (emote && !text.includes(emote.name)) text = `${text} ${emote.name}`;
     }
   }
 
-  if (
-    text === null &&
-    !replyTarget &&
-    answers === null &&
-    depth === "ambient" &&
-    settings.emotesEnabled
-  ) {
-    text = maybeEmoteOnly(speaker, emotes, classification, rng);
-  }
-
-  /**
-   * Everything below is idle chatter only.
-   *
-   * Active conversation is AI or nothing: when a topic is live but no
-   * generated reaction was supplied, the room stays quiet rather than reaching
-   * for a canned line. Pools filling those gaps is what let deterministic text
-   * dilute and repeat over the top of real answers.
-   */
-  if (text === null && topic !== null) return null;
-
-  if (text === null) {
-    source = replyTarget ? "template" : "pool";
-    const asides =
-      !replyTarget && topic?.intent === "directive" && stage !== "reacting"
-        ? DIRECTIVE_ASIDES
-        : null;
-
-    const entries = replyTarget
-      ? SIDE_REPLIES
-      : (answers ??
-        asides ??
-        /**
-         * Depth decides whether this message is a reaction or a thought.
-         * `engaged` and `invested` draw on composed shapes, which is the only
-         * place messages longer than a few words come from.
-         */
-        (depth === "engaged" || depth === "invested"
-          ? composedFor(topic, stage)
-          : depth === "light"
-            ? COMPOSED_LIGHT
-            : entriesForTopic(topic, depth, classification, options.silentMs)));
-
-    const result = generateFromPool(
-      entries,
-      speaker,
-      population.tagBias(speaker),
-      {
-        keywords: classification.keywords,
-        emotes,
-        replyTo: replyTarget?.[1],
-        streamer: settings.streamerName || undefined,
-        topic: settings.streamTopic || undefined,
-        recentTexts: options.recentTexts,
-        lastTemplate: options.lastTemplate,
-      },
-      rng,
-    );
-    if (result === null) return null;
-    text = result.text;
-    template = result.template;
-
-    if (settings.emotesEnabled && depth !== "ambient") {
-      text = decorateWithEmotes(
-        text,
-        speaker,
-        emotes,
-        { intent: classification.intent, sentiment: classification.sentiment },
-        rng,
-      );
-    }
-  }
-
-  const kind: MessageKind = options.arriving
-    ? "greeting"
-    : replyTarget
-      ? "reply"
-      : topic === null
+  const kind: MessageKind =
+    phase === "startup"
+      ? "greeting"
+      : phase === "idle"
         ? "idle"
-        : topic.intent === "greeting"
+        : intent === "greeting"
           ? "greeting"
-          : topic.intent === "question_to_chat"
+          : intent === "question_to_chat"
             ? "question"
             : "reaction";
 
   return {
     viewerId: speaker.id,
-    template,
     message: {
-      id: `${topic?.id ?? "amb"}-${now}-${sequence}-${speaker.id}`,
+      id: `${topic?.id ?? phase}-${now}-${sequence}-${speaker.id}`,
       viewerId: speaker.id,
       username: speaker.name,
       color: speaker.color,
       text,
       kind,
       source,
-      replyTo: replyTarget?.[1],
       offset: 0,
     },
   };
 }
+
+/**
+ * Whether a line is nothing but emote names.
+ *
+ * Appending a trailer to one of these is how "KEKW KEKW" turned into
+ * "KEKW KEKW Sadge" — an emote block with an unrelated mood stapled on.
+ */
+function isEmoteOnly(text: string, emotes: readonly Emote[]): boolean {
+  const names = new Set(emotes.map((emote) => emote.name));
+  const words = text.trim().split(/\s+/);
+  return words.length > 0 && words.every((word) => names.has(word));
+}
+
+/** Intents where one message per viewer is the whole of what a person says. */
+const ONE_SHOT_INTENTS = new Set<Intent>(["greeting", "farewell"]);
 
 /**
  * Who speaks next in a topic.
@@ -598,7 +289,7 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
  * likelier. That difference is most of what separates a crowd reacting from a
  * conversation happening.
  */
-function pickTopicSpeaker(options: DirectOneOptions) {
+function pickTopicSpeaker(options: DirectOneOptions): Viewer | undefined {
   const { topic, stage, population, now, rng, excludeSpeakers } = options;
 
   /**
@@ -607,8 +298,7 @@ function pickTopicSpeaker(options: DirectOneOptions) {
    * Composed rather than short-circuiting: the caller's exclusions are the
    * engine saying "not this person" — they already said this, or they already
    * greeted — and that has to hold *alongside* the topic's own speaker
-   * choice, not instead of it. Replacing the topic logic whenever an
-   * exclusion existed is how a retry lost its conversation.
+   * choice, not instead of it.
    */
   const barred = new Set(excludeSpeakers ?? []);
   if (!topic) return population.pickSpeaker(now, barred);
@@ -619,8 +309,7 @@ function pickTopicSpeaker(options: DirectOneOptions) {
    * Some things you only say once.
    *
    * Saying hello twice in the same arrival is the tell that gave the
-   * simulation away — "quinn: sup" followed four lines later by
-   * "quinn: heyyyy". A viewer who has greeted has greeted; if everyone in the
+   * simulation away. A viewer who has greeted has greeted; if everyone in the
    * room already has, the topic goes quiet rather than looping.
    */
   if (ONE_SHOT_INTENTS.has(topic.intent)) {
@@ -639,97 +328,4 @@ function pickTopicSpeaker(options: DirectOneOptions) {
   }
   for (const id of participants) barred.add(id);
   return population.pickSpeaker(now, barred);
-}
-
-/** What arrival looks like to everything downstream: a room saying hello. */
-const ARRIVAL_CLASSIFICATION: Classification = {
-  intent: "greeting",
-  sentiment: "positive",
-  energy: 0.3,
-  keywords: [],
-  confidence: 1,
-};
-
-/** Intents where one message per viewer is the whole of what a person says. */
-const ONE_SHOT_INTENTS = new Set<Intent>(["greeting", "farewell"]);
-
-/** A topic's classification, or a neutral one for off-topic chatter. */
-function classificationFor(topic: Topic | null): Classification {
-  if (!topic) {
-    return {
-      intent: "mundane",
-      sentiment: "neutral",
-      energy: 0.15,
-      keywords: [],
-      confidence: 0.4,
-    };
-  }
-  return {
-    intent: topic.intent,
-    sentiment: topic.sentiment,
-    energy: topic.seed,
-    keywords: [...topic.keywords],
-    confidence: 0.8,
-    directiveTarget: topic.directiveTarget,
-    subject: topic.subject,
-  };
-}
-
-/** Pool entries appropriate to a topic, falling back to ambient chatter. */
-/**
- * Longer shapes appropriate to where a conversation is.
- *
- * Mixed into the pool rather than replacing it, so short reactions still
- * happen — they are what a pile-on is made of. The point is that they stop
- * being the only thing available.
- */
-function composedFor(
-  topic: Topic | null,
-  stage: TopicStage,
-): readonly ResponseEntry[] {
-  if (!topic) return COMPOSED_AMBIENT;
-  // Late in a topic's life chat references it rather than reacting to it.
-  if (stage === "referencing") return COMPOSED_CALLBACK;
-
-  switch (topic.intent) {
-    case "achievement":
-    case "excitement":
-    case "directive":
-      return COMPOSED_HYPE;
-    case "struggle":
-    case "confusion":
-      return COMPOSED_STRUGGLE;
-    case "question_to_chat":
-    case "showing":
-    case "story":
-      return COMPOSED_CURIOUS;
-    default:
-      return COMPOSED_AMBIENT;
-  }
-}
-
-function entriesForTopic(
-  topic: Topic | null,
-  depth: Depth,
-  classification: Classification,
-  silentMs: number,
-): readonly ResponseEntry[] {
-  if (!topic) {
-    /**
-     * Off-topic chatter escalates with real silence.
-     *
-     * The settling tier is what chat says while the streamer is mid-sentence;
-     * "is your mic on?" and "chat we're on our own" only make sense once the
-     * room has actually been left alone for a while.
-     */
-    const pool =
-      silentMs < 25_000
-        ? IDLE_SETTLING
-        : silentMs < 60_000
-          ? IDLE_NOTICING
-          : IDLE_RESTLESS;
-    return entriesForDepth(depth, pool, classification, IDLE_AMBIENT);
-  }
-  const pool = REACTIONS[topic.intent] ?? REACTIONS.mundane ?? [];
-  return entriesForDepth(depth, pool, classification, IDLE_AMBIENT);
 }

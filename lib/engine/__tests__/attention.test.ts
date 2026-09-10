@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickDepth, shouldReact, type Depth } from "../attention";
+import { shouldReact } from "../attention";
 import { createRng } from "../rng";
 import type { Classification, Intent, Viewer } from "../types";
 
@@ -12,18 +12,6 @@ const classification = (patch: Partial<Classification> = {}): Classification => 
   ...patch,
 });
 
-const viewer = (patch: Partial<Viewer> = {}): Viewer => ({
-  id: "v1",
-  name: "tester",
-  nameWords: ["tester"],
-  color: "#fff",
-  personality: "chatty",
-  activity: 0.5,
-  verbosity: 0.5,
-  emoteAffinity: 0.5,
-  lastSpokeAt: 0,
-  ...patch,
-});
 
 const quiet = { recentVolume: 0, repeatsPrevious: false, repeatedAfterIgnore: false };
 
@@ -140,91 +128,6 @@ describe("shouldReact", () => {
   });
 });
 
-describe("pickDepth", () => {
-  /** Depth distribution over many draws. */
-  function mix(v: Viewer, energy = 0.3, position = 1): Record<Depth, number> {
-    const rng = createRng(7);
-    const counts: Record<Depth, number> = {
-      ambient: 0, light: 0, engaged: 0, invested: 0,
-    };
-    const trials = 4000;
-    for (let i = 0; i < trials; i++) {
-      counts[pickDepth({ viewer: v, energy, position }, rng)]++;
-    }
-    for (const key of Object.keys(counts) as Depth[]) counts[key] /= trials;
-    return counts;
-  }
-
-  /**
-   * These used to assert ambient dominance outright — the mix was 78% weighted
-   * to one-to-three words, which measured out as 77% of real output at three
-   * words or fewer and a mean of 2.5. That was the bias we set out to remove,
-   * so the assertions are now about balance rather than dominance.
-   *
-   * Short reactions are still the largest single bucket. They just no longer
-   * crowd everything else out of ordinary conversation.
-   */
-  it("keeps short reactions a major share without letting them dominate", () => {
-    const result = mix(viewer());
-    // Still a big slice — a chat with no "W" or "LMAO" is not a chat.
-    expect(result.ambient).toBeGreaterThan(0.2);
-    // But no longer the whole picture: the requested shape has 4-7 word
-    // replies common and 8-12 very common, which cannot happen if short
-    // reactions outweigh everything else combined.
-    expect(result.ambient).toBeLessThan(result.light + result.engaged + result.invested);
-    expect(result.ambient).toBeGreaterThan(result.invested);
-  });
-
-  it("leaves real replies as a substantial share, not a rounding error", () => {
-    const result = mix(viewer());
-    expect(result.engaged + result.invested).toBeGreaterThan(0.2);
-  });
-
-  it("keeps full sentences a minority", () => {
-    expect(mix(viewer()).invested).toBeLessThan(0.25);
-  });
-
-  it("still skews terse viewers toward short reactions", () => {
-    expect(mix(viewer({ verbosity: 0 })).ambient).toBeGreaterThan(0.45);
-  });
-
-  it("lets verbose viewers write more", () => {
-    const terse = mix(viewer({ verbosity: 0 }));
-    const wordy = mix(viewer({ verbosity: 1 }));
-    expect(wordy.engaged + wordy.invested).toBeGreaterThan(
-      terse.engaged + terse.invested,
-    );
-  });
-
-  it("produces MORE short reactions at high energy, not fewer", () => {
-    // Nobody composes a paragraph while shouting.
-    const calm = mix(viewer(), 0.05);
-    const excited = mix(viewer(), 0.95);
-    expect(excited.ambient).toBeGreaterThan(calm.ambient);
-    expect(excited.invested).toBeLessThan(calm.invested);
-  });
-
-  it("makes the first responder reflexive", () => {
-    const first = mix(viewer(), 0.3, 0);
-    const later = mix(viewer(), 0.3, 4);
-    expect(first.ambient).toBeGreaterThan(later.ambient);
-    expect(later.invested).toBeGreaterThan(first.invested);
-  });
-});
-
-/**
- * Regression: chat used to ignore roughly three quarters of natural speech.
- *
- * Measured causes, all compounding:
- *  - `mundane` had a 0.18 base while being ~60% of how people actually talk
- *  - mundane was penalised twice, since its confidence is a fixed 0.15 and the
- *    confidence multiplier then scaled it again
- *  - `repeatsPrevious` matched on *intent*, so consecutive casual sentences —
- *    the normal case — permanently applied a further 0.7x
- *
- * The product's whole premise is "talk normally and watch chat react", so a
- * 28% response rate was a broken product, not tasteful restraint.
- */
 describe("attention over natural speech", () => {
   const NATURAL: Array<Partial<Classification>> = [
     { intent: "mundane", confidence: 0.15, energy: 0.04 },

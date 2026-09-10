@@ -49,7 +49,7 @@ const SCRIPT: Array<[number, string, number]> = [
 // Pick the first bare-number argument so the flags below can share argv.
 const SEED =
   Number(process.argv.slice(2).find((a) => /^\d+$/.test(a))) || 20260825;
-const DURATION_S = 200;
+const DURATION_S = 300;
 const STEP_MS = 250;
 
 const CACHE = ".emote-harness-cache.json";
@@ -99,10 +99,34 @@ const engine = new SimulationEngine({
   seed: SEED,
   now: 0,
   emotes: EMOTES,
-  settings: { audienceSize: 45, aiShare: 0 }, // aiShare 0 = fully offline run
 });
+engine.updateSettings({ messagesPerSecond: Number(process.env.SIM_RATE ?? 1) });
+engine.beginSession(0);
 
+/**
+ * Stands in for the AI tier, driven the way the app drives it: every tick
+ * the engine is asked what it needs, and the answer is served on the spot.
+ * Latency is a separate concern and not what this measures. Startup, active,
+ * continuation and every idle stage all flow through this one call, exactly
+ * as in the browser.
+ */
 const provider = createMockProvider();
+let generations = 0;
+const phases: Record<string, number> = {};
+
+async function pump(now: number): Promise<void> {
+  const request = engine.nextGeneration(now);
+  if (!request) return;
+  generations += 1;
+  const key = request.phase + (request.continuation ? "+" : "") + (request.idleStage ? request.idleStage : "");
+  phases[key] = (phases[key] ?? 0) + 1;
+  const result = await provider.generate(request);
+  if (result.status === "ok" && result.reactions.length > 0) {
+    engine.supplyReactions(result.reactions, now);
+  } else {
+    engine.generationFailed(now);
+  }
+}
 
 const clock = (ms: number) => {
   const total = Math.floor(ms / 1000);
@@ -130,21 +154,6 @@ for (let now = 0; now <= DURATION_S * 1000; now += STEP_MS) {
     const [, text, energy] = SCRIPT[scriptIndex++];
     const outcome = engine.handleTranscript(text, now, energy);
     const c = outcome?.classification;
-
-    // Stand in for the AI tier. The engine emits nothing active without it.
-    // Awaited rather than fired off, so the batch lands on this tick — a real
-    // session's latency is a separate concern and not what this measures.
-    if (outcome?.reacted) {
-      const batch = await provider.generate({
-        utterance: text,
-        history: [],
-        classification: outcome.classification,
-        emotes: EMOTES.map((emote) => emote.name),
-        recent: [],
-        count: 14,
-      });
-      engine.supplyReactions(batch.reactions, now);
-    }
     console.log(
       `\n${DIM}${clock(now)}${RESET} ${BOLD}STREAMER:${RESET} ${text}` +
         `\n${DIM}          -> ${c?.intent} / ${c?.sentiment} ` +
@@ -155,6 +164,7 @@ for (let now = 0; now <= DURATION_S * 1000; now += STEP_MS) {
     );
   }
 
+  await pump(now);
   for (const message of engine.tick(now)) {
     emitted.push(message.text);
     if (lastMessageAt !== null) gaps.push(now - lastMessageAt);
@@ -192,6 +202,7 @@ for (const [label, n] of Object.entries(buckets)) {
 }
 console.log(`audience:       ${stats.audience}`);
 console.log(`by source:      ${JSON.stringify(stats.bySource)}`);
+console.log(`AI batches:     ${generations} (${(generations / (DURATION_S / 60)).toFixed(1)}/min) ${JSON.stringify(phases)}`);
 
 // Length distribution is the other pacing health check. Real chat is
 // dominated by emotes and one-word reactions; a wall of 4-6 word statements

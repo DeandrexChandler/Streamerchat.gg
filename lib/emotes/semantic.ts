@@ -12,11 +12,14 @@ import type { Rng } from "../engine/rng";
  *
  * Priority, highest first:
  *
- *   1. A tag the user assigned by hand
- *   2. A name that semantically matches the intent — `hi`, `wave`, `peepoHi`
- *   3. A strong mood match for the intent
- *   4. Unknown-mood wildcards, which are most of any imported pack
- *   5. Anything at all, rarely, so variation survives
+ *   1. The emote the model asked for by name, when the pack has it
+ *   2. A tag the user assigned by hand
+ *   3. A name that semantically matches the intent — `hi`, `wave`, `peepoHi`
+ *   4. A strong mood match for the intent
+ *   5. Unknown-mood wildcards, which are most of any imported pack
+ *   6. Anything at all, rarely, so variation survives — but only once the
+ *      semantic tiers have come up empty, so nothing unrelated is posted
+ *      where something related exists
  *
  * Names are matched on a normalised form, because packs are full of `Hi`,
  * `peepoHi`, `helloThere` and `HYPERS` and none of them are typed the way the
@@ -30,7 +33,15 @@ import type { Rng } from "../engine/rng";
  * an emote as a greeting has said something more reliable than any guess we
  * can make from "GAMBA" or "xqcWOT".
  */
-const INTENT_TAG: Partial<Record<Intent, EmoteTag>> = {
+/**
+ * What a message is for, as far as emote choice is concerned.
+ *
+ * The classifier's intents plus "idle", which is not something the streamer
+ * did but is very much a moment chat has emotes for.
+ */
+export type EmoteMoment = Intent | "idle";
+
+const INTENT_TAG: Partial<Record<EmoteMoment, EmoteTag>> = {
   greeting: "greeting",
   farewell: "farewell",
   achievement: "achievement",
@@ -41,7 +52,8 @@ const INTENT_TAG: Partial<Record<Intent, EmoteTag>> = {
   question_to_chat: "question",
   showing: "showing",
   story: "story",
-  mundane: "idle",
+  mundane: "general",
+  idle: "idle",
 };
 
 /**
@@ -50,7 +62,7 @@ const INTENT_TAG: Partial<Record<Intent, EmoteTag>> = {
  * Order matters: within a tier the earliest fragment with any match wins, so
  * `hi` beats `wave` for a greeting even when the pack has both.
  */
-const SEMANTIC_NAMES: Partial<Record<Intent, readonly string[]>> = {
+const SEMANTIC_NAMES: Partial<Record<EmoteMoment, readonly string[]>> = {
   greeting: ["hi", "hello", "hey", "hii", "wave", "o7", "welcome", "yo"],
   farewell: ["bye", "goodbye", "gn", "o7", "cya", "later", "peace"],
   achievement: ["pog", "poggers", "letsgo", "hype", "yay", "win", "gg", "clap", "w"],
@@ -61,10 +73,11 @@ const SEMANTIC_NAMES: Partial<Record<Intent, readonly string[]>> = {
   showing: ["pog", "look", "eyes", "peek", "stare", "wow"],
   story: ["listen", "popcorn", "chill", "sip", "cozy"],
   directive: ["pog", "clap", "hype", "letsgo", "w"],
+  idle: ["afk", "sleep", "zzz", "bored", "wait", "waiting", "hmm", "sip", "lurk", "peek", "stare"],
 };
 
 /** Moods that suit each intent when no name matches, best first. */
-const INTENT_MOODS: Record<Intent, readonly EmoteMood[]> = {
+const INTENT_MOODS: Record<EmoteMoment, readonly EmoteMood[]> = {
   greeting: ["love", "chill", "hype"],
   farewell: ["love", "chill", "sad"],
   question_to_chat: ["confused", "funny", "chill"],
@@ -76,6 +89,7 @@ const INTENT_MOODS: Record<Intent, readonly EmoteMood[]> = {
   showing: ["love", "hype", "chill"],
   story: ["chill", "funny", "love"],
   mundane: ["chill", "funny", "unknown"],
+  idle: ["chill", "confused", "funny"],
 };
 
 /** How often to ignore everything above and take any emote at all. */
@@ -100,9 +114,17 @@ function nameMatches(emoteName: string, fragment: string): boolean {
 
 export interface SemanticEmoteOptions {
   emotes: readonly Emote[];
-  intent: Intent;
+  intent: EmoteMoment;
   /** The reaction's own emotion, when the AI supplied one. Overrides intent moods. */
   emotion?: EmoteMood;
+  /**
+   * The emote the AI asked for by name, if any.
+   *
+   * Honoured when the pack actually has it — the model only ever saw names
+   * from the loaded pack, but it can still misspell one or invent one, and
+   * an invented name renders as bare text on stream.
+   */
+  preferred?: string;
   rng: Rng;
 }
 
@@ -116,13 +138,17 @@ export function pickSemanticEmote({
   emotes,
   intent,
   emotion,
+  preferred,
   rng,
 }: SemanticEmoteOptions): Emote | null {
   if (emotes.length === 0) return null;
 
-  // A rare escape hatch, so a pack's best match does not become the only thing
-  // chat ever posts for a given intent.
-  if (rng.chance(WILDCARD_ESCAPE)) return rng.pick([...emotes]);
+  // 0. What the model asked for, if it exists.
+  if (preferred) {
+    const wanted = preferred.toLowerCase();
+    const exact = emotes.find((emote) => emote.name.toLowerCase() === wanted);
+    if (exact) return exact;
+  }
 
   // 1. What the user said this emote is for.
   const wanted = INTENT_TAG[intent];
@@ -131,10 +157,20 @@ export function pickSemanticEmote({
     if (tagged.length > 0) return rng.pick(tagged);
   }
 
+  // 2. A name that means this moment.
   for (const fragment of SEMANTIC_NAMES[intent] ?? []) {
     const matches = emotes.filter((emote) => nameMatches(emote.name, fragment));
     if (matches.length > 0) return rng.pick(matches);
   }
+
+  /**
+   * Nothing in the pack is *about* this moment, so the choice below is a
+   * mood guess. A rare escape hatch here keeps a pack's best mood match from
+   * becoming the only thing chat ever posts. It sits below the semantic
+   * tiers on purpose: when the pack owns a `hi` emote, a greeting never
+   * posts Sadge instead.
+   */
+  if (rng.chance(WILDCARD_ESCAPE)) return rng.pick([...emotes]);
 
   /**
    * The AI's stated emotion outranks the intent's mood list.

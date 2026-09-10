@@ -12,19 +12,6 @@ import {
 } from "../config/emote-store";
 import type { EmotePack } from "../emotes/seventv";
 import type { Reaction } from "../ai/reaction";
-import { MAX_EMOTES_IN_PROMPT } from "../ai/prompt";
-
-/**
- * Reactions requested per utterance, scaled by chat speed.
- *
- * Bigger batches at higher speeds so CHAOS has more to release, bounded
- * server-side by AI_MAX_BATCH_SIZE so a UI slider can never drive spend past
- * a known ceiling.
- */
-
-function reactionCountFor(messagesPerSecond: number): number {
-  return Math.round(Math.min(28, 14 + messagesPerSecond * 3.5));
-}
 import type { Emote } from "../engine/types";
 import {
   SimulationEngine,
@@ -116,9 +103,6 @@ export interface UseSimulatorResult {
   /** OBS browser sources currently receiving this session's chat. */
   overlaySubscribers: number;
 
-  /** Last generation outcome: ok, cooling, empty, error, a refusal reason. */
-  aiStatus: string;
-
   /** Feed a line in as though it had been spoken. Same path as speech. */
   say: (text: string) => void;
 }
@@ -143,12 +127,12 @@ export function useSimulator(
     released: 0,
     ignored: 0,
     bySource: {},
+    phase: "startup",
+    queued: 0,
   });
   const [settings, setSettings] = useState<SimulationSettings>(DEFAULT_SETTINGS);
   const [emotes, setEmotes] = useState<Emote[]>(() => []);
   const [overlaySubscribers, setOverlaySubscribers] = useState(0);
-  /** Last thing the generation pipeline did, surfaced so failures are visible. */
-  const [aiStatus, setAiStatus] = useState<string>("idle");
 
   const engineRef = useRef<SimulationEngine | null>(null);
   const micRef = useRef<MicSession | null>(null);
@@ -158,10 +142,8 @@ export function useSimulator(
   const emotesRef = useRef<Emote[]>([]);
   const pausedRef = useRef(false);
   const overlayRef = useRef<OverlayTransport | null>(null);
-  /** What chat said recently, so a batch doesn't echo it. */
-  const recentTextsRef = useRef<string[]>([]);
-  /** What the streamer has said recently, oldest first. The AI's context. */
-  const historyRef = useRef<string[]>([]);
+  /** A generation request is on the wire. One at a time, always. */
+  const inFlightRef = useRef(false);
 
   /** Level subscribers, kept outside React entirely. */
   const levelSubscribers = useRef(new Set<(level: number) => void>());
@@ -226,6 +208,45 @@ export function useSimulator(
     return engineRef.current;
   }, []);
 
+  /**
+   * Keeps the AI queue topped up.
+   *
+   * Called every tick. The engine decides whether a batch is needed and what
+   * it should be about — startup, a reaction, a continuation, an idle stage —
+   * and this only carries the request. One request at a time; the engine
+   * hands out nothing while one is unresolved.
+   *
+   * Failure is silent here on purpose. The route already logged the cause
+   * server-side, where someone can act on it; the streamer is live and cannot.
+   * The engine backs off briefly and asks again on its own.
+   */
+  const pump = useCallback(async (engine: SimulationEngine, now: number) => {
+    if (inFlightRef.current) return;
+    const request = engine.nextGeneration(now);
+    if (!request) return;
+
+    inFlightRef.current = true;
+    try {
+      const response = await fetch("/api/chat-candidates", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(request),
+      });
+      const body = (await response.json()) as { reactions?: Reaction[]; status?: string };
+
+      if (!response.ok || body.status !== "ok" || !body.reactions?.length) {
+        engine.generationFailed(Date.now());
+        return;
+      }
+      engine.supplyReactions(body.reactions, Date.now());
+    } catch {
+      engine.generationFailed(Date.now());
+    } finally {
+      inFlightRef.current = false;
+    }
+  }, []);
+
   const startTicking = useCallback(() => {
     if (tickRef.current !== null) return;
 
@@ -235,15 +256,7 @@ export function useSimulator(
 
       const now = Date.now();
       const released = engine.tick(now);
-
-      // Kept for the AI prompt, so a refill knows what chat just said and does
-      // not echo it back.
-      if (released.length > 0) {
-        recentTextsRef.current = [
-          ...recentTextsRef.current,
-          ...released.map((message) => message.text),
-        ].slice(-20);
-      }
+      void pump(engine, now);
 
       // The scheduler is the only source of released messages, so this is the
       // one place the overlay is fed — nothing else can reach OBS.
@@ -277,106 +290,13 @@ export function useSimulator(
 
       setStats(engine.stats());
     }, TICK_MS);
-  }, []);
+  }, [pump]);
 
   const stopTicking = useCallback(() => {
     if (tickRef.current !== null) {
       clearInterval(tickRef.current);
       tickRef.current = null;
     }
-  }, []);
-
-  /**
-   * Tops up the AI candidate pool.
-   *
-   * Fire and forget by design. Nothing awaits this, nothing blocks on it, and
-   * a failure is invisible beyond slightly less variety — the pool and
-   * template tiers carry chat regardless. That is the whole point of the AI
-   * being a component rather than the system.
-   *
-   * The engine decides whether a moment is worth spending on; the budget guard
-   * inside it has the final say. This function only performs the call.
-   */
-  /**
-   * Asks for a batch of audience reactions to what was just said.
-   *
-   * Fire and forget. Nothing awaits this and nothing blocks on it — the
-   * template tiers carry chat regardless, which is what keeps an AI outage
-   * from being an outage of the product.
-   *
-   * One request per utterance, never one per rendered message.
-   */
-  const requestReactions = useCallback(
-    async (utterance: string, outcome: TranscriptOutcome | null, at: number) => {
-      const engine = engineRef.current;
-      if (!engine || !outcome) return;
-
-      historyRef.current = [...historyRef.current, utterance].slice(-12);
-
-      if (!engine.wantsReactions(at)) {
-        setAiStatus("cooling");
-        return;
-      }
-      setAiStatus("requesting");
-
-      try {
-        const response = await fetch("/api/chat-candidates", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({
-            utterance,
-            // Everything before this utterance, so a change of mind is legible.
-            history: historyRef.current.slice(0, -1),
-            classification: outcome.classification,
-            // Only what the prompt will use. A full imported pack is several
-            // hundred names, which the request schema rejects outright.
-            emotes: emotesRef.current
-              .slice(0, MAX_EMOTES_IN_PROMPT)
-              .map((emote) => emote.name),
-            recent: recentTextsRef.current,
-            streamer: settingsRef.current.streamerName || undefined,
-            topic: settingsRef.current.streamTopic || undefined,
-            // No model from the client. The server owns which one it calls;
-            // a stale value in a browser that once had a model picker must not
-            // be able to aim requests at something the key cannot use.
-            count: reactionCountFor(settingsRef.current.messagesPerSecond),
-          }),
-        });
-
-        const body = (await response.json()) as {
-          reactions?: Reaction[];
-          status?: string;
-        };
-
-        if (!response.ok || !body.reactions?.length) {
-          // The server names the cause; the client never guesses at one.
-          const why = body.status ?? `http ${response.status}`;
-          console.warn(`[ai] no reactions (${why}) — chat stays quiet`);
-          setAiStatus(why);
-          return;
-        }
-
-        console.log(`[ai] queued ${body.reactions.length} reactions for "${utterance.slice(0, 60)}"`);
-        setAiStatus("ok");
-        engine.supplyReactions(body.reactions, Date.now());
-      } catch (error) {
-        console.warn("[ai] request failed — chat falls back to templates", error);
-        setAiStatus("error");
-      }
-    },
-    [],
-  );
-
-  /**
-   * Asks for the arrival batch that plays while the stream is coming up.
-   *
-   * Deterministic and synchronous. Arrival used to be an AI request, which
-   * meant a slow or failing provider produced a completely empty chat at the
-   * exact moment the streamer was looking for proof the thing works.
-   */
-  const beginIntro = useCallback(() => {
-    engineRef.current?.beginIntro(Date.now());
   }, []);
 
   /**
@@ -419,9 +339,9 @@ export function useSimulator(
        * is the only way to use the product without granting mic permission.
        */
       setStatus((current) => (current === "running" ? current : "running"));
-      void requestReactions(trimmed, outcome, at);
+      void pump(engine, at);
     },
-    [ensureEngine, startTicking, requestReactions],
+    [ensureEngine, startTicking, pump],
   );
 
   const start = useCallback(async () => {
@@ -431,7 +351,7 @@ export function useSimulator(
     setError(null);
 
     const engine = ensureEngine();
-    engine.markActivity(Date.now());
+    engine.beginSession(Date.now());
 
     if (isDemo) {
       setMicLabel("Demo mode — no microphone");
@@ -482,8 +402,8 @@ export function useSimulator(
         return next.length > 30 ? next.slice(-30) : next;
       });
 
-      // Only generate for what the engine actually accepted.
-      if (outcome.reacted) void requestReactions(text, outcome, at);
+      // Accepted input invalidates the queue; the pump refills on the next tick.
+      if (outcome.reacted) void pump(engineRef.current!, at);
     });
 
     provider.events.on("interim", ({ text }) => setInterim(text));
@@ -504,10 +424,7 @@ export function useSimulator(
     pausedRef.current = false;
     startTicking();
     setStatus("running");
-
-    // Fire and forget: the room starts arriving while the microphone comes up.
-    beginIntro();
-  }, [status, providerId, isDemo, ensureEngine, startTicking, requestReactions, beginIntro]);
+  }, [status, providerId, isDemo, ensureEngine, startTicking, pump]);
 
   const stop = useCallback(() => {
     stopTicking();
@@ -537,9 +454,7 @@ export function useSimulator(
     micRef.current?.stop();
     micRef.current = null;
 
-    // Drop queued messages: resuming later and dumping stale reactions to
-    // something said minutes ago is worse than losing them.
-    engineRef.current?.flush();
+    engineRef.current?.pause();
     setInterim("");
     setMicLabel("");
     setStatus("paused");
@@ -566,7 +481,7 @@ export function useSimulator(
     }
 
     pausedRef.current = false;
-    engineRef.current?.markActivity(Date.now());
+    engineRef.current?.resume(Date.now());
     void providerRef.current?.start();
     setStatus("running");
   }, [status, isDemo]);
@@ -586,6 +501,8 @@ export function useSimulator(
     micRef.current?.stop();
     micRef.current = null;
     engineRef.current?.flush();
+    engineRef.current = null;
+    inFlightRef.current = false;
     pausedRef.current = false;
 
     // Wipe the browser source as well. Leaving the last few messages frozen on
@@ -638,7 +555,6 @@ export function useSimulator(
     updateSettings,
     subscribeLevel,
     overlaySubscribers,
-    aiStatus,
     say,
   };
 }

@@ -4,6 +4,9 @@ import { parseReactions } from "../parse";
 import type { CandidateRequest } from "../provider";
 
 const request: CandidateRequest = {
+  phase: "active",
+  continuation: false,
+  silenceSeconds: 0,
   utterance: "look at this roof",
   history: [],
   classification: {

@@ -38,7 +38,7 @@ export const OverlayChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{3,8}$/),
   text: z.string().min(1).max(400),
   kind: z.enum(["reaction", "idle", "greeting", "question", "reply", "system"]),
-  source: z.enum(["pool", "template", "ai", "system"]),
+  source: z.enum(["ai", "emote", "directive", "system"]),
   at: z.number().finite(),
   replyTo: z.string().max(40).optional(),
 });

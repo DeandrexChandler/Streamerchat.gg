@@ -13,7 +13,7 @@ function message(id: string): ChatMessage {
     color: "#aabbcc",
     text: id,
     kind: "reaction",
-    source: "pool",
+    source: "ai",
     at: 0,
   };
 }

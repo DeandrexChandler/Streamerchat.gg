@@ -100,8 +100,15 @@ export type MessageKind =
   | "reply"
   | "system";
 
-/** Which generator produced a message. Tracked for cost/debug visibility. */
-export type MessageSource = "pool" | "template" | "ai" | "system";
+/**
+ * Where a message's words came from. Tracked for the dev trace.
+ *
+ *   ai         the model wrote it
+ *   emote      the model's line was rendered as an emote instead
+ *   directive  the token the streamer asked chat to spam
+ *   system     the app itself
+ */
+export type MessageSource = "ai" | "emote" | "directive" | "system";
 
 export interface ChatMessage {
   id: string;
@@ -122,21 +129,6 @@ export interface PendingMessage extends Omit<ChatMessage, "at"> {
   /** Ms after the burst's start at which this should land. */
   offset: number;
 }
-
-// ------------------------------------------------------------------- pools
-
-export type LengthClass = "tiny" | "short" | "medium" | "long";
-
-export interface ResponseEntry {
-  /** May contain `{keyword}` / `{emote}` slots for the template generator. */
-  text: string;
-  weight?: number;
-  length?: LengthClass;
-  /** Personality affinity hooks — see Personality.tagBias. */
-  tags?: readonly string[];
-}
-
-export type ResponsePool = Readonly<Partial<Record<Intent, readonly ResponseEntry[]>>>;
 
 // ------------------------------------------------------------------ emotes
 

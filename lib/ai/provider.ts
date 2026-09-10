@@ -2,28 +2,58 @@ import type { Classification } from "../engine/types";
 import type { Reaction } from "./reaction";
 
 /**
- * The AI tier is behind an interface for the same reason transcription is: the
- * engine must never know or care which model produced a line, and swapping
- * providers should be a new implementation rather than a rewrite.
+ * The AI tier is behind an interface for one reason: tests and the headless
+ * harness need a stand-in that never touches the network. There is exactly
+ * one real implementation (Gemini) and there is no selection between them at
+ * runtime — the mock is injected by tests, never chosen by configuration.
  *
  * The contract is deliberately narrow. A provider takes a description of the
  * moment and returns candidate lines. It does not decide when to run, how
- * often, or what happens to the output — the budget guard, the director and
- * the validator own those.
+ * often, or what happens to the output — the engine, the limiter and the
+ * validator own those.
  */
 
+/**
+ * What kind of moment a batch is for.
+ *
+ *   startup  the stream just went live and nobody has spoken
+ *   active   the streamer said something, or chat is still on it
+ *   idle     the streamer has been silent past the threshold
+ */
+export type GenerationPhase = "startup" | "active" | "idle";
+
+/**
+ * How long the silence has gone on, in coarse steps the prompt can act on.
+ *
+ *   1  the streamer is focused on something
+ *   2  the streamer may be busy or away
+ *   3  is the streamer still there?
+ *   4  chat has given up waiting and is entertaining itself
+ */
+export type IdleStage = 1 | 2 | 3 | 4;
+
 export interface CandidateRequest {
+  phase: GenerationPhase;
   /**
-   * What the streamer just said, verbatim.
+   * What the streamer said most recently, verbatim. Empty during startup.
    *
-   * This was absent, and its absence was the central bug: the model received
-   * an intent label and a keyword list, so it could not react to a sentence it
-   * had never seen.
+   * This was absent once, and its absence was the central bug: the model
+   * received an intent label and a keyword list, so it could not react to a
+   * sentence it had never seen.
    */
   utterance: string;
-  /** Recent utterances, oldest first, so a change of mind is visible. */
+  /** Recent streamer inputs before that, oldest first, so a change of mind is visible. */
   history: readonly string[];
   classification: Classification;
+  /**
+   * Active only: the batch for this utterance already drained and the
+   * streamer has not said anything new. Chat keeps going rather than
+   * reacting afresh to a sentence from half a minute ago.
+   */
+  continuation: boolean;
+  /** Seconds since the streamer last said anything. */
+  silenceSeconds: number;
+  idleStage?: IdleStage;
   /**
    * Emote names actually loaded in this session.
    *
@@ -39,12 +69,8 @@ export interface CandidateRequest {
 }
 
 /**
- * Why a generation produced what it did.
- *
- * An empty batch used to be indistinguishable from a rejected key, an
- * exhausted quota and a retired model — all of which reached the streamer as
- * the same unhelpful line. These need different fixes, so they get different
- * names.
+ * Why a generation produced what it did. For the server log and for tests —
+ * the browser is only ever told "ok" or "unavailable".
  */
 export type ProviderStatus =
   | "ok"
@@ -59,17 +85,17 @@ export type ProviderStatus =
 export interface GenerationResult {
   reactions: Reaction[];
   status: ProviderStatus;
-  /** The provider's own message, when it gave one. For logs, not the UI. */
+  /** The provider's own message, when it gave one. For logs, never the UI. */
   detail?: string;
 }
 
 export interface CandidateProvider {
   readonly name: string;
   /**
-   * Returns audience reactions and why.
+   * Returns audience lines and why.
    *
-   * Never throws. Active chat is AI-only, so a failure means chat stays quiet
-   * and the reason is surfaced — never a deterministic pool standing in.
+   * Never throws. Chat is AI-only, so a failure means chat stays quiet for
+   * this batch — never a deterministic pool standing in.
    */
   generate(request: CandidateRequest): Promise<GenerationResult>;
 }

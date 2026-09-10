@@ -4,6 +4,9 @@ import type { CandidateRequest } from "../provider";
 
 function request(patch: Partial<CandidateRequest> = {}): CandidateRequest {
   return {
+    phase: "active",
+    continuation: false,
+    silenceSeconds: 0,
     utterance: "look at this roof I just built",
     history: [],
     classification: {
@@ -92,4 +95,44 @@ describe("buildPrompt", () => {
     const prompt = buildPrompt(request({ emotes: many }));
     expect(prompt).not.toContain("emote199");
   });
-})
+
+  describe("phases", () => {
+    it("frames startup as arrival, with nothing to react to", () => {
+      const prompt = buildPrompt(request({ phase: "startup", utterance: "", history: [] }));
+      expect(prompt).toMatch(/just went live/i);
+      expect(prompt).toMatch(/arriving/i);
+      expect(prompt).not.toMatch(/react to that/i);
+    });
+
+    it("tells a startup continuation that the first wave already said hello", () => {
+      const prompt = buildPrompt(request({ phase: "startup", utterance: "", continuation: true }));
+      expect(prompt).toMatch(/already said hello/i);
+    });
+
+    it("frames a continuation as chat carrying on, not reacting afresh", () => {
+      const prompt = buildPrompt(request({ continuation: true, silenceSeconds: 25 }));
+      expect(prompt).toContain("look at this roof I just built");
+      expect(prompt).toMatch(/haven't said anything since/i);
+      expect(prompt).toMatch(/do not react as though they just said it/i);
+      expect(prompt).toContain("25 seconds");
+    });
+
+    it("escalates idle framing with the stage", () => {
+      const one = buildPrompt(request({ phase: "idle", idleStage: 1, silenceSeconds: 70 }));
+      const four = buildPrompt(request({ phase: "idle", idleStage: 4, silenceSeconds: 700 }));
+      expect(one).toMatch(/focused|concentrating/i);
+      expect(four).toMatch(/entertaining themselves/i);
+      expect(four).toContain("12 minutes");
+      expect(one).not.toMatch(/entertaining themselves/i);
+    });
+
+    it("mentions the silence in minutes once it is long", () => {
+      const prompt = buildPrompt(request({ phase: "idle", idleStage: 2, silenceSeconds: 180 }));
+      expect(prompt).toContain("3 minutes");
+    });
+
+    it("offers the model an optional emote field", () => {
+      expect(buildPrompt(request())).toContain('"emote"');
+    });
+  });
+});

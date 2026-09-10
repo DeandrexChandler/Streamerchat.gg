@@ -54,10 +54,10 @@ export function loadAiConfig(): AiConfig {
     apiKey: process.env[KEY_ENV] ?? "",
     model: MODEL,
     maxCallsPerMinute: num("AI_MAX_CALLS_PER_MINUTE", 10),
-    maxCallsPerHour: num("AI_MAX_CALLS_PER_HOUR", 400),
+    maxCallsPerHour: num("AI_MAX_CALLS_PER_HOUR", 500),
     cooldownMs: num("AI_COOLDOWN_MS", 2_500),
-    maxOutputTokens: num("AI_MAX_OUTPUT_TOKENS", 2_000),
-    maxBatchSize: num("AI_MAX_BATCH_SIZE", 40),
+    maxOutputTokens: num("AI_MAX_OUTPUT_TOKENS", 3_000),
+    maxBatchSize: num("AI_MAX_BATCH_SIZE", 60),
   };
 }
 
