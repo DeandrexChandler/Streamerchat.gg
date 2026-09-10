@@ -2,145 +2,138 @@
 
 ## What this is
 
-A simulated live chat for streamers with quiet chats. The streamer talks; a
-simulated audience reacts in real time. Built to be genuinely used — the target
-users are two real people with low-viewership streams, not a hypothetical
-market.
+An AI wrapper for a simulated Twitch chat. The streamer presses Play, AI
+generates believable viewers and messages, the chat flows continuously at
+the selected speed, streamer speech or typed input gives the AI new context,
+and prolonged silence causes AI-generated idle conversation.
 
-Success is: start the app, open the simulator, turn on the mic, talk normally,
-watch a believable chat react, and put that chat into OBS.
+Built to be genuinely used by two real people with low-viewership streams.
+Success is a manual session where the chat feels continuously alive,
+contextually responsive, varied, and recognisably like Twitch chat — and
+then goes into OBS.
+
+The full product definition is `docs/product-scope.md`. The system is
+described in `docs/architecture.md`. What comes later is `docs/roadmap.md`.
+Those three files and this one are the source of truth; anything older is
+history.
 
 ## Operating mode
 
-You are the primary engineer on this project, not a tutor. Make engineering
-decisions and act on them. Explain *significant architectural* choices briefly
-so the owner can follow along — do not narrate routine work or explain what
-every line does.
+You are the primary engineer, not a tutor. Make engineering decisions and
+act on them. Explain significant architectural choices briefly; do not
+narrate routine work.
 
-- Refactor aggressively when justified. Nothing here is sacred.
-- Do not preserve a bad implementation because it already exists.
+- Refactor when justified. Nothing here is sacred.
 - Ask only when a decision genuinely changes what gets built and you cannot
-  reasonably make the call yourself. Otherwise decide, state the decision, and
-  keep moving.
+  reasonably make the call. Otherwise decide, state it, keep moving.
 - Do not generate documentation nobody asked for.
 - Do not over-engineer. This is a monolith on purpose.
 
-## The core architectural rule
+## The core rule
 
-**AI is a component inside the system, never the system itself.**
+**The AI writes every line chat says. Deterministic code owns everything
+else.**
 
 ```
-Microphone → Transcription → Classifier → Director → Scheduler → Renderer
-                                             ↑
-                              pools · templates · AI (~5%)
+Mic / typed ─► Classifier ─► Engine ─(nextGeneration)─► Hook ─► Route ─► Gemini
+                              │ ◄───(supplyReactions)──────────────────────┘
+                              ▼
+                     Director ─► Scheduler ─► Renderer / OBS
 ```
 
-Deterministic code owns: timing, message frequency, usernames, colors, emote
-selection, personalities, idle behaviour, scheduling, rate limiting, settings,
-UI state, analytics.
+Deterministic code owns: timing, scheduling, rate limiting, who speaks,
+usernames and colours, personalities, per-viewer memory, repetition rules,
+emote selection, safety filtering, compact context, queue refill, the
+displayed viewer count.
 
-**AI owns the wording of active chat. Deterministic code owns everything
-else.** One batch is generated per streamer utterance — never one call per
-rendered message — and the scheduler releases it over the following seconds.
+The AI owns: wording and conversational content, in batches — startup,
+active, continuation, idle — never one call per message.
 
 Consequences that must stay true:
-- Active responses come from the AI provider, 100% of the time. Deterministic
-  pools must never quietly stand in for it: a streamer cannot tell canned text
-  from an answer, and silently mixing the two makes the product dishonest.
-- A missing key, an invalid key, a rate limit or a provider failure is
-  **surfaced**, not papered over. Chat goes quiet and the status says why.
-- Idle chatter is the one exception, and only after real silence.
-- No AI call for anything a lookup table or a rule can decide: timing,
-  usernames, colours, viewer counts, emote choice, safety filtering.
+
+- **There is no deterministic chat text.** No pools, no templates, no
+  fallback lines. If the model did not write it, it is the streamer's own
+  directive token or it is nothing.
+- **A provider failure is silent to the streamer.** The route retries once,
+  logs the cause server-side, and returns `{reactions: [], status:
+  "unavailable"}`. No banner, no provider name, no error text in the UI. The
+  next batch tries on its own.
+- **One provider, one model, fixed.** Gemini `gemini-3.5-flash-lite` via
+  `GOOGLE_API_KEY`. No selection anywhere. If Gemini is down or the key is
+  out of credit, the answer is to add credit — never another provider.
+- **Idle is always on**, at sixty seconds, escalating through four stages.
+- **The roster is at most ten people**, sized by tier, with stable names and
+  colours and per-viewer memory. See `lib/engine/roster.ts`.
 
 ## Avoid both failure modes
 
-Replacing AI with thousands of hardcoded strings is the *other* failure mode.
-Behaviour lives in data structures — weighted pools, personality profiles,
-emote metadata, intent definitions — under `lib/data/`. Logic lives in
-`lib/engine/`. Adding new chat behaviour should usually mean editing data, not
-writing code.
+"Everything goes to a model" produced twelve lines dumped at once from a
+fresh random username each. "Thousands of hardcoded strings" produced a chat
+that could not hear you. The engine exists so neither happens: the model
+writes, the engine decides who, when, how often, and whether they have
+already said it.
 
 ## Layout
 
 ```
 app/
-  (shell)/         pages with app chrome — simulator, obs
+  (shell)/         pages with app chrome — simulator, settings, obs
   overlay/         OBS browser source; NO chrome, deliberately outside (shell)
-  api/             server routes
+  api/             chat-candidates (the one route that spends money), emotes, overlay, transcribe
 lib/
-  engine/          simulation: classifier, director, scheduler, population, rng
-  engine/generators/  pool + template + ai tiers
-  data/            response pools, personalities, usernames, emotes
-  config/          zod-validated settings + storage adapter
-  audio/           mic, VAD, utterance batching — plain classes, no React
-scripts/simulate.ts  headless harness
+  ai/              provider contract, prompt per phase, gemini, mock (tests only), validate, config
+  engine/          engine, director, scheduler, population, roster, generation, topics, classifier, attention, rng
+  data/            usernames, personalities, emote index
+  emotes/          7TV import, semantic emote selection
+  config/          zod-validated settings + storage adapters
+  audio/           mic, VAD — plain classes, no React
+  transcription/   Web Speech provider
+scripts/simulate.ts  headless harness with the mock provider
+docs/                product-scope, architecture, roadmap
 ```
 
 ## Non-negotiables
 
-**Randomness goes through `lib/engine/rng.ts`, never `Math.random()`.** Seeded
-RNG is what makes the engine testable and lets a weird session be reproduced.
+**Randomness goes through `lib/engine/rng.ts`, never `Math.random()`.**
 
-**The audio pipeline stays out of React.** No `setState` at animation-frame
-rate. The volume meter is driven through a DOM ref / CSS variable. If you find
-yourself adding a ref to mirror state into a callback, the logic belongs in a
-plain class instead.
+**The audio pipeline stays out of React.** No `setState` at frame rate.
 
-**The scheduler is the only thing that emits messages.** It is the single choke
-point for rate limiting and for the OBS transport. Nothing bypasses it.
+**The scheduler is the only thing that emits messages.**
 
-**Never prefix a secret with `NEXT_PUBLIC_`.** That inlines it into the client
-bundle. Any route that spends money is authenticated, rate-limited, and
-size-capped.
+**The key is server-side only. Never prefix a secret with `NEXT_PUBLIC_`.**
+The chat-candidates route is rate-limited and size-capped. It is not
+authenticated, because there are no accounts; that is acceptable on
+localhost and nowhere else.
+
+**Never spend real API credit in automated tests.** Every provider boundary
+is mocked. The harness uses the mock. If a check needs a real key, stop and
+say so.
 
 **Chat never dunks on the streamer.** Viewers may be confused, derail, tease
-*each other*, and be self-deprecating — that is what keeps it from sounding
-like a corporate mascot. It never bites the broadcaster. Slurs are dropped in
-every filter mode including "off"; "off" means "allow swearing", not "disable
-safety". This output goes on someone's live broadcast.
+each other, be self-deprecating. They never bite the broadcaster. Slurs are
+dropped in every filter mode including "off".
+
+## Anti-feature-creep rule
+
+Before any change: *does this directly improve believable continuous
+AI-generated Twitch chat?* If not, record it in `docs/roadmap.md` and do not
+build it. Phases 2–4 (emote controls, polish, hosted product) are not
+started until Phase 1 is manually believable.
 
 ## Testing
 
-`npm test` must pass before anything is called done. Run `npm run simulate` to
-eyeball pacing and message quality — it is faster and more honest than clicking
-through the UI, and it needs no microphone.
+`npm test` must pass before anything is called done. `npm run typecheck`
+and `npm run lint` too (two pre-existing lint findings in `ChatList.tsx`
+are known and recorded).
 
-Test the engine at its seams (classifier intents, scheduler timing and rate
-limits, filter modes, weighted distributions), not React internals. When you
-fix a realism bug, add a regression test for it — "chat repeated itself three
-times" is a real bug and it should stay fixed.
+`npm run simulate` runs a scripted session through the engine with the mock
+provider and prints pacing health — rate, gap spread, AI batches per minute
+by phase, slots that waited, lines dropped, dry ticks. It is the fastest
+honest read on whether the loop is alive. `SIM_RATE=4 npm run simulate` for
+a tier.
+
+Test the engine at its seams with a scripted provider: phases, refill,
+staleness, repetition, pacing per tier, viewer continuity, emote selection,
+silent failure. When you fix a realism bug, add the regression test.
 
 Do not claim something works because it compiles. Run it.
-
-## Current state
-
-Done: repo audit; marketing/auth/analytics surface removed; routes flattened;
-build green; simulation engine with population, classifier, director,
-scheduler, filter, and pools; headless harness; audio pipeline (Web Speech
-default, Whisper fallback); simulator UI rebuild with inline settings; 7TV
-emote import; OBS transport.
-
-The OBS transport is an SSE relay, because OBS runs its browser source in its
-own CEF process and shares no channel with the browser the simulator is open
-in. The simulator POSTs each tick's released messages to `/api/overlay/publish`
-and the browser source subscribes to `/api/overlay/stream`; they are paired by
-a persisted random key that lives in the browser-source URL. The relay is an
-in-memory hub — deliberately, since this is one process on one machine — and
-publishing stops entirely while no browser source is attached.
-
-Next: AI tier (Google Gemini), behind the `lib/engine/ai-budget.ts` guard and
-draining into the director's existing candidate pool.
-
-Deliberately deferred: accounts and any database. The product has to work
-end-to-end first.
-
-<!-- BEGIN:nextjs-agent-rules -->
-
-# This is NOT the Next.js you know
-
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->

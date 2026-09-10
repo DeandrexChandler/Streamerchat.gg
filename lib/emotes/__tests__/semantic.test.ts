@@ -173,4 +173,48 @@ describe("semantic emote selection", () => {
       pickSemanticEmote({ emotes: [], intent: "greeting", rng: createRng(1) }),
     ).toBeNull();
   });
+
+  it("honours the emote the model asked for, when the pack has it", () => {
+    const emotes = pack(["hi", "chill"], ["KEKW", "funny"], ["Sadge", "sad"]);
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const picked = pickSemanticEmote({
+        emotes,
+        intent: "greeting",
+        preferred: "sadge",
+        rng: createRng(seed),
+      });
+      expect(picked?.name).toBe("Sadge");
+    }
+  });
+
+  it("ignores a preferred emote the pack does not have", () => {
+    const emotes = pack(["hi", "chill"], ["KEKW", "funny"]);
+    for (const seed of [1, 2, 3]) {
+      const picked = pickSemanticEmote({
+        emotes,
+        intent: "greeting",
+        preferred: "NotLoaded",
+        rng: createRng(seed),
+      });
+      expect(picked?.name).toBe("hi");
+    }
+  });
+
+  it("reaches for an AFK emote when the room is idle", () => {
+    const emotes = pack(["peepoAFK", "chill"], ["hi", "chill"], ["KEKW", "funny"]);
+    let afk = 0;
+    for (let seed = 0; seed < 40; seed += 1) {
+      if (pickSemanticEmote({ emotes, intent: "idle", rng: createRng(seed) })?.name === "peepoAFK") afk += 1;
+    }
+    expect(afk).toBeGreaterThan(30);
+  });
+
+  it("never posts an unrelated emote where a related one exists", () => {
+    // The wildcard escape used to fire before the semantic tiers, so a
+    // greeting could come out as Sadge one time in twelve.
+    const emotes = pack(["hi", "chill"], ["Sadge", "sad"]);
+    for (let seed = 0; seed < 200; seed += 1) {
+      expect(pickSemanticEmote({ emotes, intent: "greeting", rng: createRng(seed) })?.name).toBe("hi");
+    }
+  });
 });
