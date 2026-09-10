@@ -1,69 +1,65 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { KEY_ENV, loadAiConfig } from "../config";
+import { AiRateLimiter, KEY_ENV, MODEL, loadAiConfig } from "../config";
 
 /**
- * The provider default, pinned.
+ * One provider, one model, pinned.
  *
- * Nothing tested this, which is how a temporary OpenAI testing phase left
- * `openai` as the shipped default: a correctly configured GOOGLE_API_KEY was
- * ignored, and the streamer got a model error for a provider they had never
- * chosen and could not see.
+ * A testing phase once added a second provider and left it as the default,
+ * so a correctly configured Google key was ignored. There is no longer a
+ * selection to get wrong, and this makes sure one does not creep back.
  */
 
-const TOUCHED = ["AI_PROVIDER", "AI_MODE", "AI_MODEL", ...Object.values(KEY_ENV)];
-let saved: Record<string, string | undefined> = {};
+let saved: string | undefined;
 
 beforeEach(() => {
-  saved = Object.fromEntries(TOUCHED.map((key) => [key, process.env[key]]));
-  for (const key of TOUCHED) delete process.env[key];
+  saved = process.env[KEY_ENV];
+  delete process.env[KEY_ENV];
 });
 
 afterEach(() => {
-  for (const [key, value] of Object.entries(saved)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
+  if (saved === undefined) delete process.env[KEY_ENV];
+  else process.env[KEY_ENV] = saved;
 });
 
-describe("provider configuration", () => {
-  it("is Gemini with nothing set", () => {
-    expect(loadAiConfig().provider).toBe("gemini");
+describe("AI configuration", () => {
+  it("is Gemini Flash-Lite, always", () => {
+    expect(MODEL).toBe("gemini-3.5-flash-lite");
+    expect(loadAiConfig().model).toBe("gemini-3.5-flash-lite");
   });
 
-  it("uses the cheap Flash-Lite model chosen by measurement", () => {
+  it("reads the key from GOOGLE_API_KEY", () => {
+    expect(KEY_ENV).toBe("GOOGLE_API_KEY");
     process.env.GOOGLE_API_KEY = "test-key";
-    const config = loadAiConfig();
-    expect(config.provider).toBe("gemini");
-    expect(config.model).toBe("gemini-3.5-flash-lite");
+    expect(loadAiConfig().apiKey).toBe("test-key");
   });
 
-  it("reads Gemini's key from GOOGLE_API_KEY", () => {
-    expect(KEY_ENV.gemini).toBe("GOOGLE_API_KEY");
+  it("has no provider or model switch to flip", () => {
+    const config = loadAiConfig() as Record<string, unknown>;
+    expect(config).not.toHaveProperty("provider");
+    expect(config).not.toHaveProperty("mode");
   });
 
-  it("goes live on a Google key alone, with no provider set", () => {
+  it("refuses every call with no key rather than calling anything", () => {
+    const limiter = new AiRateLimiter(loadAiConfig());
+    expect(limiter.refusal(0)).toBe("no-key");
+  });
+
+  it("allows a healthy continuous session's call rate", () => {
+    // Continuous chat refills about every ten seconds. Six calls in a minute
+    // must never trip the ceiling.
     process.env.GOOGLE_API_KEY = "test-key";
-    expect(loadAiConfig().mode).toBe("live");
+    const limiter = new AiRateLimiter(loadAiConfig());
+    for (let i = 0; i < 6; i += 1) {
+      expect(limiter.refusal(i * 10_000)).toBeNull();
+      limiter.record(i * 10_000);
+    }
   });
 
-  it("switches to OpenAI only when explicitly asked", () => {
-    process.env.AI_PROVIDER = "openai";
-    process.env.OPENAI_API_KEY = "test-key";
-    const config = loadAiConfig();
-    expect(config.provider).toBe("openai");
-    expect(config.model).toBe("gpt-4o-mini");
-  });
-
-  it("stays on Gemini for an unrecognised provider name", () => {
-    process.env.AI_PROVIDER = "anthropic";
-    expect(loadAiConfig().provider).toBe("gemini");
-  });
-
-  it("never falls back to OpenAI when the Google key is missing", () => {
-    // The failure mode worth naming: no key should mean "not configured",
-    // never "quietly call a different vendor".
-    const config = loadAiConfig();
-    expect(config.provider).toBe("gemini");
-    expect(config.mode).not.toBe("live");
+  it("enforces the cooldown between calls", () => {
+    process.env.GOOGLE_API_KEY = "test-key";
+    const limiter = new AiRateLimiter(loadAiConfig());
+    limiter.record(0);
+    expect(limiter.refusal(500)).toBe("cooldown");
+    expect(limiter.refusal(5_000)).toBeNull();
   });
 });

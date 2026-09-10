@@ -63,5 +63,4 @@ export const CandidateRequestSchema = z.object({
   streamer: z.string().max(40).nullish().transform((v) => v ?? undefined),
   topic: z.string().max(80).nullish().transform((v) => v ?? undefined),
   count: z.number().int().min(1).max(40).default(16),
-  model: z.string().max(60).optional(),
 });

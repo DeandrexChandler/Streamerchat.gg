@@ -1,36 +1,33 @@
 /**
- * AI limits, read from the environment.
+ * AI configuration, read from the environment.
  *
- * Configuration rather than constants scattered through the code, because the
- * numbers that matter during development are quota numbers — and the person
- * who needs to change them is testing against a free tier, not editing the
- * engine.
+ * One provider, one model. There is no selection here on purpose: the product
+ * is a Gemini wrapper, and a testing phase that added a second provider left
+ * the default pointing at the wrong one. Configuration that can be wrong is
+ * configuration nobody asked for.
  *
- * Every value has a conservative default, so an empty `.env.local` is a safe
- * `.env.local`.
+ * Every limit has a conservative default, so an empty `.env.local` is a safe
+ * `.env.local`. The one thing that must be set is the key.
  */
 
-export type AiMode = "live" | "mock" | "off";
+/** The model this project chose by measurement — see lib/ai/gemini.ts. */
+export const MODEL = "gemini-3.5-flash-lite";
 
-/** Which upstream to call. Configuration, never a rewrite. */
-export type AiProviderId = "openai" | "gemini";
-
-const DEFAULT_MODELS: Record<AiProviderId, string> = {
-  openai: "gpt-4o-mini",
-  gemini: "gemini-3.5-flash-lite",
-};
-
-/** The env var each provider reads its key from. */
-export const KEY_ENV: Record<AiProviderId, string> = {
-  openai: "OPENAI_API_KEY",
-  gemini: "GOOGLE_API_KEY",
-};
+/** The env var holding the Gemini key. Never NEXT_PUBLIC_. */
+export const KEY_ENV = "GOOGLE_API_KEY";
 
 export interface AiConfig {
-  mode: AiMode;
-  provider: AiProviderId;
+  /** Empty when unset. The route treats that as "unavailable", never as an error. */
+  apiKey: string;
   model: string;
-  /** Ceilings. The per-minute one is what protects a free-tier daily quota. */
+  /**
+   * Call ceilings.
+   *
+   * Continuous chat refills roughly every ten to fifteen seconds at any speed
+   * tier, which is four to six calls a minute. The ceilings sit above that
+   * so a healthy session never trips them, and far enough below runaway to
+   * protect a key from a defect.
+   */
   maxCallsPerMinute: number;
   maxCallsPerHour: number;
   /** Minimum gap between calls, independent of the ceilings above. */
@@ -53,49 +50,25 @@ function num(name: string, fallback: number): number {
 }
 
 export function loadAiConfig(): AiConfig {
-  /**
-   * Gemini is the product. OpenAI is a temporary testing override.
-   *
-   * Flipped back after a testing phase left `openai` as the default, which
-   * meant a correctly configured GOOGLE_API_KEY was ignored and the streamer
-   * got a model error for a provider they had never chosen. Anything other
-   * than an explicit `AI_PROVIDER=openai` means Gemini.
-   */
-  const provider: AiProviderId =
-    (process.env.AI_PROVIDER ?? "").toLowerCase() === "openai" ? "openai" : "gemini";
-
-  const hasKey = Boolean(process.env[KEY_ENV[provider]]);
-  const requested = (process.env.AI_MODE ?? "").toLowerCase();
-
-  const mode: AiMode =
-    requested === "mock" || requested === "off"
-      ? requested
-      : // No key is "off", not an error: running with zero keys is supported.
-        hasKey
-        ? "live"
-        : "off";
-
   return {
-    mode,
-    provider,
-    model: process.env.AI_MODEL || DEFAULT_MODELS[provider],
-    maxCallsPerMinute: num("AI_MAX_CALLS_PER_MINUTE", 6),
-    maxCallsPerHour: num("AI_MAX_CALLS_PER_HOUR", 120),
-    cooldownMs: num("AI_COOLDOWN_MS", 3_000),
-    maxOutputTokens: num("AI_MAX_OUTPUT_TOKENS", 1_200),
-    maxBatchSize: num("AI_MAX_BATCH_SIZE", 25),
+    apiKey: process.env[KEY_ENV] ?? "",
+    model: MODEL,
+    maxCallsPerMinute: num("AI_MAX_CALLS_PER_MINUTE", 10),
+    maxCallsPerHour: num("AI_MAX_CALLS_PER_HOUR", 400),
+    cooldownMs: num("AI_COOLDOWN_MS", 2_500),
+    maxOutputTokens: num("AI_MAX_OUTPUT_TOKENS", 2_000),
+    maxBatchSize: num("AI_MAX_BATCH_SIZE", 40),
   };
 }
 
 /** Why a request was refused, for the log line the developer actually reads. */
-export type RefusalReason = "cooldown" | "per-minute" | "per-hour" | "disabled";
+export type RefusalReason = "cooldown" | "per-minute" | "per-hour" | "no-key";
 
 /**
  * Call ceilings.
  *
- * Deliberately separate from the engine's older AiBudget, which counted
- * session-long spend. This one exists to keep a debugging session inside a
- * free-tier daily quota, which is a different problem with different numbers.
+ * Exists to keep a session inside a sane spend and a defect from spinning on
+ * the key. Not a pacing control: the engine decides when a batch is needed.
  */
 export class AiRateLimiter {
   private calls: number[] = [];
@@ -105,7 +78,7 @@ export class AiRateLimiter {
 
   /** Null when a call is allowed, otherwise why it is not. */
   refusal(now: number = Date.now()): RefusalReason | null {
-    if (this.config.mode === "off") return "disabled";
+    if (!this.config.apiKey) return "no-key";
     if (now - this.lastCallAt < this.config.cooldownMs) return "cooldown";
 
     this.calls = this.calls.filter((t) => now - t < 3_600_000);
@@ -121,7 +94,7 @@ export class AiRateLimiter {
     this.calls.push(now);
   }
 
-  /** For the status line: how much of each ceiling is used. */
+  /** For the log line: how much of each ceiling is used. */
   usage(now: number = Date.now()): { minute: number; hour: number } {
     this.calls = this.calls.filter((t) => now - t < 3_600_000);
     return {
