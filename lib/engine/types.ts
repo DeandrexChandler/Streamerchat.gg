@@ -73,11 +73,20 @@ export interface Personality {
   tagBias: Readonly<Partial<Record<string, number>>>;
 }
 
+/**
+ * One person in the room.
+ *
+ * Identity is fixed for the session — name, colour, personality — and the
+ * history is what makes them behave like a person rather than a slot: what
+ * they have already said, what they have already done, and when. A future
+ * custom viewer is the same shape with the identity fields supplied by hand.
+ */
 export interface Viewer {
   id: string;
   name: string;
   /** Vocabulary this name consumed, released back to the pool on removal. */
   nameWords: string[];
+  /** From the fixed Twitch palette, assigned once. */
   color: string;
   personality: PersonalityId;
   /** 0..1 — relative likelihood of being the one who speaks. */
@@ -88,6 +97,12 @@ export interface Viewer {
   emoteAffinity: number;
   /** Wall-clock ms of this viewer's last message; throttles repeat speakers. */
   lastSpokeAt: number;
+  /** Everything this viewer has said this session, normalised. */
+  said: Set<string>;
+  /** When this viewer last performed each conversational action. */
+  intents: Map<Intent, number>;
+  /** Messages this session. */
+  spoken: number;
 }
 
 // ----------------------------------------------------------------- messages

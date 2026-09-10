@@ -137,6 +137,8 @@ export interface DirectOneOptions {
   recentSpeakers: ReadonlyArray<readonly [string, string]>;
   /** Viewers who may not speak this message. */
   excludeSpeakers?: ReadonlySet<string>;
+  /** A hype moment: the speaking cooldown is waived. */
+  burst?: boolean;
   now: number;
   /** Monotonic counter, so two messages in one millisecond cannot share an id. */
   sequence: number;
@@ -290,7 +292,8 @@ const ONE_SHOT_INTENTS = new Set<Intent>(["greeting", "farewell"]);
  * conversation happening.
  */
 function pickTopicSpeaker(options: DirectOneOptions): Viewer | undefined {
-  const { topic, stage, population, now, rng, excludeSpeakers } = options;
+  const { topic, stage, population, now, rng, excludeSpeakers, burst } = options;
+  const pick = { burst };
 
   /**
    * Viewers barred from this message.
@@ -301,7 +304,7 @@ function pickTopicSpeaker(options: DirectOneOptions): Viewer | undefined {
    * choice, not instead of it.
    */
   const barred = new Set(excludeSpeakers ?? []);
-  if (!topic) return population.pickSpeaker(now, barred);
+  if (!topic) return population.pickSpeaker(now, barred, pick);
 
   const participants = [...topic.participants.keys()];
 
@@ -314,7 +317,7 @@ function pickTopicSpeaker(options: DirectOneOptions): Viewer | undefined {
    */
   if (ONE_SHOT_INTENTS.has(topic.intent)) {
     for (const id of participants) barred.add(id);
-    return population.pickSpeaker(now, barred);
+    return population.pickSpeaker(now, barred, pick);
   }
 
   const repeatable = participants.filter((id) => !barred.has(id));
@@ -326,6 +329,17 @@ function pickTopicSpeaker(options: DirectOneOptions): Viewer | undefined {
     const viewer = population.get(rng.pick(repeatable));
     if (viewer) return viewer;
   }
-  for (const id of participants) barred.add(id);
-  return population.pickSpeaker(now, barred);
+
+  /**
+   * Prefer a fresh voice; settle for a returning one.
+   *
+   * With a roster of ten, everyone has usually joined a conversation within
+   * its first half minute. Excluding participants outright then meant no
+   * one was left to speak, and the room went quiet at exactly the moment it
+   * should have been busiest — measured as half of all emit slots lost at
+   * two messages a second.
+   */
+  const fresh = new Set(barred);
+  for (const id of participants) fresh.add(id);
+  return population.pickSpeaker(now, fresh, pick) ?? population.pickSpeaker(now, barred, pick);
 }

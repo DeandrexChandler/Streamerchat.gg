@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  DEFAULT_SETTINGS,
-  type SimulationSettings,
-} from "@/lib/config/settings";
+import type { SimulationSettings } from "@/lib/config/settings";
 import { useStoredSettings } from "@/lib/react/use-stored-settings";
 import {
   Card,
@@ -73,35 +70,9 @@ export default function ChatSettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Audience</CardTitle>
+          <CardTitle>Display</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          <Field
-            id="audience-size"
-            label="Viewers"
-            hint="Above a few hundred this is a displayed viewer count, not a headcount — a real stream with 10,000 viewers still only has a few dozen talking."
-          >
-            <Input
-              id="audience-size"
-              type="number"
-              min={5}
-              max={10000}
-              value={settings.audienceSize}
-              onChange={(e) =>
-                update({
-                  audienceSize: clamp(
-                    Number(e.target.value),
-                    5,
-                    10000,
-                    DEFAULT_SETTINGS.audienceSize,
-                  ),
-                })
-              }
-            />
-          </Field>
-
-          <Separator />
-
           <label
             htmlFor="timestamps"
             className="flex cursor-pointer items-start justify-between gap-4"
@@ -253,10 +224,4 @@ function toList(raw: string): string[] {
     .split(",")
     .map((word) => word.trim())
     .filter(Boolean);
-}
-
-/** Keeps a typed value in range, falling back when the field is cleared. */
-function clamp(value: number, min: number, max: number, fallback: number) {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.min(max, Math.max(min, value));
 }

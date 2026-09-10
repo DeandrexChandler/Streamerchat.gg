@@ -1,5 +1,5 @@
 import type { SimulationSettings } from "../config/settings";
-import { DEFAULT_SETTINGS, MAX_SIMULATED_VIEWERS } from "../config/settings";
+import { DEFAULT_SETTINGS } from "../config/settings";
 import type {
   CandidateRequest,
   GenerationPhase,
@@ -18,6 +18,12 @@ import {
 } from "./generation";
 import { Population } from "./population";
 import { createFilter, type Filter } from "./profanity";
+import {
+  MAX_CONSECUTIVE,
+  rosterSizeFor,
+  speakingCooldownFor,
+  turnoverIntervalFor,
+} from "./roster";
 import { createRng, type Rng } from "./rng";
 import { Scheduler } from "./scheduler";
 import { TopicTracker, type Topic } from "./topics";
@@ -71,12 +77,26 @@ const RATE_GAIN = 1.2;
  *
  * Greeting and farewell are once per session: you arrive once and you leave
  * once. Nothing else is listed, and that is the point — reacting twice to a
- * fight, or firing off two lines while typing fast, is what people do.
+ * fight, or firing off two lines while typing fast, is what people do. The
+ * intent on a batch is the *streamer's*; a viewer answering a question is
+ * not asking one, so a cooldown on "question" would throttle every reply.
  */
 const ACTION_COOLDOWN_MS: Partial<Record<Intent, number>> = {
   greeting: Number.POSITIVE_INFINITY,
   farewell: Number.POSITIVE_INFINITY,
 };
+
+/**
+ * Moments where one person firing off several lines in a row is the point.
+ *
+ * The speaking cooldown is waived for these while the moment is fresh. The
+ * consecutive cap still holds.
+ */
+const BURST_INTENTS: ReadonlySet<Intent> = new Set<Intent>([
+  "excitement",
+  "achievement",
+  "directive",
+]);
 
 /**
  * How many speakers to try before giving the tick up.
@@ -87,6 +107,9 @@ const ACTION_COOLDOWN_MS: Partial<Record<Intent, number>> = {
  * spinning.
  */
 const SPEAKER_ATTEMPTS = 4;
+
+/** How soon to try again when a slot found nobody eligible to speak. */
+const RETRY_SLOT_MS = 400;
 
 /** Chat lines kept for the prompt, so a refill does not echo them. */
 const RECENT_LINES = 20;
@@ -115,6 +138,10 @@ export interface EngineStats {
   phase: GenerationPhase;
   /** Generated lines waiting to be spoken. */
   queued: number;
+  /** Emit slots that found a line but nobody eligible to say it. */
+  slotsWaited: number;
+  /** Lines dropped because nobody in the room could ever say them. */
+  linesDropped: number;
 }
 
 /** What a batch was for, so a late reply can be recognised as stale. */
@@ -192,17 +219,13 @@ export class SimulationEngine {
   /** Paused: nothing is planned and nothing is released. */
   private paused = false;
 
-  // ------------------------------------------------------ viewer memory
+  // ------------------------------------------------------------- room
 
-  /**
-   * Every line each viewer has said this session, normalised.
-   *
-   * Session-scoped rather than a rolling window: a viewer who says "hey" in
-   * minute one and "heyyy" in minute forty has still said it twice.
-   */
-  private viewerTexts = new Map<string, Set<string>>();
-  /** Per viewer, when they last performed each conversational action. */
-  private viewerActions = new Map<string, Map<Intent, number>>();
+  /** Who spoke last, and how many times in a row. */
+  private lastSpeakerId: string | null = null;
+  private consecutive = 0;
+  /** When a regular last left and a new name arrived. */
+  private lastTurnoverAt: number;
 
   // ---------------------------------------------------------------- misc
 
@@ -214,6 +237,8 @@ export class SimulationEngine {
   private releaseTimes: number[] = [];
   private ignoredCount = 0;
   private releasedCount = 0;
+  private slotsWaited = 0;
+  private linesDropped = 0;
   private readonly sourceCounts: Record<string, number> = {};
 
   constructor(options: EngineOptions = {}) {
@@ -222,13 +247,15 @@ export class SimulationEngine {
     this.emotes = options.emotes ?? [];
     this.filter = createFilter(this.settings);
 
-    this.population = new Population(this.rng, this.simulatedViewers());
+    this.population = new Population(this.rng, rosterSizeFor(this.settings.messagesPerSecond));
+    this.population.setCooldown(speakingCooldownFor(this.settings.messagesPerSecond));
     this.scheduler = new Scheduler(this.effectiveRateLimit());
 
     const now = options.now ?? Date.now();
     this.lastSpeechAt = now;
     this.nextEmitAt = now;
     this.lastViewerDriftAt = now;
+    this.lastTurnoverAt = now;
     // Land somewhere inside the band rather than climbing to it from zero
     // while the streamer watches.
     const [low, high] = viewerBandFor(this.settings.messagesPerSecond);
@@ -246,14 +273,13 @@ export class SimulationEngine {
     return Math.ceil(this.settings.messagesPerSecond * 60 * 1.6);
   }
 
-  private simulatedViewers(): number {
-    return Math.min(this.settings.audienceSize, MAX_SIMULATED_VIEWERS);
-  }
-
   updateSettings(patch: Partial<SimulationSettings>): void {
     this.settings = { ...this.settings, ...patch };
     this.filter = createFilter(this.settings);
     this.scheduler.setRateLimit(this.effectiveRateLimit());
+    // The roster follows the tier: a faster stream is a bigger room.
+    this.population.driftToward(rosterSizeFor(this.settings.messagesPerSecond));
+    this.population.setCooldown(speakingCooldownFor(this.settings.messagesPerSecond));
   }
 
   setEmotes(emotes: readonly Emote[]): void {
@@ -277,8 +303,10 @@ export class SimulationEngine {
     this.lastClassification = null;
     this.recentLines = [];
     this.recentSpeakers = [];
-    this.viewerTexts.clear();
-    this.viewerActions.clear();
+    this.lastSpeakerId = null;
+    this.consecutive = 0;
+    this.lastTurnoverAt = now;
+    this.population.forget();
     this.topics.reset();
     this.dropBatch();
     this.scheduler.reset();
@@ -460,6 +488,10 @@ export class SimulationEngine {
 
     if (this.phase === "startup") {
       const first = this.phaseBatches === 0;
+      // The greeting wave is one hello per person. Asking for more lines than
+      // there are people leaves the rest unsayable, and a queue full of
+      // unsayable lines is a silent room.
+      const wave = first ? Math.min(count, this.population.size) : count;
       this.inFlight = {
         phase: "startup",
         utteranceId: this.utteranceId,
@@ -469,6 +501,7 @@ export class SimulationEngine {
       };
       return {
         ...shared,
+        count: wave,
         phase: "startup",
         utterance: "",
         history: [],
@@ -578,6 +611,7 @@ export class SimulationEngine {
    */
   tick(now: number): ChatMessage[] {
     this.updateViewerCount(now);
+    this.turnOver(now);
     this.topics.prune(now);
     this.emitDue(now);
 
@@ -621,8 +655,16 @@ export class SimulationEngine {
     let guard = 0;
     while (now >= this.nextEmitAt && guard++ < 32) {
       const at = this.nextEmitAt;
-      this.produceOne(at);
-      this.nextEmitAt = at + this.drawGap(at);
+      const spoke = this.produceOne(at);
+      /**
+       * A slot nobody eligible could fill is delayed, not lost.
+       *
+       * The line is still queued; someone will be off cooldown shortly. Waiting
+       * a whole gap on top of that is how a ten-person room ran at 80% of the
+       * configured rate. A short retry keeps the long-run rate honest without
+       * letting anyone speak before they may.
+       */
+      this.nextEmitAt = at + (spoke ? this.drawGap(at) : Math.min(this.drawGap(at), RETRY_SLOT_MS));
     }
   }
 
@@ -648,18 +690,32 @@ export class SimulationEngine {
    * queue topped up, so in a healthy session this only goes quiet for the
    * length of one request.
    */
-  private produceOne(at: number): void {
+  private produceOne(at: number): boolean {
     // Peeked, not popped. Consumed only once a message actually exists —
     // pulling it off first meant a tick with no available speaker silently
     // discarded a generated line.
     const reaction = this.reactions[0];
-    if (!reaction) return;
+    if (!reaction) return false;
 
     const topic = reaction.phase === "active" ? this.currentTopic(at) : null;
     const stage = topic ? this.topics.stageOf(topic, at) : "developing";
     const intent = reaction.intent ?? "mundane";
 
     const barred = this.restedFor(intent, at);
+
+    /**
+     * Nobody monopolises the room.
+     *
+     * A few lines in a row from one person is a hype moment; more than that
+     * is one account talking to itself, whatever the words are.
+     */
+    if (this.lastSpeakerId && this.consecutive >= MAX_CONSECUTIVE) {
+      barred.add(this.lastSpeakerId);
+    }
+
+    // The cooldown is waived while a hype moment is fresh.
+    const burst =
+      topic !== null && BURST_INTENTS.has(topic.intent) && stage !== "referencing";
 
     /**
      * Retried rather than dropped.
@@ -677,6 +733,7 @@ export class SimulationEngine {
         reaction,
         phase: reaction.phase ?? this.phase,
         excludeSpeakers: barred,
+        burst,
         population: this.population,
         settings: this.settings,
         emotes: this.emotes,
@@ -685,27 +742,34 @@ export class SimulationEngine {
         sequence: this.emitSequence++,
         rng: this.rng,
       });
-      if (!result) return;
+      if (!result) {
+        this.slotsWaited += 1;
+        return false;
+      }
 
       /**
        * Checked against the model's line as well as the rendered one: a
        * viewer who said "insane" must not say "insane KEKW" a minute later.
        * That is the same person saying the same thing with a sticker on it.
        */
-      const said = result.message.source === "ai"
-        ? [reaction.text, result.message.text]
-        : [result.message.text];
-      if (said.some((text) => this.echoesSelf(result.viewerId, text))) {
+      const said = (
+        result.message.source === "ai"
+          ? [reaction.text, result.message.text]
+          : [result.message.text]
+      ).map(normaliseSaid);
+      if (said.some((text) => this.population.hasSaid(result.viewerId, text))) {
         // This person has said this. Someone else may not have.
         barred.add(result.viewerId);
         continue;
       }
 
       this.reactions.shift();
-      for (const text of said) this.rememberSaid(result.viewerId, text, intent, at);
+      this.population.remember(result.viewerId, said, intent, at);
+      this.consecutive = result.viewerId === this.lastSpeakerId ? this.consecutive + 1 : 1;
+      this.lastSpeakerId = result.viewerId;
       if (topic) this.topics.recordParticipation(topic, result.viewerId);
       this.scheduler.enqueueAt(result.message, at);
-      return;
+      return true;
     }
 
     /**
@@ -719,13 +783,12 @@ export class SimulationEngine {
     this.reactions.shift();
     const attempts = (reaction.attempts ?? 0) + 1;
     if (attempts < 2) this.reactions.push({ ...reaction, attempts });
+    else this.linesDropped += 1;
+    this.slotsWaited += 1;
+    return false;
   }
 
-  // --------------------------------------------------------- viewer memory
-
-  private echoesSelf(viewerId: string, text: string): boolean {
-    return this.viewerTexts.get(viewerId)?.has(normaliseSaid(text)) === true;
-  }
+  // ------------------------------------------------------------------ room
 
   /**
    * Viewers who may not perform this action yet.
@@ -737,21 +800,26 @@ export class SimulationEngine {
     const cooldown = ACTION_COOLDOWN_MS[intent];
     const barred = new Set<string>();
     if (cooldown === undefined) return barred;
-    for (const [viewerId, actions] of this.viewerActions) {
-      const last = actions.get(intent);
-      if (last !== undefined && now - last < cooldown) barred.add(viewerId);
+    for (const viewer of this.population.all()) {
+      const last = this.population.lastDid(viewer.id, intent);
+      if (last !== undefined && now - last < cooldown) barred.add(viewer.id);
     }
     return barred;
   }
 
-  private rememberSaid(viewerId: string, text: string, intent: Intent, now: number): void {
-    const said = this.viewerTexts.get(viewerId) ?? new Set<string>();
-    said.add(normaliseSaid(text));
-    this.viewerTexts.set(viewerId, said);
-
-    const actions = this.viewerActions.get(viewerId) ?? new Map<Intent, number>();
-    actions.set(intent, now);
-    this.viewerActions.set(viewerId, actions);
+  /**
+   * One regular leaves, one new name arrives.
+   *
+   * Only at the faster tiers, and slowly: the roster never grows, a departed
+   * name is never reissued, and the newcomer starts with no history. Left
+   * off entirely for slow streams, where the same handful every session is
+   * the realism.
+   */
+  private turnOver(now: number): void {
+    const interval = turnoverIntervalFor(this.settings.messagesPerSecond);
+    if (interval === null || now - this.lastTurnoverAt < interval) return;
+    this.lastTurnoverAt = now;
+    if (this.population.size >= 2) this.population.churn();
   }
 
   // ------------------------------------------------------------------ misc
@@ -814,6 +882,8 @@ export class SimulationEngine {
       bySource: { ...this.sourceCounts },
       phase: this.phase,
       queued: this.reactions.length,
+      slotsWaited: this.slotsWaited,
+      linesDropped: this.linesDropped,
     };
   }
 }

@@ -1,7 +1,7 @@
 import { PERSONALITY_LIST, PERSONALITIES } from "../data/personalities";
 import { USERNAME_COLORS, generateUsername } from "../data/usernames";
 import type { Rng } from "./rng";
-import type { Viewer } from "./types";
+import type { Intent, Viewer } from "./types";
 
 /**
  * The virtual audience.
@@ -12,20 +12,25 @@ import type { Viewer } from "./types";
  * lurk, and the ability for one viewer to reply to another — none of which is
  * expressible if every line comes from a fresh random username.
  */
-/**
- * How long a viewer is excluded outright after speaking.
- *
- * Long enough to break a back-to-back exchange with themselves, short enough
- * that a regular can still carry a conversation across a burst.
- */
-const SPEAKER_COOLDOWN_MS = 6_000;
-
 /** Below this many rested viewers, the cooldown is relaxed rather than starving chat. */
 const MIN_SPEAKER_CHOICES = 3;
+
+/** Default sit-out after speaking. The engine sets a tier-aware one. */
+const DEFAULT_COOLDOWN_MS = 6_000;
+
+export interface PickOptions {
+  /**
+   * A hype moment: the cooldown is waived so a few people can fire off
+   * several lines in a row, which is what excitement looks like. The
+   * consecutive cap still holds, from the caller's exclusions.
+   */
+  burst?: boolean;
+}
 
 export class Population {
   private readonly viewers = new Map<string, Viewer>();
   private readonly takenNames = new Set<string>();
+  private cooldownMs = DEFAULT_COOLDOWN_MS;
   /**
    * Vocabulary already spent on names. Tracked separately from full names
    * because `bramble` / `littlebramble` / `wobbly_bramble` are all distinct
@@ -74,6 +79,9 @@ export class Population {
       verbosity: this.rng.float(...personality.verbosity),
       emoteAffinity: this.rng.float(...personality.emoteAffinity),
       lastSpokeAt: 0,
+      said: new Set(),
+      intents: new Map(),
+      spoken: 0,
     };
 
     this.viewers.set(viewer.id, viewer);
@@ -141,7 +149,11 @@ export class Population {
    *
    * `exclude` keeps a single burst from having one person reply to themselves.
    */
-  pickSpeaker(now: number, exclude: ReadonlySet<string> = new Set()): Viewer | undefined {
+  pickSpeaker(
+    now: number,
+    exclude: ReadonlySet<string> = new Set(),
+    options: PickOptions = {},
+  ): Viewer | undefined {
     const eligible = this.all().filter((v) => !exclude.has(v.id));
     if (eligible.length === 0) return undefined;
 
@@ -154,13 +166,14 @@ export class Population {
      *   quinn: sup
      *   quinn: heyyyy
      *
-     * Anyone who spoke very recently is removed outright — unless doing so
-     * leaves too few people to choose between, which is a real case at the
-     * lowest speed tier where the whole room is three viewers.
+     * Anyone who spoke recently is removed outright — unless doing so leaves
+     * too few people to choose between, which is a real case at the lowest
+     * speed tier where the whole room is five viewers, or unless this is a
+     * hype moment where firing off consecutive lines is the realism.
      */
-    const rested = eligible.filter(
-      (v) => now - v.lastSpokeAt >= SPEAKER_COOLDOWN_MS,
-    );
+    const rested = options.burst
+      ? eligible
+      : eligible.filter((v) => now - v.lastSpokeAt >= this.cooldownMs);
     const pool = rested.length >= MIN_SPEAKER_CHOICES ? rested : eligible;
 
     return this.rng.weighted(pool, (viewer) => {
@@ -189,6 +202,42 @@ export class Population {
   markSpoke(viewerId: string, at: number): void {
     const viewer = this.viewers.get(viewerId);
     if (viewer) viewer.lastSpokeAt = at;
+  }
+
+  /** Sit-out after speaking. Tier-aware; the engine sets it from the rate. */
+  setCooldown(ms: number): void {
+    this.cooldownMs = ms;
+  }
+
+  // ------------------------------------------------------------- memory
+
+  /** Whether this viewer has already said this, normalised. */
+  hasSaid(viewerId: string, normalised: string): boolean {
+    return this.viewers.get(viewerId)?.said.has(normalised) === true;
+  }
+
+  /** When this viewer last did this, or undefined if never. */
+  lastDid(viewerId: string, intent: Intent): number | undefined {
+    return this.viewers.get(viewerId)?.intents.get(intent);
+  }
+
+  /** Records a message against its viewer. */
+  remember(viewerId: string, normalised: readonly string[], intent: Intent, at: number): void {
+    const viewer = this.viewers.get(viewerId);
+    if (!viewer) return;
+    for (const text of normalised) viewer.said.add(text);
+    viewer.intents.set(intent, at);
+    viewer.spoken += 1;
+  }
+
+  /** A new session: everyone forgets what they said. Identities stay. */
+  forget(): void {
+    for (const viewer of this.viewers.values()) {
+      viewer.said.clear();
+      viewer.intents.clear();
+      viewer.spoken = 0;
+      viewer.lastSpokeAt = 0;
+    }
   }
 
   /** Tag multipliers for this viewer's archetype. */

@@ -123,7 +123,7 @@ describe("SimulationEngine", () => {
 
   it("reuses viewers rather than inventing a name per message", async () => {
     const { messages } = await drive(180_000, {
-      settings: { audienceSize: 12 },
+      settings: { messagesPerSecond: 0.5 },
       script: [[1000, "hey everyone"], [40_000, "chat what should i build"]],
     });
     const names = new Set(messages.map((m) => m.username));
@@ -133,7 +133,7 @@ describe("SimulationEngine", () => {
 
   it("gives a viewer a stable colour across their messages", async () => {
     const { messages } = await drive(180_000, {
-      settings: { audienceSize: 8 },
+      settings: { messagesPerSecond: 0.5 },
       script: [[1000, "hey everyone"], [40_000, "chat what should i build"]],
     });
     for (const [, lines] of byUser(messages)) {
@@ -204,8 +204,9 @@ describe("startup", () => {
     expect(messages).toHaveLength(0);
   });
 
-  it("greets once per viewer in the first wave", async () => {
-    const { messages } = await drive(12_000, { settings: { audienceSize: 40 } });
+  it("greets once per viewer in the first wave, and sizes the wave to the room", async () => {
+    const { messages, requests } = await drive(12_000, {});
+    expect(requests[0].count).toBeLessThanOrEqual(10);
     const names = messages.map((m) => m.username);
     expect(names.length).toBeGreaterThan(5);
     expect(new Set(names).size).toBe(names.length);
@@ -515,6 +516,7 @@ describe("pacing", () => {
     const at = (rate: number) => {
       const engine = new SimulationEngine({ seed: 1, now: 0, settings: { messagesPerSecond: rate } });
       engine.beginSession(0);
+      engine.handleTranscript("hey chat", 0, undefined, true);
       return engine.nextGeneration(0)!.count;
     };
     expect(at(0.2)).toBeLessThan(at(1));
@@ -580,7 +582,7 @@ describe("viewer count", () => {
 describe("viewers do not repeat themselves", () => {
   it("never lets one viewer post the same line twice in a session", async () => {
     const { messages } = await drive(300_000, {
-      settings: { audienceSize: 6 },
+      settings: { messagesPerSecond: 0.2 },
       provider: saying(["same", "fair", "true", "yeah", "real", "facts"]),
       script: [[1000, "hey"], [60_000, "hmm"], [120_000, "ok"], [180_000, "well"], [240_000, "so"]],
     });
@@ -593,7 +595,7 @@ describe("viewers do not repeat themselves", () => {
 
   it("treats hii, heyyy and hey!! as the same thing from one person", async () => {
     const { messages } = await drive(120_000, {
-      settings: { audienceSize: 4 },
+      settings: { messagesPerSecond: 0.2 },
       provider: saying(["hey", "heyyy", "hey!!", "hii", "hi"]),
       script: [[1000, "hey chat"], [40_000, "hi again"], [80_000, "hello hello"]],
     });
@@ -605,7 +607,7 @@ describe("viewers do not repeat themselves", () => {
 
   it("never lets one viewer post the same emote block twice", async () => {
     const { messages } = await drive(120_000, {
-      settings: { audienceSize: 4 },
+      settings: { messagesPerSecond: 0.2 },
       provider: saying(["KEKW", "KEKW KEKW", "KEKW KEKW KEKW"]),
       script: [[1000, "lmao"], [40_000, "lol"], [80_000, "haha"]],
     });
@@ -617,7 +619,7 @@ describe("viewers do not repeat themselves", () => {
 
   it("never lets one viewer greet twice, even across separate greetings", async () => {
     const { messages } = await drive(140_000, {
-      settings: { audienceSize: 4 },
+      settings: { messagesPerSecond: 0.2 },
       provider: saying(["yo", "hey", "sup", "hii", "hello", "wassup"]),
       script: [[1000, "hey everyone"], [90_000, "hi again chat"]],
     });
@@ -637,7 +639,7 @@ describe("viewers do not repeat themselves", () => {
 
   it("still lets a viewer come back later with something new", async () => {
     const { messages } = await drive(300_000, {
-      settings: { audienceSize: 6 },
+      settings: { messagesPerSecond: 0.2 },
       script: [[1000, "hey"], [100_000, "what do you all think"], [200_000, "okay moving on"]],
     });
     const most = Math.max(...[...byUser(messages).values()].map((lines) => lines.length));
@@ -645,13 +647,125 @@ describe("viewers do not repeat themselves", () => {
   });
 
   it("delays rather than violates when nobody eligible is left", async () => {
-    // Four viewers, one line. Four say it, then the room waits for a new
+    // Five viewers, one line. Five say it, then the room waits for a new
     // line rather than letting anyone say it twice.
     const { messages } = await drive(60_000, {
-      settings: { audienceSize: 4 },
+      settings: { messagesPerSecond: 0.2 },
       provider: saying(["insane"]),
       script: [[1000, "we just won"]],
     });
-    expect(messages.filter((m) => m.text.includes("insane")).length).toBeLessThanOrEqual(4);
+    expect(messages.filter((m) => m.text.includes("insane")).length).toBeLessThanOrEqual(5);
+  });
+});
+
+// -------------------------------------------------------------- identity
+
+describe("viewer identity", () => {
+  it.each([
+    [0.2, 5],
+    [0.5, 8],
+    [1, 10],
+    [4, 10],
+  ])("keeps the roster at %s/sec to %i people", async (rate, size) => {
+    const { engine } = await drive(5_000, { settings: { messagesPerSecond: rate } });
+    expect(engine.stats().simulated).toBe(size);
+  });
+
+  it("never shows more than ten distinct names at a slow tier", async () => {
+    const { messages } = await drive(300_000, {
+      settings: { messagesPerSecond: 1 },
+      script: [[1000, "hey"], [60_000, "what do you think"], [120_000, "let's go"], [200_000, "so anyway"]],
+    });
+    expect(messages.length).toBeGreaterThan(100);
+    expect(new Set(messages.map((m) => m.username)).size).toBeLessThanOrEqual(10);
+  });
+
+  it("keeps a name's colour and identity for the whole session", async () => {
+    const { messages } = await drive(300_000, {
+      settings: { messagesPerSecond: 2 },
+      script: [[1000, "hey"], [100_000, "what do you think"], [200_000, "let's go"]],
+    });
+    for (const [, lines] of byUser(messages)) {
+      expect(new Set(lines.map((m) => m.color)).size).toBe(1);
+      expect(new Set(lines.map((m) => m.viewerId)).size).toBe(1);
+    }
+  });
+
+  it("uses only the fixed Twitch palette", async () => {
+    const { messages } = await drive(60_000, { settings: { messagesPerSecond: 4 } });
+    for (const message of messages) expect(message.color).toMatch(/^#[0-9A-F]{6}$/);
+  });
+
+  it("turns the room over slowly at the top tier, never growing it", async () => {
+    const { messages, engine } = await drive(300_000, {
+      settings: { messagesPerSecond: 4 },
+      script: [[1000, "hey"], [100_000, "what do you think"], [200_000, "let's go"]],
+    });
+    const names = new Set(messages.map((m) => m.username));
+    // Five minutes at one swap a minute: a handful of new faces, not a feed.
+    expect(names.size).toBeGreaterThan(10);
+    expect(names.size).toBeLessThanOrEqual(16);
+    expect(engine.stats().simulated).toBe(10);
+  });
+
+  it("never turns over a slow room", async () => {
+    const { messages } = await drive(300_000, {
+      settings: { messagesPerSecond: 0.2 },
+      script: [[1000, "hey"], [100_000, "what do you think"], [200_000, "let's go"]],
+    });
+    expect(new Set(messages.map((m) => m.username)).size).toBeLessThanOrEqual(5);
+  });
+
+  it("never reissues a departed name", async () => {
+    const { messages } = await drive(300_000, {
+      settings: { messagesPerSecond: 4 },
+      script: [[1000, "hey"], [100_000, "what do you think"], [200_000, "let's go"]],
+    });
+    // One id per name and one name per id, across the whole session.
+    const byName = new Map<string, Set<string>>();
+    for (const m of messages) byName.set(m.username, (byName.get(m.username) ?? new Set()).add(m.viewerId));
+    for (const ids of byName.values()) expect(ids.size).toBe(1);
+  });
+
+  it("caps consecutive messages from one viewer at five", async () => {
+    const { messages } = await drive(120_000, {
+      settings: { messagesPerSecond: 4 },
+      script: [[1000, "LET'S GO WE WON"], [30_000, "INSANE"], [60_000, "NO WAY"]],
+    });
+    let run = 0;
+    let previous = "";
+    for (const m of messages) {
+      run = m.username === previous ? run + 1 : 1;
+      previous = m.username;
+      expect(run).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it("lets one viewer fire off consecutive lines in a hype moment", async () => {
+    const { messages } = await drive(60_000, {
+      settings: { messagesPerSecond: 4 },
+      script: [[1000, "LET'S GO WE WON"], [20_000, "THAT WAS INSANE"], [40_000, "NO WAY"]],
+    });
+    let longest = 0;
+    let run = 0;
+    let previous = "";
+    for (const m of messages) {
+      run = m.username === previous ? run + 1 : 1;
+      previous = m.username;
+      longest = Math.max(longest, run);
+    }
+    expect(longest).toBeGreaterThan(1);
+  });
+
+  it("makes people take turns outside a hype moment", async () => {
+    const { messages } = await drive(120_000, {
+      settings: { messagesPerSecond: 0.5 },
+      script: [[1000, "so yesterday something happened at work"]],
+    });
+    let backToBack = 0;
+    for (let i = 1; i < messages.length; i++) {
+      if (messages[i].username === messages[i - 1].username) backToBack += 1;
+    }
+    expect(backToBack / Math.max(1, messages.length)).toBeLessThan(0.1);
   });
 });

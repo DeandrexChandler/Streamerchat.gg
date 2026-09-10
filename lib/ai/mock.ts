@@ -78,11 +78,17 @@ const IDLE: ReadonlyArray<(stage: number) => Reaction> = [
  * would run every viewer dry inside a minute at the top tier and make the
  * harness measure the mock's poverty rather than the engine's pacing.
  */
-const VARIANTS = ["", " fr", " lmao", " tbh", " ngl", " honestly", " no way", " ok"];
+const VARIANTS = [
+  "", " fr", " lmao", " tbh", " ngl", " honestly", " no way", " ok",
+  " lol", " bro", " tho", " rn", " istg", " omg", " sheesh", " again",
+];
+
+const PREFIXES = ["", "ok ", "nah ", "wait ", "yo ", "lmao ", "bro ", "no "];
 
 function vary(reaction: Reaction, index: number): Reaction {
   const suffix = VARIANTS[Math.floor(index / 12) % VARIANTS.length];
-  return { ...reaction, text: `${reaction.text}${suffix}` };
+  const prefix = PREFIXES[Math.floor(index / (12 * VARIANTS.length)) % PREFIXES.length];
+  return { ...reaction, text: `${prefix}${reaction.text}${suffix}` };
 }
 
 export function createMockProvider(): CandidateProvider {

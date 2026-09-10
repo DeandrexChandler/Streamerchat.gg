@@ -129,6 +129,8 @@ export function useSimulator(
     bySource: {},
     phase: "startup",
     queued: 0,
+    slotsWaited: 0,
+    linesDropped: 0,
   });
   const [settings, setSettings] = useState<SimulationSettings>(DEFAULT_SETTINGS);
   const [emotes, setEmotes] = useState<Emote[]>(() => []);

@@ -113,6 +113,9 @@ engine.beginSession(0);
 const provider = createMockProvider();
 let generations = 0;
 const phases: Record<string, number> = {};
+/** Ticks where nothing generated was waiting to be said. The silence metric. */
+let dryTicks = 0;
+let totalTicks = 0;
 
 async function pump(now: number): Promise<void> {
   const request = engine.nextGeneration(now);
@@ -165,6 +168,8 @@ for (let now = 0; now <= DURATION_S * 1000; now += STEP_MS) {
   }
 
   await pump(now);
+  if (engine.pendingReactions === 0) dryTicks += 1;
+  totalTicks += 1;
   for (const message of engine.tick(now)) {
     emitted.push(message.text);
     if (lastMessageAt !== null) gaps.push(now - lastMessageAt);
@@ -202,6 +207,9 @@ for (const [label, n] of Object.entries(buckets)) {
 }
 console.log(`audience:       ${stats.audience}`);
 console.log(`by source:      ${JSON.stringify(stats.bySource)}`);
+console.log(`slots waited:   ${stats.slotsWaited} (a line was queued but nobody eligible could say it yet)`);
+console.log(`lines dropped:  ${stats.linesDropped} (nobody in the room could ever say them)`);
+console.log(`dry ticks:      ${dryTicks} of ${totalTicks} (${((100 * dryTicks) / Math.max(1, totalTicks)).toFixed(1)}%) — ticks with nothing queued to say`);
 console.log(`AI batches:     ${generations} (${(generations / (DURATION_S / 60)).toFixed(1)}/min) ${JSON.stringify(phases)}`);
 
 // Length distribution is the other pacing health check. Real chat is

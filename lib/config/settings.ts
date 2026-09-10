@@ -10,17 +10,6 @@ import { z } from "zod";
  */
 export const SimulationSettingsSchema = z.object({
   /**
-   * Displayed concurrent viewers. Cosmetic above MAX_SIMULATED_VIEWERS.
-   *
-   * A real stream with 10,000 viewers does not have 10,000 people talking —
-   * it has a few dozen, drawn from a huge silent pool. Simulating ten thousand
-   * distinct identities would burn memory and username vocabulary to produce
-   * output indistinguishable from a few hundred, so the number above the cap
-   * only drives the viewer count and how fast the roster turns over.
-   */
-  audienceSize: z.number().int().min(5).max(10_000).default(50),
-
-  /**
    * Target output rate, in messages per second.
    *
    * An explicit unit rather than the old 0.25-12 multiplier, so the setting,
@@ -41,9 +30,6 @@ export const SimulationSettingsSchema = z.object({
    * IDLE_FULL_AFTER_MS in the engine for the ramp.
    */
   idleAfterSeconds: z.number().min(5).max(300).default(60),
-
-  /** Probability that a message replies to another viewer instead of the streamer. */
-  sideConversationChance: z.number().min(0).max(0.6).default(0.12),
 
   emotesEnabled: z.boolean().default(true),
 
@@ -82,15 +68,6 @@ export const SimulationSettingsSchema = z.object({
 });
 
 export type SimulationSettings = z.infer<typeof SimulationSettingsSchema>;
-
-/**
- * Hard ceiling on distinct simulated viewers.
- *
- * Beyond this the audience setting is a label, not a headcount. Picked so the
- * username vocabulary never runs dry and the weighted speaker pick stays cheap
- * at the tick rate.
- */
-export const MAX_SIMULATED_VIEWERS = 300;
 
 export const DEFAULT_SETTINGS: SimulationSettings =
   SimulationSettingsSchema.parse({});
