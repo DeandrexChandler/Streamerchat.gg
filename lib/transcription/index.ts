@@ -1,25 +1,21 @@
-import { MockProvider } from "./mock";
 import type { TranscriptionProvider } from "./provider";
 import { WebSpeechProvider } from "./web-speech";
 
 export type { TranscriptionProvider, TranscriptionEvents } from "./provider";
-export { MockProvider, DEMO_SCRIPT } from "./mock";
 export { WebSpeechProvider } from "./web-speech";
 
-export type ProviderId = "web-speech" | "mock";
-
 /**
- * Builds a provider, falling back to mock when the requested one can't run.
+ * The browser's speech recognition, or nothing.
  *
- * Falling back rather than throwing is deliberate: a user on an unsupported
- * browser should still see the simulator work, with a clear notice, rather
- * than a dead page.
+ * There used to be a fallback to a scripted transcript on unsupported
+ * browsers. With chat generated from what the streamer says, a script is
+ * not a demo — it is fake speech being sent to a paid model. On a browser
+ * without recognition the microphone simply does not transcribe; typed
+ * input still works, and the notice says which browsers do.
  */
-export function createProvider(id: ProviderId): TranscriptionProvider {
-  if (id === "mock") return new MockProvider();
-
+export function createProvider(): TranscriptionProvider | null {
   const webSpeech = new WebSpeechProvider();
-  return webSpeech.isSupported() ? webSpeech : new MockProvider();
+  return webSpeech.isSupported() ? webSpeech : null;
 }
 
 export function isSpeechRecognitionAvailable(): boolean {

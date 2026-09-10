@@ -72,6 +72,13 @@ const SPEED_LABELS = [
 ] as const;
 
 
+/** What the room is doing, in the streamer's words rather than the engine's. */
+const PHASE_LABELS: Record<EngineStats["phase"], string> = {
+  startup: "Arriving",
+  active: "Reacting",
+  idle: "Idle",
+};
+
 export interface ControlPanelProps {
   status: SimulatorStatus;
   stats: EngineStats;
@@ -115,11 +122,6 @@ export function ControlPanel({
 
       <div className="space-y-2.5 border-t border-gray-200 pt-4 dark:border-gray-700">
         <Toggle
-          label="Idle chatter"
-          checked={settings.idleEnabled}
-          onChange={(idleEnabled) => onChange({ idleEnabled })}
-        />
-        <Toggle
           label="Emotes"
           checked={settings.emotesEnabled}
           onChange={(emotesEnabled) => onChange({ emotesEnabled })}
@@ -141,6 +143,10 @@ export function ControlPanel({
         <Stat label="Viewers" value={stats.audience} format={formatCount} />
         <Stat label="Messages" value={stats.released} />
         <Stat label="Ignored" value={stats.ignored} />
+        <div className="flex justify-between">
+          <span>Chat</span>
+          <span className="text-gray-700 dark:text-gray-300">{PHASE_LABELS[stats.phase]}</span>
+        </div>
 
         <button
           type="button"

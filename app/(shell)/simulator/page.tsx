@@ -1,7 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Maximize2, Minimize2, SendHorizontal } from "lucide-react";
 import { ChatList } from "@/app/components/chat/ChatList";
 import { useSimulator } from "@/lib/react/use-simulator";
@@ -20,9 +19,7 @@ import { TranscriptPanel } from "./TranscriptPanel";
  * rather than as a chat. Do not change `w-96` to `flex-1`.
  */
 function Simulator() {
-  const params = useSearchParams();
-  // ?demo=1 replays a scripted session with no microphone.
-  const simulator = useSimulator(params.get("demo") ? "mock" : "web-speech");
+  const simulator = useSimulator();
   const { status, messages, settings } = simulator;
 
   const live = status === "running";
@@ -274,11 +271,7 @@ function Simulator() {
 }
 
 export default function SimulatorPage() {
-  return (
-    <Suspense fallback={null}>
-      <Simulator />
-    </Suspense>
-  );
+  return <Simulator />;
 }
 
 /**

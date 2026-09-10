@@ -96,37 +96,6 @@ export default function ChatSettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>AI variety</CardTitle>
-          <CardDescription>
-            Optional. Chat works fully without it — the AI only adds phrasings
-            the built-in pools would never contain, and an outage or a missing
-            key just means slightly less variety.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <Field
-            id="ai-share"
-            label="How much AI"
-            hint="Share of substantive messages. Emotes and one-word reactions never use it, so the real figure is well under this."
-          >
-            <select
-              id="ai-share"
-              value={String(settings.aiShare)}
-              onChange={(e) => update({ aiShare: Number(e.target.value) })}
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-            >
-              <option value="0">Off — fully offline</option>
-              <option value="0.05">Light (default)</option>
-              <option value="0.12">Medium</option>
-              <option value="0.25">Heavy</option>
-            </select>
-          </Field>
-
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <CardTitle>Filtering</CardTitle>
           <CardDescription>
             This output goes on a live broadcast. Slurs are dropped in every

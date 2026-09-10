@@ -19,18 +19,6 @@ export const SimulationSettingsSchema = z.object({
    */
   messagesPerSecond: z.number().min(0.2).max(4).default(1),
 
-  /** Idle chatter when the streamer goes quiet. */
-  idleEnabled: z.boolean().default(true),
-  /**
-   * Seconds of silence before idle chatter starts blending in.
-   *
-   * Sixty, not fourteen. Idle is what chat does when the streamer has actually
-   * stopped, and at fourteen seconds it was interrupting ordinary pauses for
-   * breath. Reaching this point does not switch idle on outright — see
-   * IDLE_FULL_AFTER_MS in the engine for the ramp.
-   */
-  idleAfterSeconds: z.number().min(5).max(300).default(60),
-
   emotesEnabled: z.boolean().default(true),
 
   /**
@@ -46,17 +34,6 @@ export const SimulationSettingsSchema = z.object({
   blockedWords: z.array(z.string()).default([]),
   /** Words exempted from the built-in filter. */
   allowedWords: z.array(z.string()).default([]),
-
-  /**
-   * Probability that a *substantive* message is drawn from the AI tier.
-   * 0 = fully offline.
-   *
-   * Note this is not a share of all traffic. AI is only ever used for
-   * "engaged"/"invested" messages, which are a minority by design — spending
-   * a model call to produce "W" or an emote would be pure waste. Effective
-   * AI usage lands well under this number.
-   */
-  aiShare: z.number().min(0).max(0.4).default(0.05),
 
   /** Optional context so chat can reference the streamer and what they're doing. */
   streamerName: z.string().max(40).default(""),

@@ -21,7 +21,7 @@ import {
 import type { ChatMessage } from "../engine/types";
 import { loadOverlayKey } from "../config/overlay-key";
 import { OverlayTransport } from "../overlay/transport";
-import { createProvider, type ProviderId } from "../transcription";
+import { createProvider } from "../transcription";
 import type { TranscriptionProvider } from "../transcription/provider";
 
 /**
@@ -107,13 +107,7 @@ export interface UseSimulatorResult {
   say: (text: string) => void;
 }
 
-export function useSimulator(
-  providerId: ProviderId = "web-speech",
-): UseSimulatorResult {
-  // Demo mode replays a scripted session and skips microphone capture
-  // entirely, so the whole pipeline can be seen working with no mic, no
-  // permission prompt, and no Chrome requirement.
-  const isDemo = providerId === "mock";
+export function useSimulator(): UseSimulatorResult {
   const [status, setStatus] = useState<SimulatorStatus>("idle");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [interim, setInterim] = useState("");
@@ -355,30 +349,38 @@ export function useSimulator(
     const engine = ensureEngine();
     engine.beginSession(Date.now());
 
-    if (isDemo) {
-      setMicLabel("Demo mode — no microphone");
-    } else {
-      // Mic capture and speech recognition are independent: recognition opens
-      // its own capture internally, while MicSession exists for the level
-      // meter and the loudness signal the classifier uses.
-      const mic = new MicSession();
-      micRef.current = mic;
+    // Mic capture and speech recognition are independent: recognition opens
+    // its own capture internally, while MicSession exists for the level
+    // meter and the loudness signal the classifier uses.
+    const mic = new MicSession();
+    micRef.current = mic;
 
-      mic.events.on("level", (level) => {
-        for (const handler of levelSubscribers.current) handler(level);
-      });
-      mic.events.on("error", ({ message }) => {
-        setError(message);
-        setStatus("error");
-      });
+    mic.events.on("level", (level) => {
+      for (const handler of levelSubscribers.current) handler(level);
+    });
+    mic.events.on("error", ({ message }) => {
+      setError(message);
+      setStatus("error");
+    });
 
-      const micOk = await mic.start();
-      if (!micOk) return;
-      setMicLabel(mic.label);
-    }
+    const micOk = await mic.start();
+    if (!micOk) return;
+    setMicLabel(mic.label);
 
-    const provider = createProvider(providerId);
+    const provider = createProvider();
     providerRef.current = provider;
+
+    if (!provider) {
+      // No recognition in this browser. The session still runs — arrival,
+      // idle and typed input all work — it just cannot hear you.
+      setError(
+        "Speech recognition isn't available in this browser, so the microphone won't transcribe. Typed input still works. Chrome or Edge can hear you.",
+      );
+      pausedRef.current = false;
+      startTicking();
+      setStatus("running");
+      return;
+    }
 
     provider.events.on("final", ({ text }) => {
       setInterim("");
@@ -417,16 +419,10 @@ export function useSimulator(
 
     await provider.start();
 
-    if (provider.name === "mock" && !isDemo) {
-      setError(
-        "Speech recognition is unavailable in this browser — running a scripted demo instead. Chrome or Edge is required.",
-      );
-    }
-
     pausedRef.current = false;
     startTicking();
     setStatus("running");
-  }, [status, providerId, isDemo, ensureEngine, startTicking, pump]);
+  }, [status, ensureEngine, startTicking, pump]);
 
   const stop = useCallback(() => {
     stopTicking();
@@ -465,28 +461,26 @@ export function useSimulator(
   const resume = useCallback(async () => {
     if (status !== "paused") return;
 
-    if (!isDemo) {
-      const mic = new MicSession();
-      micRef.current = mic;
-      mic.events.on("level", (level) => {
-        for (const handler of levelSubscribers.current) handler(level);
-      });
-      mic.events.on("error", ({ message }) => {
-        setError(message);
-        setStatus("error");
-      });
+    const mic = new MicSession();
+    micRef.current = mic;
+    mic.events.on("level", (level) => {
+      for (const handler of levelSubscribers.current) handler(level);
+    });
+    mic.events.on("error", ({ message }) => {
+      setError(message);
+      setStatus("error");
+    });
 
-      // Permission is already granted at this point, so this does not
-      // re-prompt — it just reopens the stream.
-      if (!(await mic.start())) return;
-      setMicLabel(mic.label);
-    }
+    // Permission is already granted at this point, so this does not
+    // re-prompt — it just reopens the stream.
+    if (!(await mic.start())) return;
+    setMicLabel(mic.label);
 
     pausedRef.current = false;
     engineRef.current?.resume(Date.now());
     void providerRef.current?.start();
     setStatus("running");
-  }, [status, isDemo]);
+  }, [status]);
 
   /**
    * Wipes the session and returns to the idle state.

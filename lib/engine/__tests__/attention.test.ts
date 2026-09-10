@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { shouldReact } from "../attention";
 import { createRng } from "../rng";
-import type { Classification, Intent, Viewer } from "../types";
+import type { Classification, Intent } from "../types";
 
 const classification = (patch: Partial<Classification> = {}): Classification => ({
   intent: "mundane",
