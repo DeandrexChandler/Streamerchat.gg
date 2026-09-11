@@ -30,8 +30,6 @@ export interface AiConfig {
    */
   maxCallsPerMinute: number;
   maxCallsPerHour: number;
-  /** Minimum gap between calls, independent of the ceilings above. */
-  cooldownMs: number;
   maxOutputTokens: number;
   /**
    * Hard cap on reactions per request.
@@ -55,32 +53,37 @@ export function loadAiConfig(): AiConfig {
     model: MODEL,
     maxCallsPerMinute: num("AI_MAX_CALLS_PER_MINUTE", 10),
     maxCallsPerHour: num("AI_MAX_CALLS_PER_HOUR", 500),
-    cooldownMs: num("AI_COOLDOWN_MS", 2_500),
     maxOutputTokens: num("AI_MAX_OUTPUT_TOKENS", 3_000),
     maxBatchSize: num("AI_MAX_BATCH_SIZE", 60),
   };
 }
 
 /** Why a request was refused, for the log line the developer actually reads. */
-export type RefusalReason = "cooldown" | "per-minute" | "per-hour" | "no-key";
+export type RefusalReason = "per-minute" | "per-hour";
 
 /**
  * Call ceilings.
  *
  * Exists to keep a session inside a sane spend and a defect from spinning on
  * the key. Not a pacing control: the engine decides when a batch is needed.
+ *
+ * There is deliberately no minimum gap between calls. There used to be one,
+ * and it refused the first reaction of a session: the arrival batch's retry
+ * had just landed, the streamer said hello, and the answer to that hello was
+ * turned away for arriving within 2.5 seconds of another call. The client
+ * only ever has one request in flight, so a gap protected nothing.
+ *
+ * The key is checked by the route per request, not here: a limiter that
+ * remembered an empty key from the first request would refuse forever after
+ * the key was added.
  */
 export class AiRateLimiter {
   private calls: number[] = [];
-  private lastCallAt = Number.NEGATIVE_INFINITY;
 
-  constructor(private readonly config: AiConfig) {}
+  constructor(private readonly config: Pick<AiConfig, "maxCallsPerMinute" | "maxCallsPerHour">) {}
 
   /** Null when a call is allowed, otherwise why it is not. */
   refusal(now: number = Date.now()): RefusalReason | null {
-    if (!this.config.apiKey) return "no-key";
-    if (now - this.lastCallAt < this.config.cooldownMs) return "cooldown";
-
     this.calls = this.calls.filter((t) => now - t < 3_600_000);
     const lastMinute = this.calls.filter((t) => now - t < 60_000).length;
 
@@ -90,7 +93,6 @@ export class AiRateLimiter {
   }
 
   record(now: number = Date.now()): void {
-    this.lastCallAt = now;
     this.calls.push(now);
   }
 

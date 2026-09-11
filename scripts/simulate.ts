@@ -19,6 +19,7 @@
 
 import { SimulationEngine } from "../lib/engine/engine";
 import { createMockProvider } from "../lib/ai/mock";
+import type { CandidateRequest } from "../lib/ai/provider";
 import { readFileSync, writeFileSync } from "node:fs";
 import { buildEmoteIndex, isEmoteOnly } from "../lib/data/emotes";
 import {
@@ -117,18 +118,31 @@ const phases: Record<string, number> = {};
 let dryTicks = 0;
 let totalTicks = 0;
 
+/** Simulated provider latency, ms. SIM_LATENCY=12000 for a bad Gemini day. */
+const LATENCY_MS = Number(process.env.SIM_LATENCY ?? 0);
+const landing: Array<{ at: number; ticket: number; request: CandidateRequest }> = [];
+
+async function deliver(now: number): Promise<void> {
+  while (landing.length > 0 && landing[0].at <= now) {
+    const { ticket, request } = landing.shift()!;
+    const result = await provider.generate(request);
+    if (result.status === "ok" && result.reactions.length > 0) {
+      engine.supplyReactions(result.reactions, now, ticket);
+    } else {
+      engine.generationFailed(now, ticket);
+    }
+  }
+}
+
 async function pump(now: number): Promise<void> {
+  await deliver(now);
   const request = engine.nextGeneration(now);
   if (!request) return;
   generations += 1;
   const key = request.phase + (request.continuation ? "+" : "") + (request.idleStage ? request.idleStage : "");
   phases[key] = (phases[key] ?? 0) + 1;
-  const result = await provider.generate(request);
-  if (result.status === "ok" && result.reactions.length > 0) {
-    engine.supplyReactions(result.reactions, now);
-  } else {
-    engine.generationFailed(now);
-  }
+  landing.push({ at: now + LATENCY_MS, ticket: engine.generationTicket!, request });
+  await deliver(now);
 }
 
 const clock = (ms: number) => {
@@ -210,6 +224,7 @@ console.log(`by source:      ${JSON.stringify(stats.bySource)}`);
 console.log(`slots waited:   ${stats.slotsWaited} (a line was queued but nobody eligible could say it yet)`);
 console.log(`lines dropped:  ${stats.linesDropped} (nobody in the room could ever say them)`);
 console.log(`dry ticks:      ${dryTicks} of ${totalTicks} (${((100 * dryTicks) / Math.max(1, totalTicks)).toFixed(1)}%) — ticks with nothing queued to say`);
+console.log(`latency:        ${LATENCY_MS}ms simulated, planner sizing against ${stats.latencyMs}ms`);
 console.log(`AI batches:     ${generations} (${(generations / (DURATION_S / 60)).toFixed(1)}/min) ${JSON.stringify(phases)}`);
 
 // Length distribution is the other pacing health check. Real chat is

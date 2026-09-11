@@ -12,39 +12,56 @@ import type { IdleStage } from "../ai/provider";
 export const IDLE_AFTER_MS = 60_000;
 
 /**
- * How long a batch should last, in seconds of chat at the configured rate.
+ * How long a batch should last, in seconds of chat at the configured rate,
+ * on top of however long the provider is taking to answer.
  *
- * Twenty seconds at the configured rate. Momentum pushes the real rate
- * above the setting during a busy stretch, so a batch drains in more like
- * fifteen — long enough that one call covers a moment, short enough that it
- * never goes stale before it is used. Measured on the harness with a
- * talkative script: four to six calls a minute at every tier, which is what
- * keeps a long session inside a few dollars. At the lowest tier the floor keeps a batch
- * from being a single line.
+ * Twenty seconds of chat per call keeps a long session inside a few dollars
+ * — measured at four to six calls a minute at every tier. The latency term
+ * is what keeps the room continuous when the provider is slow: a batch has
+ * to outlast the wait for the next one, or the queue runs dry while the
+ * refill is still on the wire. Gemini answered in about a second when the
+ * model was chosen and in ten to fifteen on a bad day; the engine measures
+ * which day it is and sizes accordingly. At the lowest tier the floor keeps
+ * a batch from being a single line.
  */
 const BATCH_SECONDS = 20;
 const MIN_BATCH = 8;
 const MAX_BATCH = 60;
 
-/** Lines left in the queue when the next batch is requested. */
-const LOW_WATER_SECONDS = 4;
+/**
+ * Lines left in the queue when the next batch is requested: enough to
+ * cover the provider's latency plus a margin, but never so many that the
+ * refill fires the moment a batch lands.
+ */
+const LOW_WATER_MARGIN_S = 5;
 const MIN_LOW_WATER = 2;
+const LOW_WATER_MAX_SHARE = 0.75;
+
+/** What to assume before any reply has been measured. */
+export const INITIAL_LATENCY_MS = 4_000;
 
 /**
  * How long to wait after a failed generation before asking again.
  *
- * Without this a dead key would be retried at the server's cooldown rate
- * forever. With it, an outage costs one quiet stretch per attempt and the
- * session keeps trying on its own.
+ * Without this a dead key would be retried every tick. With it, an outage
+ * costs one quiet stretch per attempt and the session keeps trying on its
+ * own. Short, because the server already retried once before saying no:
+ * by the time this fires two attempts have failed, and a third is likely
+ * to succeed a few seconds later (Gemini's 503s are brief). Eight seconds
+ * here, on top of a slow first call, was most of why a room could stay
+ * quiet for a minute after Play.
  */
-export const FAILURE_BACKOFF_MS = 8_000;
+export const FAILURE_BACKOFF_MS = 3_000;
 
-export function batchSizeFor(messagesPerSecond: number): number {
-  return Math.max(MIN_BATCH, Math.min(MAX_BATCH, Math.round(messagesPerSecond * BATCH_SECONDS)));
+export function batchSizeFor(messagesPerSecond: number, latencyMs = INITIAL_LATENCY_MS): number {
+  const seconds = BATCH_SECONDS + latencyMs / 1000;
+  return Math.max(MIN_BATCH, Math.min(MAX_BATCH, Math.round(messagesPerSecond * seconds)));
 }
 
-export function lowWaterFor(messagesPerSecond: number): number {
-  return Math.max(MIN_LOW_WATER, Math.round(messagesPerSecond * LOW_WATER_SECONDS));
+export function lowWaterFor(messagesPerSecond: number, latencyMs = INITIAL_LATENCY_MS): number {
+  const runway = Math.round(messagesPerSecond * (latencyMs / 1000 + LOW_WATER_MARGIN_S));
+  const ceiling = Math.floor(batchSizeFor(messagesPerSecond, latencyMs) * LOW_WATER_MAX_SHARE);
+  return Math.max(MIN_LOW_WATER, Math.min(runway, ceiling));
 }
 
 /**

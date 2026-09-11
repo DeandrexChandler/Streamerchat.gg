@@ -27,6 +27,8 @@ interface DriveOptions {
   settings?: Partial<SimulationSettings>;
   emotes?: readonly typeof FIXTURE_EMOTES[number][];
   provider?: CandidateProvider;
+  /** Simulated provider latency. Replies land this long after the request. */
+  latencyMs?: number;
   /** [ms, text] — what the streamer says and when. */
   script?: ReadonlyArray<readonly [number, string]>;
   /** Called on every tick, after the pump. */
@@ -50,20 +52,30 @@ async function drive(durationMs: number, options: DriveOptions = {}): Promise<Se
   const session: Session = { engine, messages: [], requests: [] };
   const script = [...(options.script ?? [])];
 
+  const landing: Array<{ at: number; ticket: number; request: CandidateRequest }> = [];
+
   engine.beginSession(0);
   for (let now = 0; now <= durationMs; now += 250) {
     while (script.length > 0 && script[0][0] <= now) {
       engine.handleTranscript(script.shift()![1], now, undefined, true);
     }
+    const deliver = async () => {
+      while (landing.length > 0 && landing[0].at <= now) {
+        const { ticket, request } = landing.shift()!;
+        const result = await provider.generate(request);
+        if (result.status === "ok" && result.reactions.length > 0) {
+          engine.supplyReactions(result.reactions, now, ticket);
+        } else {
+          engine.generationFailed(now, ticket);
+        }
+      }
+    };
+    await deliver();
     const request = engine.nextGeneration(now);
     if (request) {
       session.requests.push(request);
-      const result = await provider.generate(request);
-      if (result.status === "ok" && result.reactions.length > 0) {
-        engine.supplyReactions(result.reactions, now);
-      } else {
-        engine.generationFailed(now);
-      }
+      landing.push({ at: now + (options.latencyMs ?? 0), ticket: engine.generationTicket!, request });
+      await deliver();
     }
     session.messages.push(...engine.tick(now));
     options.onTick?.(session, now);
@@ -291,12 +303,58 @@ describe("active generation", () => {
     expect(dry / ticks).toBeLessThan(0.05);
   });
 
+  it("stays continuous on a slow provider by sizing against measured latency", async () => {
+    // Twelve-second replies, the way Gemini answered on a bad day. After the
+    // first batches have measured it, the queue must not run dry.
+    let dry = 0;
+    let ticks = 0;
+    const { engine } = await drive(240_000, {
+      latencyMs: 12_000,
+      script: [[1000, "hey chat"]],
+      onTick: ({ engine }, now) => {
+        if (now < 60_000) return;
+        ticks += 1;
+        if (engine.pendingReactions === 0) dry += 1;
+      },
+    });
+    expect(engine.stats().latencyMs).toBeGreaterThan(8_000);
+    expect(dry / ticks).toBeLessThan(0.05);
+  });
+
+  it("learns the provider's latency even from a reply it abandoned", () => {
+    // On a slow day the arrival batch is the first thing abandoned — the
+    // streamer speaks before it lands — and it is also the first measurement.
+    const engine = new SimulationEngine({ seed: 1, now: 0 });
+    engine.beginSession(0);
+    engine.nextGeneration(0);
+    const arrival = engine.generationTicket!;
+    engine.handleTranscript("hey chat", 2_000, undefined, true);
+    engine.nextGeneration(2_000);
+    engine.supplyReactions([{ text: "hi" }], 15_000, arrival);
+    expect(engine.stats().latencyMs).toBeGreaterThan(8_000);
+  });
+
+  it("asks for bigger batches, earlier, when the provider is slow", () => {
+    const at = (latency: number) => {
+      const engine = new SimulationEngine({ seed: 1, now: 0, settings: { messagesPerSecond: 1 } });
+      engine.beginSession(0);
+      engine.nextGeneration(0);
+      engine.supplyReactions([{ text: "hi" }], latency);
+      engine.handleTranscript("look at this roof", latency, undefined, true);
+      engine.nextGeneration(latency);
+      engine.supplyReactions([{ text: "nice" }], latency * 2);
+      return engine.nextGeneration(latency * 2 + 250)!.count;
+    };
+    expect(at(12_000)).toBeGreaterThan(at(1_000));
+  });
+
   it("continues the conversation when a batch drains and nobody spoke", async () => {
     const { requests } = await drive(50_000, { script: [[1000, "look at this roof"]] });
     const continuations = requests.filter((r) => r.phase === "active" && r.continuation);
     expect(continuations.length).toBeGreaterThan(0);
     expect(continuations[0].utterance).toBe("look at this roof");
-    expect(continuations[0].silenceSeconds).toBeGreaterThan(5);
+    // Requested once the first reply has started draining, not before.
+    expect(continuations[0].silenceSeconds).toBeGreaterThanOrEqual(2);
   });
 
   it("never asks twice while a request is unresolved", () => {
@@ -340,6 +398,42 @@ describe("active generation", () => {
     expect(engine.nextGeneration(1_250)?.utterance).toBe("second thing");
   });
 
+  it("ignores a reply carrying an abandoned ticket", () => {
+    // The streamer spoke during a slow arrival call. The arrival reply lands
+    // after the reaction request went out; it must not be mistaken for the
+    // reaction, and its failure must not back off the reaction either.
+    const engine = new SimulationEngine({ seed: 3, now: 0 });
+    engine.beginSession(0);
+    engine.nextGeneration(0);
+    const arrival = engine.generationTicket!;
+
+    engine.handleTranscript("hey chat", 6_000, undefined, true);
+    const reaction = engine.nextGeneration(6_000);
+    const ticket = engine.generationTicket!;
+    expect(reaction?.phase).toBe("active");
+    expect(ticket).not.toBe(arrival);
+
+    engine.supplyReactions([{ text: "hi" }], 8_000, arrival);
+    expect(engine.pendingReactions).toBe(0);
+    engine.generationFailed(8_000, arrival);
+    expect(engine.generationTicket).toBe(ticket);
+
+    engine.supplyReactions([{ text: "hey!" }], 9_000, ticket);
+    expect(engine.pendingReactions).toBe(1);
+  });
+
+  it("sizes the first reply for speed and the continuation for depth", () => {
+    const engine = new SimulationEngine({ seed: 1, now: 0, settings: { messagesPerSecond: 4 } });
+    engine.beginSession(0);
+    engine.handleTranscript("look at this roof", 0, undefined, true);
+    const first = engine.nextGeneration(0)!;
+    expect(first.count).toBeLessThanOrEqual(12);
+    engine.supplyReactions([{ text: "nice" }], 100);
+    const next = engine.nextGeneration(200)!;
+    expect(next.continuation).toBe(true);
+    expect(next.count).toBeGreaterThan(first.count);
+  });
+
   it("goes quiet, not canned, when the provider fails", async () => {
     const { messages } = await drive(40_000, { provider: dead, script: [[1000, "hey chat"]] });
     expect(messages).toHaveLength(0);
@@ -347,9 +441,28 @@ describe("active generation", () => {
 
   it("backs off after a failure rather than hammering", async () => {
     const { requests } = await drive(60_000, { provider: dead, script: [[1000, "hey chat"]] });
-    // 60s at an 8s backoff is at most about eight attempts.
-    expect(requests.length).toBeLessThan(10);
-    expect(requests.length).toBeGreaterThan(2);
+    // 60s at a 3s backoff is about twenty attempts — trying, not spinning.
+    expect(requests.length).toBeLessThan(25);
+    expect(requests.length).toBeGreaterThan(10);
+  });
+
+  it("answers the first thing said even while the arrival batch is still in flight", () => {
+    // The reported freeze: a slow arrival call, the streamer says hello
+    // during it, and the late batch must be discarded while the reaction
+    // request goes out at once.
+    const engine = new SimulationEngine({ seed: 3, now: 0 });
+    engine.beginSession(0);
+    const arrival = engine.nextGeneration(0);
+    expect(arrival?.phase).toBe("startup");
+
+    engine.handleTranscript("hey chat", 6_000, undefined, true);
+    // The arrival answer lands after the streamer spoke.
+    engine.supplyReactions([{ text: "hi" }, { text: "im early" }], 8_000);
+    expect(engine.pendingReactions).toBe(0);
+
+    const reaction = engine.nextGeneration(8_000);
+    expect(reaction?.phase).toBe("active");
+    expect(reaction?.utterance).toBe("hey chat");
   });
 
   it("recovers on its own once the provider is back", async () => {
@@ -409,17 +522,36 @@ describe("idle", () => {
     expect(stages).toEqual([1, 2, 3, 4]);
   });
 
-  it("drops the old stage's lines when the stage advances", async () => {
-    let queuedAtBoundary = -1;
-    await drive(lastWord + 150_000 + 500, {
+  it("replaces the old stage's lines when the new stage's batch lands", async () => {
+    // With an instant provider the stage-2 batch lands on the boundary tick
+    // and takes the queue over; nothing from stage 1 is spoken after it.
+    const { messages, requests } = await drive(lastWord + 150_000 + 30_000, {
+      script: [[lastWord, "okay building now"]],
+    });
+    const boundary = lastWord + 150_000;
+    expect(requests.some((r) => r.phase === "idle" && r.idleStage === 2)).toBe(true);
+    const after = messages.filter((m) => m.at > boundary + 1_000);
+    expect(after.length).toBeGreaterThan(10);
+  });
+
+  it("keeps the old lines flowing across a transition while the provider is slow", async () => {
+    // A 12s provider used to mean 12s of silence at every phase or stage
+    // change: the queue was dropped first and refilled second.
+    let dry = 0;
+    let ticks = 0;
+    await drive(lastWord + 150_000 + 40_000, {
+      latencyMs: 12_000,
       script: [[lastWord, "okay building now"]],
       onTick: ({ engine }, now) => {
-        if (now === lastWord + 150_000) queuedAtBoundary = engine.pendingReactions;
+        // Around the idle threshold and the stage-2 boundary.
+        const nearIdle = now > lastWord + 55_000 && now < lastWord + 80_000;
+        const nearStage2 = now > lastWord + 145_000 && now < lastWord + 170_000;
+        if (!nearIdle && !nearStage2) return;
+        ticks += 1;
+        if (engine.pendingReactions === 0) dry += 1;
       },
     });
-    // At the exact boundary tick the stage-1 queue was dropped and the
-    // stage-2 batch supplied in its place, so the queue holds only new lines.
-    expect(queuedAtBoundary).toBeGreaterThan(0);
+    expect(dry / ticks).toBeLessThan(0.05);
   });
 
   it("ends the instant the streamer speaks", async () => {
@@ -516,8 +648,12 @@ describe("pacing", () => {
     const at = (rate: number) => {
       const engine = new SimulationEngine({ seed: 1, now: 0, settings: { messagesPerSecond: rate } });
       engine.beginSession(0);
-      engine.handleTranscript("hey chat", 0, undefined, true);
-      return engine.nextGeneration(0)!.count;
+      // Not a greeting: a wave of hellos is sized to the room, not the tier.
+      engine.handleTranscript("look at this roof", 0, undefined, true);
+      engine.nextGeneration(0);
+      engine.supplyReactions([{ text: "nice" }], 100);
+      // The continuation carries the tier's full batch size.
+      return engine.nextGeneration(200)!.count;
     };
     expect(at(0.2)).toBeLessThan(at(1));
     expect(at(1)).toBeLessThan(at(4));
@@ -617,15 +753,34 @@ describe("viewers do not repeat themselves", () => {
     }
   });
 
-  it("never lets one viewer greet twice, even across separate greetings", async () => {
+  it("never lets one viewer greet twice in the same moment", async () => {
+    // "quinn: sup" then "quinn: heyyyy" four lines later. Arriving and then
+    // answering the streamer's hello half a minute on are two moments and
+    // the same person may do both; two hellos inside fifteen seconds is one
+    // person greeting twice.
     const { messages } = await drive(140_000, {
       settings: { messagesPerSecond: 0.2 },
       provider: saying(["yo", "hey", "sup", "hii", "hello", "wassup"]),
       script: [[1000, "hey everyone"], [90_000, "hi again chat"]],
     });
-    const greeters = messages.filter((m) => m.kind === "greeting").map((m) => m.username);
-    expect(greeters.length).toBeGreaterThan(2);
-    expect(new Set(greeters).size).toBe(greeters.length);
+    const greetings = messages.filter((m) => m.kind === "greeting");
+    expect(greetings.length).toBeGreaterThan(6);
+    for (const [, lines] of byUser(greetings)) {
+      for (let i = 1; i < lines.length; i++) {
+        expect(lines[i].at - lines[i - 1].at).toBeGreaterThan(15_000);
+      }
+    }
+  });
+
+  it("answers the streamer's hello even though everyone just said hello arriving", async () => {
+    // The freeze: ten arrivals, ten viewers marked as having greeted, and a
+    // session-long ban meant nobody could reply to "hi". The room went quiet
+    // until idle changed the subject a minute later.
+    const { messages } = await drive(45_000, { script: [[15_000, "hi chat"]] });
+    const arrivals = messages.filter((m) => m.at < 15_000);
+    const replies = messages.filter((m) => m.at >= 15_000 && m.at < 30_000);
+    expect(new Set(arrivals.map((m) => m.username)).size).toBeGreaterThanOrEqual(8);
+    expect(replies.length).toBeGreaterThan(8);
   });
 
   it("still lets different viewers say the same thing", async () => {

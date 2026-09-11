@@ -39,9 +39,12 @@ describe("AI configuration", () => {
     expect(config).not.toHaveProperty("mode");
   });
 
-  it("refuses every call with no key rather than calling anything", () => {
+  it("has no minimum gap between calls", () => {
+    // The client has one request in flight at a time; a gap protected
+    // nothing and refused the first reaction after the arrival batch.
     const limiter = new AiRateLimiter(loadAiConfig());
-    expect(limiter.refusal(0)).toBe("no-key");
+    limiter.record(0);
+    expect(limiter.refusal(1)).toBeNull();
   });
 
   it("allows a healthy continuous session's call rate", () => {
@@ -55,11 +58,10 @@ describe("AI configuration", () => {
     }
   });
 
-  it("enforces the cooldown between calls", () => {
-    process.env.GOOGLE_API_KEY = "test-key";
-    const limiter = new AiRateLimiter(loadAiConfig());
-    limiter.record(0);
-    expect(limiter.refusal(500)).toBe("cooldown");
-    expect(limiter.refusal(5_000)).toBeNull();
+  it("still holds the per-minute ceiling", () => {
+    const limiter = new AiRateLimiter({ ...loadAiConfig(), maxCallsPerMinute: 3 });
+    for (let i = 0; i < 3; i += 1) limiter.record(i);
+    expect(limiter.refusal(10)).toBe("per-minute");
+    expect(limiter.refusal(61_000)).toBeNull();
   });
 });

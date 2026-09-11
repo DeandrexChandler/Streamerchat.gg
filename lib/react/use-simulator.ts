@@ -125,6 +125,7 @@ export function useSimulator(): UseSimulatorResult {
     queued: 0,
     slotsWaited: 0,
     linesDropped: 0,
+    latencyMs: 0,
   });
   const [settings, setSettings] = useState<SimulationSettings>(DEFAULT_SETTINGS);
   const [emotes, setEmotes] = useState<Emote[]>(() => []);
@@ -138,8 +139,15 @@ export function useSimulator(): UseSimulatorResult {
   const emotesRef = useRef<Emote[]>([]);
   const pausedRef = useRef(false);
   const overlayRef = useRef<OverlayTransport | null>(null);
-  /** A generation request is on the wire. One at a time, always. */
-  const inFlightRef = useRef(false);
+  /**
+   * The generation request on the wire, if any.
+   *
+   * One at a time — but the engine decides which one. When the streamer
+   * speaks during a slow call, the engine abandons that request and hands
+   * out a new ticket; the old fetch is aborted rather than waited on, so a
+   * reaction is never held behind a fifteen-second arrival batch.
+   */
+  const inFlightRef = useRef<{ ticket: number; controller: AbortController } | null>(null);
 
   /** Level subscribers, kept outside React entirely. */
   const levelSubscribers = useRef(new Set<(level: number) => void>());
@@ -217,29 +225,42 @@ export function useSimulator(): UseSimulatorResult {
    * The engine backs off briefly and asks again on its own.
    */
   const pump = useCallback(async (engine: SimulationEngine, now: number) => {
-    if (inFlightRef.current) return;
+    // The engine hands out nothing while its current request is unresolved,
+    // so this only returns a request when there is genuinely a new one.
     const request = engine.nextGeneration(now);
     if (!request) return;
+    const ticket = engine.generationTicket;
+    if (ticket === null) return;
 
-    inFlightRef.current = true;
+    // Anything still on the wire is for a moment the engine has abandoned.
+    inFlightRef.current?.controller.abort();
+    const controller = new AbortController();
+    inFlightRef.current = { ticket, controller };
+    console.debug(`[chat] → ${request.phase}${request.continuation ? "+" : ""} ×${request.count}`);
+
     try {
       const response = await fetch("/api/chat-candidates", {
         method: "POST",
         headers: { "content-type": "application/json" },
         cache: "no-store",
         body: JSON.stringify(request),
+        signal: controller.signal,
       });
       const body = (await response.json()) as { reactions?: Reaction[]; status?: string };
 
       if (!response.ok || body.status !== "ok" || !body.reactions?.length) {
-        engine.generationFailed(Date.now());
+        console.debug(`[chat] ← nothing for ${request.phase} (the server log says why)`);
+        engine.generationFailed(Date.now(), ticket);
         return;
       }
-      engine.supplyReactions(body.reactions, Date.now());
-    } catch {
-      engine.generationFailed(Date.now());
+      console.debug(`[chat] ← ${body.reactions.length} lines for ${request.phase}`);
+      engine.supplyReactions(body.reactions, Date.now(), ticket);
+    } catch (error) {
+      // An abort is the engine having moved on; there is nothing to report.
+      if (!controller.signal.aborted) engine.generationFailed(Date.now(), ticket);
+      void error;
     } finally {
-      inFlightRef.current = false;
+      if (inFlightRef.current?.ticket === ticket) inFlightRef.current = null;
     }
   }, []);
 
@@ -349,6 +370,19 @@ export function useSimulator(): UseSimulatorResult {
     const engine = ensureEngine();
     engine.beginSession(Date.now());
 
+    /**
+     * The room starts before the microphone does.
+     *
+     * Arrival chat, idle chat and typed input need nothing from the mic, and
+     * the mic can take a second to come up or fail outright. Waiting on it
+     * meant a denied permission left the engine loop never started and the
+     * button stuck on "Starting". Now the loop runs first and the mic joins
+     * when it can; a mic problem is reported, not fatal.
+     */
+    pausedRef.current = false;
+    startTicking();
+    setStatus("running");
+
     // Mic capture and speech recognition are independent: recognition opens
     // its own capture internally, while MicSession exists for the level
     // meter and the loudness signal the classifier uses.
@@ -360,11 +394,14 @@ export function useSimulator(): UseSimulatorResult {
     });
     mic.events.on("error", ({ message }) => {
       setError(message);
-      setStatus("error");
     });
 
     const micOk = await mic.start();
-    if (!micOk) return;
+    if (!micOk) {
+      // The error event above already said why. Chat carries on without it.
+      micRef.current = null;
+      return;
+    }
     setMicLabel(mic.label);
 
     const provider = createProvider();
@@ -376,9 +413,6 @@ export function useSimulator(): UseSimulatorResult {
       setError(
         "Speech recognition isn't available in this browser, so the microphone won't transcribe. Typed input still works. Chrome or Edge can hear you.",
       );
-      pausedRef.current = false;
-      startTicking();
-      setStatus("running");
       return;
     }
 
@@ -418,11 +452,7 @@ export function useSimulator(): UseSimulatorResult {
     });
 
     await provider.start();
-
-    pausedRef.current = false;
-    startTicking();
-    setStatus("running");
-  }, [status, ensureEngine, startTicking, pump]);
+  }, [status, ensureEngine, startTicking]);
 
   const stop = useCallback(() => {
     stopTicking();
@@ -498,7 +528,8 @@ export function useSimulator(): UseSimulatorResult {
     micRef.current = null;
     engineRef.current?.flush();
     engineRef.current = null;
-    inFlightRef.current = false;
+    inFlightRef.current?.controller.abort();
+    inFlightRef.current = null;
     pausedRef.current = false;
 
     // Wipe the browser source as well. Leaving the last few messages frozen on

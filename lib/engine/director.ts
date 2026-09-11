@@ -281,7 +281,7 @@ function isEmoteOnly(text: string, emotes: readonly Emote[]): boolean {
 }
 
 /** Intents where one message per viewer is the whole of what a person says. */
-const ONE_SHOT_INTENTS = new Set<Intent>(["greeting", "farewell"]);
+export const ONE_SHOT_INTENTS: ReadonlySet<Intent> = new Set<Intent>(["greeting", "farewell"]);
 
 /**
  * Who speaks next in a topic.

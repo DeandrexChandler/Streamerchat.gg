@@ -35,7 +35,7 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
  * an empty batch, which the client treats as "nothing to add" rather than as a
  * failure, so the cost of the remaining outliers is one skipped refill.
  */
-const TIMEOUT_MS = 20_000;
+const TIMEOUT_MS = 30_000;
 
 /**
  * Chosen by measuring, not by headline rates.

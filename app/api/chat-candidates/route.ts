@@ -47,7 +47,12 @@ export interface HandlerDeps {
   limiter: AiRateLimiter;
   httpLimiter: RateLimiter;
   log?: Pick<Console, "log" | "warn">;
+  /** Waits before the retry. Injectable so tests need not. */
+  pause?: (ms: number) => Promise<void>;
 }
+
+/** Breathing room before the one retry. */
+const RETRY_PAUSE_MS = 750;
 
 const unavailable = (): BatchResponse => ({ reactions: [], status: "unavailable" });
 
@@ -94,6 +99,13 @@ export function createCandidatesHandler(deps: HandlerDeps) {
     const count = Math.min(candidateRequest.count, config.maxBatchSize);
     const label = describe(candidateRequest);
 
+    // Checked per request, never cached: a key added after the first call
+    // must start working on the next one.
+    if (!config.apiKey) {
+      log.warn(`[ai] REFUSED (no-key) | ${label}`);
+      return NextResponse.json(unavailable(), noStore);
+    }
+
     const refusal = limiter.refusal();
     if (refusal) {
       log.warn(`[ai] REFUSED (${refusal}) | ${label}`);
@@ -110,6 +122,9 @@ export function createCandidatesHandler(deps: HandlerDeps) {
      * neither. The next batch will try again on its own.
      */
     for (let attempt = 1; attempt <= 2; attempt += 1) {
+      // A beat before the retry. Gemini's 503 is "overloaded"; asking again
+      // in the same instant tends to get the same answer.
+      if (attempt > 1) await deps.pause?.(RETRY_PAUSE_MS);
       limiter.record();
       const started = Date.now();
       const generated = await provider.generate({ ...candidateRequest, count });
@@ -177,6 +192,7 @@ export async function POST(request: Request) {
       maxOutputTokens: config.maxOutputTokens,
     }),
     limiter: (globalRef.__aiLimiter ??= new AiRateLimiter(config)),
+    pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     httpLimiter: (globalRef.__aiHttpLimiter ??= new RateLimiter({
       windowMs: 60_000,
       maxRequests: 60,

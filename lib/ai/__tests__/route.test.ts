@@ -17,7 +17,6 @@ const config: AiConfig = {
   model: "gemini-3.5-flash-lite",
   maxCallsPerMinute: 100,
   maxCallsPerHour: 1000,
-  cooldownMs: 0,
   maxOutputTokens: 2000,
   maxBatchSize: 40,
 };
@@ -188,5 +187,60 @@ describe("chat-candidates route", () => {
     const { handler } = make(provider, { maxBatchSize: 5 });
     await handler(post({ ...body, count: 40 }));
     expect(requested).toBe(5);
+  });
+
+  it("never refuses a request for arriving right after another", async () => {
+    // The first reaction of a session follows the arrival batch by however
+    // long it takes the streamer to say hello. A gap between calls refused
+    // exactly that request and left the room quiet for its whole backoff.
+    const provider = scripted([ok(["hi"]), ok(["hey chat"]), ok(["W"])]);
+    const { handler } = make(provider);
+    for (let i = 0; i < 3; i += 1) {
+      const res = await read(await handler(post()));
+      expect(res.status).toBe("ok");
+    }
+    expect(provider.calls).toBe(3);
+  });
+
+  it("pauses briefly before the retry", async () => {
+    const waits: number[] = [];
+    const provider = scripted([{ reactions: [], status: "network" }, ok(["W"])]);
+    const log = { log: vi.fn(), warn: vi.fn() };
+    const handler = createCandidatesHandler({
+      config,
+      provider,
+      limiter: new AiRateLimiter(config),
+      httpLimiter: new RateLimiter({ windowMs: 60_000, maxRequests: 1000 }),
+      log,
+      pause: async (ms) => {
+        waits.push(ms);
+      },
+    });
+    const res = await read(await handler(post()));
+    expect(res.status).toBe("ok");
+    expect(waits).toEqual([750]);
+  });
+
+  it("reads the key per request, so one added later starts working", async () => {
+    // Same limiter across both calls, as in the running server.
+    const limiter = new AiRateLimiter(config);
+    const provider = scripted([ok(["W"])]);
+    const without = createCandidatesHandler({
+      config: { ...config, apiKey: "" },
+      provider,
+      limiter,
+      httpLimiter: new RateLimiter({ windowMs: 60_000, maxRequests: 1000 }),
+      log: { log: vi.fn(), warn: vi.fn() },
+    });
+    expect((await read(await without(post()))).status).toBe("unavailable");
+
+    const withKey = createCandidatesHandler({
+      config,
+      provider,
+      limiter,
+      httpLimiter: new RateLimiter({ windowMs: 60_000, maxRequests: 1000 }),
+      log: { log: vi.fn(), warn: vi.fn() },
+    });
+    expect((await read(await withKey(post()))).status).toBe("ok");
   });
 });

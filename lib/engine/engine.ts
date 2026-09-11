@@ -9,9 +9,10 @@ import type { QueuedReaction, Reaction } from "../ai/reaction";
 import { MAX_EMOTES_IN_PROMPT } from "../ai/prompt";
 import { shouldReact } from "./attention";
 import { classify } from "./classifier";
-import { directOne } from "./director";
+import { ONE_SHOT_INTENTS, directOne } from "./director";
 import {
   FAILURE_BACKOFF_MS,
+  INITIAL_LATENCY_MS,
   batchSizeFor,
   idleStageFor,
   lowWaterFor,
@@ -75,15 +76,20 @@ const RATE_GAIN = 1.2;
  * and "hey man !" share no words and are still one person greeting twice,
  * which is the half of the reported bug that text matching cannot see.
  *
- * Greeting and farewell are once per session: you arrive once and you leave
- * once. Nothing else is listed, and that is the point — reacting twice to a
- * fight, or firing off two lines while typing fast, is what people do. The
- * intent on a batch is the *streamer's*; a viewer answering a question is
- * not asking one, so a cooldown on "question" would throttle every reply.
+ * Greeting and farewell get a long cooldown, not a session ban. A ban froze
+ * the room: the arrival wave is one hello from each of the ten people in
+ * it, so when the streamer then said "hi", every viewer was barred from
+ * answering and the batch drained unsaid until idle. Someone who said hi
+ * on the way in does say hey back when the streamer greets them; what they
+ * do not do is say it twice in the same moment — the per-topic rule in the
+ * director covers that. Nothing else is listed, and that is the point:
+ * reacting twice to a fight is what people do, and the intent on a batch
+ * is the *streamer's*, so a cooldown on "question" would throttle every
+ * reply to one.
  */
 const ACTION_COOLDOWN_MS: Partial<Record<Intent, number>> = {
-  greeting: Number.POSITIVE_INFINITY,
-  farewell: Number.POSITIVE_INFINITY,
+  greeting: 45_000,
+  farewell: 45_000,
 };
 
 /**
@@ -110,6 +116,16 @@ const SPEAKER_ATTEMPTS = 4;
 
 /** How soon to try again when a slot found nobody eligible to speak. */
 const RETRY_SLOT_MS = 400;
+
+/** Lines in the first batch after the streamer says something. */
+const FIRST_REPLY_LINES = 12;
+
+/**
+ * Above this latency a small first batch buys nothing: the round trip
+ * dominates, and a batch that drains before the follow-up lands just adds
+ * a gap. Ask for the full batch instead.
+ */
+const SLOW_PROVIDER_MS = 6_000;
 
 /** Chat lines kept for the prompt, so a refill does not echo them. */
 const RECENT_LINES = 20;
@@ -142,15 +158,31 @@ export interface EngineStats {
   slotsWaited: number;
   /** Lines dropped because nobody in the room could ever say them. */
   linesDropped: number;
+  /** Smoothed provider latency the planner is sizing against. */
+  latencyMs: number;
 }
 
 /** What a batch was for, so a late reply can be recognised as stale. */
 interface Pending {
+  /** Ticket. A reply carrying another ticket is for a moment that has passed. */
+  id: number;
+  /** When it went out, so the reply measures the provider's latency. */
+  requestedAt: number;
   phase: GenerationPhase;
   /** Which streamer input it answers. Startup and idle carry none. */
   utteranceId: number;
   idleStage: IdleStage | null;
   intent: Intent;
+  /**
+   * Replaces the queue when it lands instead of joining it.
+   *
+   * Used across a phase or stage change. What is queued was written for the
+   * moment before, but it is still chat, and a room that goes silent for one
+   * provider round-trip at every transition is worse than a room that
+   * finishes its thought. So the old lines keep flowing until the new batch
+   * arrives, and are dropped then.
+   */
+  supersedes: boolean;
 }
 
 /**
@@ -211,6 +243,16 @@ export class SimulationEngine {
   private nextBatchId = 0;
   /** The request handed out by nextGeneration() and not yet resolved. */
   private inFlight: Pending | null = null;
+  private tickets = 0;
+  /**
+   * How long the provider has been taking, smoothed.
+   *
+   * Drives batch size and the refill mark: a slow provider needs bigger
+   * batches requested earlier, or the room goes quiet between them.
+   */
+  private latencyMs = INITIAL_LATENCY_MS;
+  /** When each ticket went out, kept until its reply arrives or is abandoned. */
+  private issuedAt = new Map<number, number>();
   /** What the queue currently holds, for staleness checks. */
   private current: Pending | null = null;
   private lastFailureAt = Number.NEGATIVE_INFINITY;
@@ -224,6 +266,15 @@ export class SimulationEngine {
   /** Who spoke last, and how many times in a row. */
   private lastSpeakerId: string | null = null;
   private consecutive = 0;
+  /**
+   * Who has spoken in each greeting or farewell batch.
+   *
+   * A wave of hellos is one hello per person, whatever else is true: not
+   * the cooldown, which is a preference and yields when the whole room is
+   * on it, but a hard rule scoped to the batch. Keyed by batch so a later,
+   * separate greeting is a fresh wave.
+   */
+  private waveSpeakers = new Map<number, Set<string>>();
   /** When a regular last left and a new name arrived. */
   private lastTurnoverAt: number;
 
@@ -452,8 +503,7 @@ export class SimulationEngine {
    *   - silence crossed into idle, or into a later idle stage
    */
   nextGeneration(now: number): CandidateRequest | null {
-    if (this.paused || this.inFlight) return null;
-    if (now - this.lastFailureAt < FAILURE_BACKOFF_MS) return null;
+    if (this.paused) return null;
 
     const silenceMs = now - this.lastSpeechAt;
     const stage = idleStageFor(silenceMs);
@@ -461,22 +511,34 @@ export class SimulationEngine {
     /**
      * Into idle, or deeper into it.
      *
-     * Either way what is queued was written for a room that had not yet
-     * noticed the silence, or had noticed less of it. It goes.
+     * What is queued was written for a room that had not yet noticed the
+     * silence, or had noticed less of it. It is superseded: it keeps flowing
+     * until the batch for the new stage lands, then goes. A refill already
+     * on the wire is left to land first — its lines are still chat, and on
+     * a slow provider they are the only thing between the room and twelve
+     * seconds of nothing — and the new request goes out right after.
      */
     if (stage !== null && this.phase !== "idle") {
       this.phase = "idle";
       this.phaseBatches = 0;
-      this.dropBatch();
-    } else if (stage !== null && this.current && this.current.idleStage !== stage) {
-      this.dropBatch();
     }
+    const supersede =
+      stage !== null && (this.current === null || this.current.idleStage !== stage);
 
-    if (this.reactions.length > lowWaterFor(this.settings.messagesPerSecond)) {
+    if (this.inFlight) return null;
+    if (now - this.lastFailureAt < FAILURE_BACKOFF_MS) return null;
+
+    /**
+     * Sized against the rate the room is actually running at, not the
+     * setting: momentum lifts a busy stretch well above it, and a refill
+     * planned for one a second runs dry at one and a third.
+     */
+    const rate = this.effectiveRate(now);
+    if (!supersede && this.reactions.length > lowWaterFor(rate, this.latencyMs)) {
       return null;
     }
 
-    const count = batchSizeFor(this.settings.messagesPerSecond);
+    const count = batchSizeFor(rate, this.latencyMs);
     const shared = {
       emotes: this.emotes.slice(0, MAX_EMOTES_IN_PROMPT).map((emote) => emote.name),
       recent: [...this.recentLines],
@@ -493,6 +555,9 @@ export class SimulationEngine {
       // unsayable lines is a silent room.
       const wave = first ? Math.min(count, this.population.size) : count;
       this.inFlight = {
+        id: this.issue(now),
+        requestedAt: now,
+        supersedes: false,
         phase: "startup",
         utteranceId: this.utteranceId,
         idleStage: null,
@@ -513,6 +578,9 @@ export class SimulationEngine {
 
     if (this.phase === "idle") {
       this.inFlight = {
+        id: this.issue(now),
+        requestedAt: now,
+        supersedes: supersede,
         phase: "idle",
         utteranceId: this.utteranceId,
         idleStage: stage,
@@ -533,7 +601,26 @@ export class SimulationEngine {
     // Active. Nothing to react to without something said.
     if (!this.lastClassification) return null;
     const continuation = this.current?.utteranceId === this.utteranceId;
+    /**
+     * The first reply to something said is sized for speed, not depth.
+     *
+     * Latency grows with output, and this is the batch the streamer is
+     * waiting on. A dozen lines reaches the screen sooner; the continuation
+     * that follows is full size. A wave of hellos is one per person besides:
+     * asking for more leaves the rest unsayable.
+     */
+    const quick = this.latencyMs < SLOW_PROVIDER_MS;
+    const wave = continuation
+      ? count
+      : Math.min(
+          count,
+          quick ? FIRST_REPLY_LINES : count,
+          ONE_SHOT_INTENTS.has(this.lastClassification.intent) ? this.population.size : count,
+        );
     this.inFlight = {
+      id: this.issue(now),
+      requestedAt: now,
+      supersedes: false,
       phase: "active",
       utteranceId: this.utteranceId,
       idleStage: null,
@@ -541,6 +628,7 @@ export class SimulationEngine {
     };
     return {
       ...shared,
+      count: wave,
       phase: "active",
       utterance: this.lastUtterance,
       history: this.history.slice(0, -1),
@@ -551,6 +639,27 @@ export class SimulationEngine {
   }
 
   /**
+   * The ticket of the request currently out, for the caller to hand back.
+   *
+   * The caller's network layer may still be waiting on a request the engine
+   * has already abandoned — the streamer spoke during a slow arrival call —
+   * and the reply, when it comes, must not be mistaken for the answer to
+   * the newer request.
+   */
+  get generationTicket(): number | null {
+    return this.inFlight?.id ?? null;
+  }
+
+  /** Mints the ticket for a request going out now. */
+  private issue(now: number): number {
+    const id = ++this.tickets;
+    this.issuedAt.set(id, now);
+    // Bounded: a ticket whose reply never comes would otherwise leak.
+    if (this.issuedAt.size > 32) this.issuedAt.delete(this.issuedAt.keys().next().value!);
+    return id;
+  }
+
+  /**
    * Accepts a generated batch for the request last handed out.
    *
    * Appended, not replaced: refills happen while a few lines from the same
@@ -558,16 +667,32 @@ export class SimulationEngine {
    * longer matches the moment — the streamer spoke while it was in flight —
    * is discarded, and the next `nextGeneration` asks for the right thing.
    */
-  supplyReactions(batch: readonly Reaction[], now: number): void {
+  supplyReactions(batch: readonly Reaction[], now: number, ticket?: number): void {
     const pending = this.inFlight;
+    if (ticket !== undefined && ticket !== pending?.id) {
+      // Not the reply we are waiting for, but it still says how long the
+      // provider takes — and on a slow day the arrival batch is usually the
+      // first thing abandoned, so this is often the first measurement.
+      const issued = this.issuedAt.get(ticket);
+      if (issued !== undefined) this.observeLatency(now - issued);
+      this.issuedAt.delete(ticket);
+      return;
+    }
     this.inFlight = null;
     if (!pending) return;
 
-    const stale =
-      pending.phase !== this.phase ||
-      pending.utteranceId !== this.utteranceId ||
-      (pending.phase === "idle" && pending.idleStage !== idleStageFor(now - this.lastSpeechAt));
-    if (stale) return;
+    this.observeLatency(now - pending.requestedAt);
+    this.issuedAt.delete(pending.id);
+
+    /**
+     * Stale means the streamer has spoken since. Nothing else.
+     *
+     * A batch that was active when requested and lands after silence tipped
+     * into idle is still about the last thing said; an idle batch that lands
+     * one stage late is still about the silence. Finishing either beats a
+     * gap, and the batch for the new stage supersedes it on arrival anyway.
+     */
+    if (pending.utteranceId !== this.utteranceId) return;
 
     if (batch.length === 0) {
       this.lastFailureAt = now;
@@ -586,21 +711,36 @@ export class SimulationEngine {
     // middle, so an unannotated batch still releases in a plausible order.
     queued.sort((a, b) => (b.eagerness ?? 0.5) - (a.eagerness ?? 0.5));
 
-    this.reactions.push(...queued);
+    if (pending.supersedes) {
+      this.reactions = queued;
+      this.waveSpeakers.clear();
+    } else {
+      this.reactions.push(...queued);
+    }
     this.current = pending;
     this.phaseBatches += 1;
   }
 
   /** The request last handed out could not be fulfilled. Chat waits it out. */
-  generationFailed(now: number): void {
+  generationFailed(now: number, ticket?: number): void {
+    if (ticket !== undefined) this.issuedAt.delete(ticket);
+    // A failure for a request the engine already abandoned is not news, and
+    // must not back off the one that replaced it.
+    if (ticket !== undefined && ticket !== this.inFlight?.id) return;
     this.inFlight = null;
     this.lastFailureAt = now;
+  }
+
+  /** Half-weight smoothing: quick to notice a slow day, quick to recover. */
+  private observeLatency(ms: number): void {
+    this.latencyMs = Math.round((this.latencyMs + Math.max(0, ms)) / 2);
   }
 
   private dropBatch(): void {
     this.reactions = [];
     this.current = null;
     this.inFlight = null;
+    this.waveSpeakers.clear();
   }
 
   // ------------------------------------------------------------------ tick
@@ -676,10 +816,14 @@ export class SimulationEngine {
    * something happens".
    */
   private drawGap(now: number): number {
-    const activity = Math.min(1.9, this.topics.activity(now));
-    const rate = this.settings.messagesPerSecond * (RATE_FLOOR + RATE_GAIN * activity);
     // 1 - next() so the draw is (0,1] and the logarithm is always finite.
-    return (-Math.log(1 - this.rng.next()) / Math.max(0.05, rate)) * 1000;
+    return (-Math.log(1 - this.rng.next()) / Math.max(0.05, this.effectiveRate(now))) * 1000;
+  }
+
+  /** The configured rate lifted by whatever momentum the room has. */
+  private effectiveRate(now: number): number {
+    const activity = Math.min(1.9, this.topics.activity(now));
+    return this.settings.messagesPerSecond * (RATE_FLOOR + RATE_GAIN * activity);
   }
 
   /**
@@ -702,6 +846,11 @@ export class SimulationEngine {
     const intent = reaction.intent ?? "mundane";
 
     const barred = this.restedFor(intent, at);
+
+    // One hello per person per wave. Hard, unlike the cooldown above.
+    if (ONE_SHOT_INTENTS.has(intent)) {
+      for (const id of this.waveSpeakers.get(reaction.batchId) ?? []) barred.add(id);
+    }
 
     /**
      * Nobody monopolises the room.
@@ -765,6 +914,11 @@ export class SimulationEngine {
 
       this.reactions.shift();
       this.population.remember(result.viewerId, said, intent, at);
+      if (ONE_SHOT_INTENTS.has(intent)) {
+        const wave = this.waveSpeakers.get(reaction.batchId) ?? new Set<string>();
+        wave.add(result.viewerId);
+        this.waveSpeakers.set(reaction.batchId, wave);
+      }
       this.consecutive = result.viewerId === this.lastSpeakerId ? this.consecutive + 1 : 1;
       this.lastSpeakerId = result.viewerId;
       if (topic) this.topics.recordParticipation(topic, result.viewerId);
@@ -804,7 +958,15 @@ export class SimulationEngine {
       const last = this.population.lastDid(viewer.id, intent);
       if (last !== undefined && now - last < cooldown) barred.add(viewer.id);
     }
-    return barred;
+    /**
+     * A preference, never a gag order.
+     *
+     * If everyone in the room did this recently, the room still answers —
+     * a streamer saying hello to a chat that just said hello gets a hello
+     * back, from the same people. The per-line memory and the per-topic
+     * rule still stop any one of them saying it twice.
+     */
+    return barred.size >= this.population.size ? new Set() : barred;
   }
 
   /**
@@ -884,6 +1046,7 @@ export class SimulationEngine {
       queued: this.reactions.length,
       slotsWaited: this.slotsWaited,
       linesDropped: this.linesDropped,
+      latencyMs: this.latencyMs,
     };
   }
 }
