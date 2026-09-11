@@ -452,7 +452,7 @@ export function useSimulator(): UseSimulatorResult {
     });
 
     await provider.start();
-  }, [status, ensureEngine, startTicking]);
+  }, [status, ensureEngine, startTicking, pump]);
 
   const stop = useCallback(() => {
     stopTicking();
