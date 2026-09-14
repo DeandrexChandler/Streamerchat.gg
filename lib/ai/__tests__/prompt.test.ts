@@ -113,7 +113,8 @@ describe("buildPrompt", () => {
       const prompt = buildPrompt(request({ continuation: true, silenceSeconds: 25 }));
       expect(prompt).toContain("look at this roof I just built");
       expect(prompt).toMatch(/haven't said anything since/i);
-      expect(prompt).toMatch(/do not react as though they just said it/i);
+      expect(prompt).toMatch(/do not react as though it was just said/i);
+      expect(prompt).toMatch(/stay about that line/i);
       expect(prompt).toContain("25 seconds");
     });
 
@@ -133,6 +134,39 @@ describe("buildPrompt", () => {
 
     it("offers the model an optional emote field", () => {
       expect(buildPrompt(request())).toContain('"emote"');
+    });
+  });
+
+  describe("answering the streamer", () => {
+    it("puts the latest line in front of the model verbatim, not as a label", () => {
+      const prompt = buildPrompt(request({ utterance: "hello can yall hear me" }));
+      expect(prompt).toContain('"hello can yall hear me"');
+      expect(prompt).toMatch(/the streamer just said, to chat/i);
+      expect(prompt).toMatch(/answer that/i);
+    });
+
+    it("shows only the last three chat lines", () => {
+      const recent = ["one", "two", "three", "four", "five"];
+      const prompt = buildPrompt(request({ recent }));
+      expect(prompt).toContain("five");
+      expect(prompt).toContain("three");
+      expect(prompt).not.toContain("  one\n");
+      expect(prompt).not.toContain("  two\n");
+    });
+
+    it("asks for words first and emotes as attachments", () => {
+      const prompt = buildPrompt(request());
+      expect(prompt).toMatch(/four words or more/i);
+      expect(prompt).toMatch(/do not write lines that are only an emote name/i);
+      expect(prompt).toMatch(/talking to the streamer/i);
+      expect(prompt).toMatch(/no @mentions/i);
+    });
+
+    it("keeps the streamer's earlier lines as compact history", () => {
+      const history = Array.from({ length: 10 }, (_, i) => `line ${i}`);
+      const prompt = buildPrompt(request({ history }));
+      expect(prompt).toContain("line 9");
+      expect(prompt).not.toContain("line 0");
     });
   });
 });

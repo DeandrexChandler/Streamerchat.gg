@@ -5,6 +5,7 @@ import { AiRateLimiter, loadAiConfig, type AiConfig } from "@/lib/ai/config";
 import type { CandidateProvider } from "@/lib/ai/provider";
 import { validateReactions } from "@/lib/ai/validate";
 import { CandidateRequestSchema } from "@/lib/ai/schema";
+import { describeShape, shapeOf } from "@/lib/ai/diagnostics";
 import type { Reaction } from "@/lib/ai/reaction";
 
 /**
@@ -131,14 +132,23 @@ export function createCandidatesHandler(deps: HandlerDeps) {
       const elapsed = Date.now() - started;
 
       // Validation runs server-side so a client cannot skip it.
-      const validated = validateReactions(generated.reactions, candidateRequest.recent);
+      const validated = validateReactions(generated.reactions, candidateRequest.recent, {
+        emotes: candidateRequest.emotes,
+        emoteEvent: candidateRequest.classification.intent === "directive",
+      });
 
       if (generated.status === "ok" && validated.reactions.length > 0) {
+        const dropped = Object.entries(validated.rejected)
+          .filter(([, n]) => n > 0)
+          .map(([rule, n]) => `${rule}=${n}`)
+          .join(" ");
         log.log(
           `[ai] ← ${validated.reactions.length} lines in ${elapsed}ms` +
             `${attempt > 1 ? " (retry)" : ""} | ${label}` +
-            `${validated.echoed ? " | echoes only" : ""}`,
+            `${validated.echoed ? " | echoes only" : ""}` +
+            `${dropped ? ` | dropped ${dropped}` : ""}`,
         );
+        log.log(`[ai]   ${describeShape(shapeOf(validated.reactions, candidateRequest))}`);
         return NextResponse.json(
           { reactions: validated.reactions, status: "ok" } satisfies BatchResponse,
           noStore,
@@ -164,8 +174,17 @@ export function createCandidatesHandler(deps: HandlerDeps) {
 }
 
 /** One line that says what was asked for, for the log. */
-function describe(request: { utterance: string; count: number; history: readonly string[] }): string {
-  return `ctx=${request.history.length} | batch=${request.count} | "${request.utterance.slice(0, 80)}"`;
+function describe(request: {
+  phase: string;
+  continuation: boolean;
+  utterance: string;
+  count: number;
+  history: readonly string[];
+}): string {
+  return (
+    `${request.phase}${request.continuation ? "+" : ""} | ctx=${request.history.length} | ` +
+    `batch=${request.count} | "${request.utterance.slice(0, 80)}"`
+  );
 }
 
 // ---------------------------------------------------------------- production

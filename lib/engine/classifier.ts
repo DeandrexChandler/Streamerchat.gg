@@ -30,7 +30,10 @@ const INTENT_SIGNALS: Readonly<Record<Intent, readonly string[]>> = {
     // Questions with an actual answer, rather than an opinion. These were the
     // most obvious gap: asking "can you hear me" and getting background
     // muttering back reads as broken, not as realistic.
-    "can you hear", "can you guys hear", "hear me", "am i loud", "too loud",
+    "can you hear", "can you guys hear", "can yall hear", "can y'all hear",
+    "yall hear me", "hear me", "am i loud", "too loud",
+    "how are we doing", "how we doing", "how are you doing", "how you doing",
+    "how yall doing", "how y'all doing", "how is everyone", "how's everyone",
     "is my mic", "mic working", "how do i sound", "audio ok", "audio okay",
     "sound ok", "can you see", "does this look", "how does this look",
     "can you read", "is this visible", "anyone here", "anybody here",
@@ -347,6 +350,21 @@ export function classify(
   if (isDirective(raw)) {
     bestIntent = "directive";
     bestScore = Math.max(bestScore, 2);
+  }
+
+  /**
+   * A question to chat outranks a greeting it is wrapped in.
+   *
+   * "hello can yall hear me" scored one for greeting and one for the
+   * question, and the tie went to whichever was iterated first. Read as a
+   * greeting it got a wave of hello emotes; the streamer wanted to know if
+   * the mic works.
+   */
+  if (
+    bestIntent === "greeting" &&
+    countMatches(lower, INTENT_SIGNALS.question_to_chat) > 0
+  ) {
+    bestIntent = "question_to_chat";
   }
 
   // A trailing "?" is strong evidence chat is being addressed, but only if the

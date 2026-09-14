@@ -12,8 +12,10 @@ import type { GenerationPhase } from "./provider";
  */
 
 export type ReactionKind =
+  | "answer"
   | "reaction"
   | "question"
+  | "opinion"
   | "joke"
   | "callback"
   | "agree"
@@ -37,7 +39,7 @@ export const ReactionSchema = z.object({
   text: z.string().min(1).max(200),
   emotion: z.enum(REACTION_EMOTIONS).optional(),
   kind: z
-    .enum(["reaction", "question", "joke", "callback", "agree", "disagree", "emote"])
+    .enum(["answer", "reaction", "question", "opinion", "joke", "callback", "agree", "disagree", "emote"])
     .optional(),
   /**
    * How eager this viewer is, 0..1.
@@ -59,7 +61,7 @@ export const ReactionSchema = z.object({
 
 export type Reaction = z.infer<typeof ReactionSchema>;
 
-export const ReactionBatchSchema = z.array(ReactionSchema).max(60);
+export const ReactionBatchSchema = z.array(ReactionSchema).max(70);
 
 /** A reaction plus the bookkeeping the queue needs. */
 export interface QueuedReaction extends Reaction {
@@ -80,4 +82,6 @@ export interface QueuedReaction extends Reaction {
   phase?: GenerationPhase;
   /** Times nobody eligible could say it. Two and it is dropped. */
   attempts?: number;
+  /** Part of the first reply to an input: one line per person. */
+  wave?: boolean;
 }

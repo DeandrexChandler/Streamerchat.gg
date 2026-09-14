@@ -24,9 +24,14 @@ export const IDLE_AFTER_MS = 60_000;
  * which day it is and sizes accordingly. At the lowest tier the floor keeps
  * a batch from being a single line.
  */
-const BATCH_SECONDS = 20;
-const MIN_BATCH = 8;
-const MAX_BATCH = 60;
+/**
+ * Twenty-four seconds gives the sizes the product asks for by tier —
+ * about 10 / 14 / 28 / 42 / 56 / 70 at 0.2 through CHAOS with a quick
+ * provider — and a slow one pushes each up.
+ */
+const BATCH_SECONDS = 24;
+const MIN_BATCH = 10;
+const MAX_BATCH = 70;
 
 /**
  * Lines left in the queue when the next batch is requested: enough to

@@ -27,18 +27,33 @@ const MAX_HISTORY = 6;
  */
 export const MAX_EMOTES_IN_PROMPT = 40;
 
-/** Recent chat lines shown, so a batch does not echo what just went out. */
-const MAX_RECENT_IN_PROMPT = 12;
+/**
+ * Recent chat lines shown, so a batch does not echo what just went out.
+ *
+ * Three, not twelve. More turned the model's attention toward continuing
+ * chat's own conversation; the job is answering the streamer.
+ */
+const MAX_RECENT_IN_PROMPT = 3;
 
+/**
+ * How chat writes.
+ *
+ * The register matters more than any single rule: this is a group of people
+ * texting the streamer directly, not an audience commentating and not an
+ * assistant summarising. Emotes are things people attach to what they said,
+ * not a substitute for saying it — a batch that was a third bare emotes
+ * read as noise, however good the words between them were.
+ */
 const RULES = [
-  "Write like real Twitch chat, not like an assistant.",
-  "Mostly lowercase. Caps are for emphasis, not grammar.",
-  "Vary the length. Some one-word reactions, plenty of short replies, a few real sentences.",
-  "No trailing punctuation on short lines. No hashtags. No quotation marks.",
-  "Never number the lines or add commentary around them.",
-  "These are different people: they should not all react the same way.",
-  "Some agree, some miss the point, some ask a question, some make a joke, some talk to each other.",
-  "NEVER insult, mock, correct or express disappointment in the streamer. Not once, not as a joke.",
+  "Every line is someone talking TO the streamer about what they just said. Not about the stream in general, not to each other.",
+  "Mostly lowercase, natural slang, the occasional ALL CAPS line. Typos and stretched words happen: heyyy, slayyy, YOOO, ur, rn, tho.",
+  "Most lines are four words or more. A few are one or two. Vary the length, the tone and the mood — some hyped, some deadpan, some confused, some warm, some blunt but never mean.",
+  "Answer directly, react with a feeling, ask a follow-up, give an opinion when one was asked for. A couple of lines can be looser or a joke, but the batch stays about what was just said.",
+  "Style, not script: 'nah he wylin', 'Ayo????', 'grown adult btw', 'slayyy', 'mhmm', 'i think you can idk tho', 'bet that', 'ooo good idea', 'leave the wall'.",
+  "Do not fall back on one-word filler like W, nice, real, same, lol unless it genuinely answers the line.",
+  "Attach an emote to a line with the \"emote\" field when it fits the feeling. Do not write lines that are only an emote name, except one or two per batch at most.",
+  "No trailing punctuation on short lines. No hashtags. No quotation marks. No @mentions. Never number the lines.",
+  "NEVER insult, mock, correct or express disappointment in the streamer. Not once, not as a joke. Teasing yourselves is fine.",
 ];
 
 /**
@@ -82,8 +97,8 @@ export function buildPrompt(request: CandidateRequest): string {
   if (emotes.length > 0) {
     lines.push(
       "",
-      `Emotes available: ${emotes.slice(0, MAX_EMOTES_IN_PROMPT).join(" ")}`,
-      "Use these where they fit and spelled exactly. Any other name renders as plain text and looks broken.",
+      `Emotes available, spelled exactly: ${emotes.slice(0, MAX_EMOTES_IN_PROMPT).join(" ")}`,
+      "Pick one for a line only when its feeling matches the line. Any other name renders as plain text and looks broken.",
     );
   }
 
@@ -93,8 +108,8 @@ export function buildPrompt(request: CandidateRequest): string {
     "Each object:",
     '  { "text": string,',
     '    "emotion": one of hype | funny | sad | confused | love | chill,',
-    '    "kind": one of reaction | question | joke | callback | agree | disagree | emote,',
-    '    "emote": optional — one name from the emotes list, if the line really wants one,',
+    '    "kind": one of answer | reaction | question | opinion | joke | callback | emote,',
+    '    "emote": optional — one name from the emotes list to attach to this line, only if its feeling fits,',
     '    "eagerness": number 0-1, where 1 is a reflexive one-word reply and 0 is someone who took a while to type }',
     "No other text.",
   );
@@ -113,8 +128,8 @@ function opening(request: CandidateRequest): string {
       return `You are the live chat of a small Twitch stream. ${who}`;
     default:
       return request.continuation
-        ? `You are the live chat of a small Twitch stream. ${who}`
-        : `You are the live chat of a small Twitch stream. The streamer just spoke. ${who} They are reacting to it.`;
+        ? `You are the live chat of a small Twitch stream. ${who} They are still talking to the streamer about what the streamer said.`
+        : `You are the live chat of a small Twitch stream. The streamer just said something to chat. ${who} They are answering it.`;
   }
 }
 
@@ -153,18 +168,20 @@ function situation(request: CandidateRequest): string[] {
     return [
       ...earlier,
       ...(earlier.length > 0 ? [""] : []),
-      `The streamer's last line was: "${utterance}"`,
-      `That was about ${describeSilence(silenceSeconds)} ago and they haven't said anything since. Chat is still going: follow-ups, people replying to each other, a late reaction, someone changing the subject slightly. Do not react as though they just said it.`,
+      "The streamer's last words to chat were:",
+      `  "${utterance}"`,
+      "",
+      `That was about ${describeSilence(silenceSeconds)} ago and they haven't said anything since. Chat is still on it: late answers, follow-up questions, opinions, someone riffing on it, someone who only just read it. Stay about THAT line — do not start new subjects, and do not react as though it was just said this second.`,
     ];
   }
 
   return [
     ...earlier,
     ...(earlier.length > 0 ? [""] : []),
-    "The streamer just said:",
+    "The streamer just said, to chat:",
     `  "${utterance}"`,
     "",
-    "React to THAT. If it changes or contradicts something they said earlier, chat should notice.",
+    "Answer THAT. Every line responds to it: answers it, feels something about it, asks about it, or gives the opinion it asked for. If it changes or contradicts something said earlier, chat notices.",
   ];
 }
 

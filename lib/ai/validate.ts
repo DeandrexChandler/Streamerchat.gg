@@ -133,6 +133,8 @@ export interface ValidationResult {
     tooLong: number;
     hostile: number;
     duplicate: number;
+    /** Bare-emote lines beyond the share a normal batch may carry. */
+    emoteSurplus: number;
   };
   /**
    * True when dedup against recent chat emptied the batch and it was allowed
@@ -141,9 +143,30 @@ export interface ValidationResult {
   echoed: boolean;
 }
 
+export interface ValidationOptions {
+  /** Emote names the pack can render, to recognise a bare-emote line. */
+  emotes?: readonly string[];
+  /**
+   * The streamer asked for emotes ("spam W"). A mostly-emote batch is the
+   * right answer, and the cap below does not apply.
+   */
+  emoteEvent?: boolean;
+}
+
+/**
+ * The most of a normal batch that may be bare emotes.
+ *
+ * A quarter is generous — the target is closer to one line in ten — but
+ * this is a backstop against the model ignoring the prompt, not a quota.
+ * Surplus bare-emote lines are dropped, never replaced: the words in the
+ * batch stay, and the room says fewer things rather than canned things.
+ */
+const MAX_EMOTE_ONLY_SHARE = 0.25;
+
 export function validateReactions(
   reactions: readonly Reaction[],
   recent: readonly string[],
+  options: ValidationOptions = {},
 ): ValidationResult {
   /**
    * Only the last few lines.
@@ -155,7 +178,8 @@ export function validateReactions(
    */
   const window = recent.slice(-RECENT_WINDOW);
   const seen = new Set(window.map((line) => line.trim().toLowerCase()));
-  const rejected = { empty: 0, tooLong: 0, hostile: 0, duplicate: 0 };
+  const rejected = { empty: 0, tooLong: 0, hostile: 0, duplicate: 0, emoteSurplus: 0 };
+  const emoteNames = new Set(options.emotes ?? []);
   const out: Reaction[] = [];
   /** Survived every rule except the recent-chat check. */
   const echoes: Reaction[] = [];
@@ -192,6 +216,28 @@ export function validateReactions(
     seen.add(key);
 
     out.push({ ...reaction, text });
+  }
+
+  /**
+   * Bare emotes are seasoning, not the meal.
+   *
+   * Kept from the front of the batch in the order the model wrote them, so
+   * the ones that survive are the ones it reached for first.
+   */
+  if (!options.emoteEvent && emoteNames.size > 0 && out.length > 0) {
+    const allowed = Math.max(1, Math.floor(out.length * MAX_EMOTE_ONLY_SHARE));
+    let kept = 0;
+    for (let i = 0; i < out.length; i += 1) {
+      const words = out[i].text.split(/\s+/);
+      if (!words.every((word) => emoteNames.has(word))) continue;
+      if (kept < allowed) {
+        kept += 1;
+        continue;
+      }
+      out.splice(i, 1);
+      i -= 1;
+      rejected.emoteSurplus += 1;
+    }
   }
 
   /**

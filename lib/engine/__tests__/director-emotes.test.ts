@@ -88,12 +88,28 @@ function emoteShare(
 }
 
 describe("emote-forward responses", () => {
-  it("answers a greeting mostly with emotes", () => {
-    expect(emoteShare("greeting")).toBeGreaterThan(0.5);
+  it("answers a greeting mostly in words, with a few emote-only lines mixed in", () => {
+    // Words carry the answer; emotes decorate it. A majority of bare emotes
+    // is how "hello can yall hear me" got a wall of waves.
+    const share = emoteShare("greeting");
+    expect(share).toBeGreaterThan(0.04);
+    expect(share).toBeLessThan(0.3);
   });
 
-  it("answers hype mostly with emotes", () => {
-    expect(emoteShare("excitement")).toBeGreaterThan(0.3);
+  it("keeps hype emote-only lines a minority too", () => {
+    const share = emoteShare("excitement");
+    expect(share).toBeGreaterThan(0.04);
+    expect(share).toBeLessThan(0.35);
+  });
+
+  it("never staples an emote onto a line the model gave no feeling for", () => {
+    for (let seed = 0; seed < 60; seed += 1) {
+      const result = direct(seed, {
+        intent: "story",
+        reaction: { text: "so what happened next", batchId: 1, createdAt: 0, intent: "story", phase: "active" },
+      });
+      if (result) expect(result.message.text).toBe("so what happened next");
+    }
   });
 
   it("still answers a story with words", () => {

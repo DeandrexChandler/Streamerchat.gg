@@ -39,16 +39,27 @@ import type {
  * actual reply.
  */
 const EMOTE_FORWARD: Partial<Record<EmoteMoment, number>> = {
-  greeting: 0.6,
-  farewell: 0.5,
+  /**
+   * Small everywhere but directives. The model already writes a few bare
+   * emote lines per batch; converting a majority of greetings on top of
+   * that is how "hello can yall hear me" got a wall of waves instead of
+   * "loud and clear". Words carry the answer; emotes decorate it.
+   */
+  greeting: 0.12,
+  farewell: 0.12,
   directive: 0.75,
-  achievement: 0.5,
-  excitement: 0.45,
-  idle: 0.12,
+  achievement: 0.15,
+  excitement: 0.12,
+  idle: 0.08,
 };
 
-/** Chance a worded line gets an emote appended, when one fits. */
-const EMOTE_TRAILER = 0.3;
+/**
+ * Chance a worded line gets an emote appended when the model did not ask
+ * for one but did say how the line feels. Only then: an emote chosen with
+ * no feeling to match is the "random emote after unrelated text" the
+ * streamer notices.
+ */
+const EMOTE_TRAILER = 0.22;
 
 /** How many times an emote is repeated in an emote-only line. */
 function emoteSpamCount(rng: Rng): number {
@@ -221,7 +232,7 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
     } else if (
       settings.emotesEnabled &&
       !isEmoteOnly(text, emotes) &&
-      (reaction.emote || rng.chance(EMOTE_TRAILER))
+      (reaction.emote || (reaction.emotion && rng.chance(EMOTE_TRAILER)))
     ) {
       /**
        * Emotes chosen from the reaction's own emotion, not at random.

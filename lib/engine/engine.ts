@@ -174,6 +174,13 @@ interface Pending {
   idleStage: IdleStage | null;
   intent: Intent;
   /**
+   * The first batch after something was said, or the arrival wave.
+   *
+   * One line per person: everyone answers the streamer once, and the
+   * continuation that follows is where anyone speaks again.
+   */
+  wave: boolean;
+  /**
    * Replaces the queue when it lands instead of joining it.
    *
    * Used across a phase or stage change. What is queued was written for the
@@ -558,6 +565,7 @@ export class SimulationEngine {
         id: this.issue(now),
         requestedAt: now,
         supersedes: false,
+        wave: first,
         phase: "startup",
         utteranceId: this.utteranceId,
         idleStage: null,
@@ -581,6 +589,7 @@ export class SimulationEngine {
         id: this.issue(now),
         requestedAt: now,
         supersedes: supersede,
+        wave: false,
         phase: "idle",
         utteranceId: this.utteranceId,
         idleStage: stage,
@@ -609,18 +618,24 @@ export class SimulationEngine {
      * that follows is full size. A wave of hellos is one per person besides:
      * asking for more leaves the rest unsayable.
      */
+    /**
+     * One reply per person, then the room keeps talking.
+     *
+     * The first batch after the streamer speaks is sized to the roster so
+     * nobody answers the same line twice; the continuation that follows at
+     * once is where repeat participation happens. Capped at a dozen on a
+     * quick provider for speed — the round trip grows with output — and
+     * left at the roster on a slow one, where a small batch just adds a gap.
+     */
     const quick = this.latencyMs < SLOW_PROVIDER_MS;
     const wave = continuation
       ? count
-      : Math.min(
-          count,
-          quick ? FIRST_REPLY_LINES : count,
-          ONE_SHOT_INTENTS.has(this.lastClassification.intent) ? this.population.size : count,
-        );
+      : Math.min(count, this.population.size, quick ? FIRST_REPLY_LINES : count);
     this.inFlight = {
       id: this.issue(now),
       requestedAt: now,
       supersedes: false,
+      wave: !continuation,
       phase: "active",
       utteranceId: this.utteranceId,
       idleStage: null,
@@ -706,6 +721,7 @@ export class SimulationEngine {
       createdAt: now,
       intent: pending.intent,
       phase: pending.phase,
+      wave: pending.wave,
     }));
     // Most eager first within the batch. Absent eagerness sorts to the
     // middle, so an unannotated batch still releases in a plausible order.
@@ -847,8 +863,15 @@ export class SimulationEngine {
 
     const barred = this.restedFor(intent, at);
 
-    // One hello per person per wave. Hard, unlike the cooldown above.
-    if (ONE_SHOT_INTENTS.has(intent)) {
+    /**
+     * One line per person in a wave. Hard, unlike the cooldown above.
+     *
+     * The first batch after the streamer speaks is everyone answering once;
+     * the director's taste for a returning voice in a developing topic is
+     * right for the chatter that follows and wrong here — it is how one
+     * name answered "can yall hear me" twice while two others said nothing.
+     */
+    if (reaction.wave || ONE_SHOT_INTENTS.has(intent)) {
       for (const id of this.waveSpeakers.get(reaction.batchId) ?? []) barred.add(id);
     }
 
@@ -914,7 +937,7 @@ export class SimulationEngine {
 
       this.reactions.shift();
       this.population.remember(result.viewerId, said, intent, at);
-      if (ONE_SHOT_INTENTS.has(intent)) {
+      if (reaction.wave || ONE_SHOT_INTENTS.has(intent)) {
         const wave = this.waveSpeakers.get(reaction.batchId) ?? new Set<string>();
         wave.add(result.viewerId);
         this.waveSpeakers.set(reaction.batchId, wave);

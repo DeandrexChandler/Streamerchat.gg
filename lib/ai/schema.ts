@@ -67,7 +67,7 @@ export const CandidateRequestSchema = z
      */
     streamer: z.string().max(40).nullish().transform((v) => v ?? undefined),
     topic: z.string().max(80).nullish().transform((v) => v ?? undefined),
-    count: z.number().int().min(1).max(60).default(16),
+    count: z.number().int().min(1).max(70).default(16),
   })
   .refine(
     (request) => request.phase !== "active" || request.utterance.trim().length > 0,

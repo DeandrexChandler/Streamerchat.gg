@@ -53,8 +53,8 @@ export function loadAiConfig(): AiConfig {
     model: MODEL,
     maxCallsPerMinute: num("AI_MAX_CALLS_PER_MINUTE", 10),
     maxCallsPerHour: num("AI_MAX_CALLS_PER_HOUR", 500),
-    maxOutputTokens: num("AI_MAX_OUTPUT_TOKENS", 3_000),
-    maxBatchSize: num("AI_MAX_BATCH_SIZE", 60),
+    maxOutputTokens: num("AI_MAX_OUTPUT_TOKENS", 4_000),
+    maxBatchSize: num("AI_MAX_BATCH_SIZE", 70),
   };
 }
 
