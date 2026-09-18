@@ -100,11 +100,11 @@ describe("normal active batches", () => {
     }
   });
 
-  it("has each viewer answer a given input once in the first wave", async () => {
-    const { messages, requests } = await session(wordy, [[1000, "hello can yall hear me"]], 20_000);
-    const first = requests.find((r) => r.utterance === "hello can yall hear me" && !r.continuation)!;
-    const wave = messages.filter((m) => m.at >= 1000).slice(0, first.count).map((m) => m.username);
-    expect(wave.length).toBeGreaterThan(5);
+  it("has each viewer answer a given input once before anyone answers twice", async () => {
+    const { engine, messages } = await session(wordy, [[1000, "hello can yall hear me"]], 20_000);
+    const room = engine.stats().simulated;
+    const wave = messages.filter((m) => m.at >= 1000).slice(0, room).map((m) => m.username);
+    expect(wave.length).toBe(room);
     expect(new Set(wave).size).toBe(wave.length);
   });
 });

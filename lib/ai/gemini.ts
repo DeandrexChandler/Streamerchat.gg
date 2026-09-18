@@ -35,7 +35,14 @@ const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
  * an empty batch, which the client treats as "nothing to add" rather than as a
  * failure, so the cost of the remaining outliers is one skipped refill.
  */
-const TIMEOUT_MS = 30_000;
+/**
+ * Latency is bimodal: a few seconds when it answers, a hang when it does
+ * not. Every successful call in the last session was under six seconds; the
+ * one failure sat at the 30s limit and then retried in six. Twelve cuts a
+ * hang's cost by more than half and only ever aborts a reply that was
+ * already too slow to keep the room fed.
+ */
+const TIMEOUT_MS = 12_000;
 
 /**
  * Chosen by measuring, not by headline rates.

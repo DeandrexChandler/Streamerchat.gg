@@ -30,17 +30,17 @@ const BASE_ATTENTION: Record<Intent, number> = {
   struggle: 0.7, // messing up is a real moment — chat sympathises
   showing: 0.7,
   confusion: 0.75,
-  story: 0.6, // chat listens to stories more than it interrupts them
+  story: 0.75, // chat listens to stories more than it interrupts them
   /**
    * Casual talk with no strong signal.
    *
-   * This was 0.18, which sounded reasonable in isolation and was badly wrong
-   * in practice: roughly 60% of how people actually speak lands in `mundane`,
-   * so that number set the response rate for the whole product. Combined with
-   * the multipliers below it produced a chat that ignored about three
-   * quarters of everything said to it.
+   * Roughly 60% of how people actually speak lands in `mundane`, so this
+   * number sets the response rate for the whole product. It was 0.18, then
+   * 0.65 with two dampers on top, and both produced a chat that ignored most
+   * of what was said to it. Chat still skips some casual talk — that is the
+   * gate's job — but the default is answering.
    */
-  mundane: 0.65,
+  mundane: 0.9,
 };
 
 export interface AttentionContext {
@@ -103,25 +103,16 @@ export function shouldReact(
   attention *= 0.85 + 0.15 * classification.confidence;
 
   /**
-   * Talking about the same kind of thing for a while is mildly less eventful.
+   * No fatigue damper, no repeat-intent damper.
    *
-   * Only mildly. This used to be 0.7, and because `mundane` is the majority
-   * bucket the condition was true for most consecutive sentences — so normal
-   * speech carried a permanent penalty for not changing subject.
+   * Both were tuned for a chat that went quiet between utterances. Chat is
+   * now continuous, so "recent volume" was permanently at its cap and
+   * `mundane` — the majority bucket — tripped the repeat penalty on nearly
+   * every consecutive sentence. Together they skipped about six in ten
+   * ordinary sentences. The context is still passed in for the one case that
+   * matters, `repeatedAfterIgnore`, handled above.
    */
-  if (context.repeatsPrevious && classification.energy < 0.5) {
-    attention *= 0.92;
-  }
-
-  // Fatigue ramps once chat has been *reacting* a lot. Idle chatter is
-  // deliberately excluded by the caller: counting it meant a long quiet
-  // stretch built up enough fatigue to suppress the reaction to whatever
-  // finally broke the silence, which is exactly backwards.
-  // Capped at 0.3: busy chat should thin out, not go quiet. The previous 0.5
-  // cap meant a lively moment actively suppressed the reaction to whatever
-  // the streamer said next.
-  const fatigue = Math.min(0.3, context.recentVolume / 90);
-  attention *= 1 - fatigue;
+  void context;
 
   return rng.chance(Math.max(0.02, Math.min(1, attention)));
 }

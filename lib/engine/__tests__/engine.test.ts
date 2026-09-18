@@ -371,11 +371,51 @@ describe("active generation", () => {
     expect(engine.nextGeneration(20_000)).not.toBeNull();
   });
 
-  it("flushes the previous moment when the streamer says something new", async () => {
+  it("keeps the previous sentence's lines flowing and answers the new one at once", async () => {
+    // Chrome finalises a phrase at every pause, so one thought lands as two
+    // or three transcripts. Flushing on each one left chat silent for a
+    // round trip every few seconds while the streamer was talking.
     const { engine } = await drive(5_000, { script: [[1000, "i'll play minecraft"]] });
     const before = engine.pendingReactions;
     expect(before).toBeGreaterThan(0);
+
     engine.handleTranscript("actually valorant", 5_000, undefined, true);
+    // Old lines stay queued...
+    expect(engine.pendingReactions).toBe(before);
+    // ...and the reply to the new line goes out immediately, however full
+    // the queue is, and will replace them when it lands.
+    const next = engine.nextGeneration(5_000);
+    expect(next?.utterance).toBe("actually valorant");
+    expect(next?.continuation).toBe(false);
+    engine.supplyReactions([{ text: "valorant lets go" }, { text: "finally" }], 5_500, engine.generationTicket!);
+    expect(engine.pendingReactions).toBe(2);
+  });
+
+  it("does not go quiet between two sentences said a few seconds apart", async () => {
+    // Reply to sentence one lands at 3s; sentence two at 6s; its reply at 8s.
+    // Between 6s and 8s the room used to be empty.
+    let dry = 0;
+    let ticks = 0;
+    await drive(12_000, {
+      latencyMs: 2_000,
+      script: [[1000, "so today we're playing sims"], [6000, "and i think we build a house first"]],
+      onTick: ({ engine }, now) => {
+        if (now < 6_000 || now > 8_000) return;
+        ticks += 1;
+        if (engine.pendingReactions === 0) dry += 1;
+      },
+    });
+    expect(ticks).toBeGreaterThan(0);
+    expect(dry).toBe(0);
+  });
+
+  it("still flushes arrival and idle lines when the streamer first speaks", async () => {
+    // A phase change is a different room. "im early" landing after the
+    // streamer's first sentence reads as chat a message behind.
+    const { engine } = await drive(3_000);
+    expect(engine.currentPhase).toBe("startup");
+    expect(engine.pendingReactions).toBeGreaterThan(0);
+    engine.handleTranscript("okay hey chat", 3_000, undefined, true);
     expect(engine.pendingReactions).toBe(0);
   });
 
@@ -387,19 +427,46 @@ describe("active generation", () => {
     expect(before.length).toBeGreaterThan(0);
   });
 
-  it("discards a batch that arrives for a moment that has passed", () => {
+  it("lets a reply to the previous sentence land, then answers the newest", () => {
     const engine = new SimulationEngine({ seed: 3, now: 0 });
     engine.beginSession(0);
     engine.handleTranscript("first thing", 0, undefined, true);
     const request = engine.nextGeneration(0);
     expect(request?.utterance).toBe("first thing");
 
-    // The streamer moves on while the request is in flight.
+    // The streamer moves on while the request is in flight. The reply is
+    // about something said one round trip ago — chat always is — so it is
+    // kept, and the reply to the newer line follows at once.
     engine.handleTranscript("second thing", 500, undefined, true);
-    engine.supplyReactions([{ text: "about the first thing" }], 1_000);
-    expect(engine.pendingReactions).toBe(0);
+    expect(engine.nextGeneration(750)).toBeNull(); // still waiting on the first
+    engine.supplyReactions([{ text: "about the first thing" }], 1_000, engine.generationTicket!);
+    expect(engine.pendingReactions).toBe(1);
 
-    expect(engine.nextGeneration(1_250)?.utterance).toBe("second thing");
+    const next = engine.nextGeneration(1_250);
+    expect(next?.utterance).toBe("second thing");
+    expect(next?.continuation).toBe(false);
+  });
+
+  it("discards an arrival batch that lands after the streamer has spoken", () => {
+    const engine = new SimulationEngine({ seed: 3, now: 0 });
+    engine.beginSession(0);
+    engine.nextGeneration(0);
+    const ticket = engine.generationTicket!;
+    engine.handleTranscript("hey chat", 500, undefined, true);
+    engine.supplyReactions([{ text: "im early" }], 1_000, ticket);
+    expect(engine.pendingReactions).toBe(0);
+  });
+
+  it("is not starved by sentences arriving faster than the provider answers", async () => {
+    // Three sentences in eight seconds against an eight-second reply. Each
+    // new sentence used to abandon the reply on the wire, so nothing landed
+    // until the last one's reply at 17s — sixteen seconds of silence while
+    // the streamer was talking.
+    const { messages } = await drive(20_000, {
+      latencyMs: 8_000,
+      script: [[1000, "so today we play sims"], [5000, "gonna build a house"], [9000, "maybe a pool too"]],
+    });
+    expect(messages.filter((m) => m.at >= 9_000 && m.at < 16_000).length).toBeGreaterThan(3);
   });
 
   it("ignores a reply carrying an abandoned ticket", () => {
@@ -426,16 +493,26 @@ describe("active generation", () => {
     expect(engine.pendingReactions).toBe(1);
   });
 
-  it("sizes the first reply for speed and the continuation for depth", () => {
+  it("asks for a full batch on the first reply, so the refill is off the critical path", () => {
+    // Ten lines drained in seven seconds; any refill slower than that was a
+    // visible gap. One round trip now covers the whole moment.
     const engine = new SimulationEngine({ seed: 1, now: 0, settings: { messagesPerSecond: 4 } });
     engine.beginSession(0);
     engine.handleTranscript("look at this roof", 0, undefined, true);
     const first = engine.nextGeneration(0)!;
-    expect(first.count).toBeLessThanOrEqual(12);
-    engine.supplyReactions([{ text: "nice" }], 100);
+    expect(first.count).toBeGreaterThan(30);
+    engine.supplyReactions([{ text: "nice" }], 100, engine.generationTicket!);
     const next = engine.nextGeneration(200)!;
     expect(next.continuation).toBe(true);
-    expect(next.count).toBeGreaterThan(first.count);
+    expect(next.count).toBe(first.count);
+  });
+
+  it("still sizes a greeting wave to the room", () => {
+    // One hello per person is a hard rule; asking for more leaves the rest unsayable.
+    const engine = new SimulationEngine({ seed: 1, now: 0, settings: { messagesPerSecond: 4 } });
+    engine.beginSession(0);
+    engine.handleTranscript("hey everyone", 0, undefined, true);
+    expect(engine.nextGeneration(0)!.count).toBe(engine.stats().simulated);
   });
 
   it("goes quiet, not canned, when the provider fails", async () => {

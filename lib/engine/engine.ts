@@ -117,15 +117,7 @@ const SPEAKER_ATTEMPTS = 4;
 /** How soon to try again when a slot found nobody eligible to speak. */
 const RETRY_SLOT_MS = 400;
 
-/** Lines in the first batch after the streamer says something. */
-const FIRST_REPLY_LINES = 12;
 
-/**
- * Above this latency a small first batch buys nothing: the round trip
- * dominates, and a batch that drains before the follow-up lands just adds
- * a gap. Ask for the full batch instead.
- */
-const SLOW_PROVIDER_MS = 6_000;
 
 /** Chat lines kept for the prompt, so a refill does not echo them. */
 const RECENT_LINES = 20;
@@ -476,11 +468,22 @@ export class SimulationEngine {
     this.previousWasIgnored = false;
 
     /**
-     * Accepted. The conversation moves on, and everything generated for the
-     * previous moment is stale: reactions to "I'll play Minecraft" are wrong
-     * once they have said "actually Valorant". Queued lines are dropped;
-     * lines already released are history and stay.
+     * Accepted. The conversation moves on.
+     *
+     * Coming out of arrival or idle, what is queued is about a room that
+     * had not heard the streamer yet — it goes. Mid-conversation it stays:
+     * Chrome finalises a phrase at every pause, so one spoken thought lands
+     * as two or three transcripts, and flushing on each one left chat a
+     * round trip behind and silent in between. Real chat lags a sentence.
+     * A reply already on the wire is left to land — it is about a sentence
+     * said one round trip ago, which is what chat always is — and the reply
+     * to this line goes out right after it and supersedes the queue on
+     * arrival. Abandoning it instead starved the room whenever sentences
+     * came faster than the provider: three in thirteen seconds against an
+     * eight-second reply meant nothing landed for twelve.
      */
+    if (this.phase !== "active") this.dropBatch();
+    else this.waveSpeakers.clear();
     this.phase = "active";
     this.phaseBatches = 0;
     this.utteranceId += 1;
@@ -488,7 +491,6 @@ export class SimulationEngine {
     this.lastClassification = classification;
     this.history.push(text);
     if (this.history.length > HISTORY_LINES) this.history.shift();
-    this.dropBatch();
     this.scheduler.trimBeyond(now, 1_500);
 
     const topic = this.topics.observe(classification, text, now);
@@ -535,13 +537,24 @@ export class SimulationEngine {
     if (this.inFlight) return null;
     if (now - this.lastFailureAt < FAILURE_BACKOFF_MS) return null;
 
+    // The streamer said something the queue does not answer yet. Out now,
+    // however full the queue is with lines about the previous sentence.
+    const freshReply =
+      this.phase === "active" &&
+      this.lastClassification !== null &&
+      this.current?.utteranceId !== this.utteranceId;
+
     /**
      * Sized against the rate the room is actually running at, not the
      * setting: momentum lifts a busy stretch well above it, and a refill
      * planned for one a second runs dry at one and a third.
      */
     const rate = this.effectiveRate(now);
-    if (!supersede && this.reactions.length > lowWaterFor(rate, this.latencyMs)) {
+    if (
+      !supersede &&
+      !freshReply &&
+      this.reactions.length > lowWaterFor(rate, this.latencyMs)
+    ) {
       return null;
     }
 
@@ -619,22 +632,24 @@ export class SimulationEngine {
      * asking for more leaves the rest unsayable.
      */
     /**
-     * One reply per person, then the room keeps talking.
+     * A full batch, first reply included.
      *
-     * The first batch after the streamer speaks is sized to the roster so
-     * nobody answers the same line twice; the continuation that follows at
-     * once is where repeat participation happens. Capped at a dozen on a
-     * quick provider for speed — the round trip grows with output — and
-     * left at the roster on a slow one, where a small batch just adds a gap.
+     * It used to be sized to the roster so nobody answered twice, with the
+     * continuation carrying the rest — which put the continuation's latency
+     * on the critical path: ten lines drained in seven seconds and a slow
+     * refill was a visible gap. One-per-person now applies to the first
+     * roster's worth of lines and the rest flow normally, so one round trip
+     * covers the whole moment. Greetings and farewells stay one per person
+     * outright, so those batches are sized to the room.
      */
-    const quick = this.latencyMs < SLOW_PROVIDER_MS;
-    const wave = continuation
-      ? count
-      : Math.min(count, this.population.size, quick ? FIRST_REPLY_LINES : count);
+    const wave =
+      !continuation && ONE_SHOT_INTENTS.has(this.lastClassification.intent)
+        ? Math.min(count, this.population.size)
+        : count;
     this.inFlight = {
       id: this.issue(now),
       requestedAt: now,
-      supersedes: false,
+      supersedes: !continuation,
       wave: !continuation,
       phase: "active",
       utteranceId: this.utteranceId,
@@ -700,14 +715,15 @@ export class SimulationEngine {
     this.issuedAt.delete(pending.id);
 
     /**
-     * Stale means the streamer has spoken since. Nothing else.
+     * Stale means the room changed, not that the streamer kept talking.
      *
-     * A batch that was active when requested and lands after silence tipped
-     * into idle is still about the last thing said; an idle batch that lands
-     * one stage late is still about the silence. Finishing either beats a
-     * gap, and the batch for the new stage supersedes it on arrival anyway.
+     * An active reply landing after a newer active sentence is about
+     * something said one round trip ago — chat always is — and finishing it
+     * beats a gap; the reply to the newer line follows at once and takes
+     * over. What is stale: an arrival or idle batch landing after the
+     * streamer has spoken, which is about a room that had not heard them.
      */
-    if (pending.utteranceId !== this.utteranceId) return;
+    if (pending.phase !== "active" && pending.utteranceId !== this.utteranceId) return;
 
     if (batch.length === 0) {
       this.lastFailureAt = now;
@@ -871,8 +887,12 @@ export class SimulationEngine {
      * right for the chatter that follows and wrong here — it is how one
      * name answered "can yall hear me" twice while two others said nothing.
      */
-    if (reaction.wave || ONE_SHOT_INTENTS.has(intent)) {
-      for (const id of this.waveSpeakers.get(reaction.batchId) ?? []) barred.add(id);
+    const spoken = this.waveSpeakers.get(reaction.batchId);
+    if (
+      ONE_SHOT_INTENTS.has(intent) ||
+      (reaction.wave && (spoken?.size ?? 0) < this.population.size)
+    ) {
+      for (const id of spoken ?? []) barred.add(id);
     }
 
     /**

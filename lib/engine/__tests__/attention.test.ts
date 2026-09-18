@@ -48,21 +48,19 @@ describe("shouldReact", () => {
     ).toBe(1);
   });
 
-  it("shows some restraint on low-signal background talk", () => {
+  it("answers most casual talk and still skips a little", () => {
     /**
-     * This used to assert < 0.3, which turned out to encode a bug rather than
-     * a preference: `mundane` is around 60% of natural speech, so a 30% cap
-     * here set the response rate for the entire product and chat ignored most
-     * of what was said to it.
-     *
-     * Restraint still matters — chat reacting to literally every sentence is
-     * the other failure mode — so this asserts a band rather than a ceiling.
+     * `mundane` is around 60% of natural speech, so this band is the
+     * product's response rate. It was capped at 0.3, then 0.8 with two
+     * dampers that were always firing once chat became continuous; both
+     * read as chat ignoring the streamer. The gate keeps a small skip so
+     * chat is not a metronome, and that is all it keeps.
      */
     const rate = reactionRate(
       classification({ intent: "mundane", confidence: 0.15, energy: 0.15 }),
     );
-    expect(rate).toBeGreaterThan(0.35);
-    expect(rate).toBeLessThan(0.8);
+    expect(rate).toBeGreaterThan(0.75);
+    expect(rate).toBeLessThan(0.97);
   });
 
   it("reliably reacts to the streamer struggling", () => {
@@ -93,14 +91,17 @@ describe("shouldReact", () => {
     expect(unsure).toBeLessThan(sure);
   });
 
-  it("reacts less to a repeated intent", () => {
+  it("does not penalise a repeated intent", () => {
+    // `mundane` is the majority bucket, so "same intent as last time" was
+    // true for nearly every consecutive sentence and normal speech carried
+    // a permanent penalty for not changing subject.
     const fresh = reactionRate(classification({ intent: "story", energy: 0.2 }));
     const repeat = reactionRate(classification({ intent: "story", energy: 0.2 }), {
       recentVolume: 0,
       repeatsPrevious: true,
       repeatedAfterIgnore: false,
     });
-    expect(repeat).toBeLessThan(fresh);
+    expect(repeat).toBeCloseTo(fresh, 1);
   });
 
   it("does not penalise repetition when the streamer is escalating", () => {
@@ -111,11 +112,14 @@ describe("shouldReact", () => {
     expect(repeat).toBeCloseTo(fresh, 1);
   });
 
-  it("reacts less when chat has been busy", () => {
+  it("does not tire out — chat is always busy now", () => {
+    // Fatigue was tuned for a chat that went quiet between utterances. With
+    // continuous chat "recent volume" sat at its cap permanently, which cost
+    // three in ten of everything the streamer said.
     const c = classification({ intent: "showing", confidence: 0.8 });
     const rested = reactionRate(c, { recentVolume: 0, repeatsPrevious: false, repeatedAfterIgnore: false });
-    const tired = reactionRate(c, { recentVolume: 60, repeatsPrevious: false, repeatedAfterIgnore: false });
-    expect(tired).toBeLessThan(rested);
+    const busy = reactionRate(c, { recentVolume: 60, repeatsPrevious: false, repeatedAfterIgnore: false });
+    expect(busy).toBeCloseTo(rested, 1);
   });
 
   it("never suppresses reaction entirely, however tired", () => {
