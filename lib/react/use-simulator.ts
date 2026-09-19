@@ -317,49 +317,83 @@ export function useSimulator(): UseSimulatorResult {
   }, []);
 
   /**
-   * Accepts a line as though the streamer had spoken it.
+   * Opens the microphone and the speech recogniser, creating whichever is
+   * missing.
    *
-   * The same entry point speech uses, deliberately: a typed message that took
-   * a different path would test a different product.
+   * The one place listening begins. It used to live inside start(), so a
+   * session begun any other way — typing first — never got a recogniser,
+   * and resume() only restarted one that already existed. The mic stayed off
+   * until Clear. Called from start() and resume(); never fatal: a denied
+   * permission is reported and chat carries on.
    */
-  const say = useCallback(
-    (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
-      const engine = ensureEngine();
-      const at = Date.now();
-      const outcome = engine.handleTranscript(trimmed, at, undefined, true);
-      if (!outcome) return;
+  const listen = useCallback(async () => {
+    // Mic capture and speech recognition are independent: recognition opens
+    // its own capture internally, while MicSession exists for the level
+    // meter and the loudness signal the classifier uses.
+    const mic = new MicSession();
+    micRef.current = mic;
+    mic.events.on("level", (level) => {
+      for (const handler of levelSubscribers.current) handler(level);
+    });
+    mic.events.on("error", ({ message }) => setError(message));
 
-      setHeard((previous) => {
-        const next = [
-          ...previous,
-          {
-            id: `${at}-typed-${trimmed.length}`,
-            text: trimmed,
-            at,
-            source: "typed" as const,
-            // Always. The streamer deliberately sent this.
-            heard: true,
-            outcome,
-          },
-        ];
-        return next.length > 30 ? next.slice(-30) : next;
+    if (!(await mic.start())) {
+      // The error event above already said why. Chat carries on without it.
+      micRef.current = null;
+      return;
+    }
+    setMicLabel(mic.label);
+
+    if (!providerRef.current) {
+      const provider = createProvider();
+      if (!provider) {
+        // No recognition in this browser. The session still runs — arrival,
+        // idle and typed input all work — it just cannot hear you.
+        setError(
+          "Speech recognition isn't available in this browser, so the microphone won't transcribe. Typed input still works. Chrome or Edge can hear you.",
+        );
+        return;
+      }
+      providerRef.current = provider;
+
+      provider.events.on("final", ({ text }) => {
+        setInterim("");
+        // Loudness at the moment of speech sharpens the classifier: the same
+        // words shouted and muttered should not produce the same reaction.
+        const energy = micRef.current?.recentEnergy() ?? undefined;
+        const at = Date.now();
+        const outcome = engineRef.current?.handleTranscript(text, at, energy);
+        if (!outcome) return;
+
+        setHeard((previous) => {
+          const next = [
+            ...previous,
+            {
+              id: `${at}-mic-${text.length}`,
+              text,
+              at,
+              source: "microphone" as const,
+              heard: outcome.reacted,
+              outcome,
+            },
+          ];
+          return next.length > 30 ? next.slice(-30) : next;
+        });
+
+        // Accepted input invalidates the queue; the pump refills on the next tick.
+        if (outcome.reacted) void pump(engineRef.current!, at);
       });
-      startTicking();
-      /**
-       * Typing is an unambiguous intent to start.
-       *
-       * The pill means "the simulation is running", which is now true. The
-       * microphone is untouched — micLabel stays empty and the meter stays
-       * flat — so the two states remain distinguishable at a glance, and this
-       * is the only way to use the product without granting mic permission.
-       */
-      setStatus((current) => (current === "running" ? current : "running"));
-      void pump(engine, at);
-    },
-    [ensureEngine, startTicking, pump],
-  );
+
+      provider.events.on("interim", ({ text }) => setInterim(text));
+
+      provider.events.on("error", ({ message, fatal }) => {
+        setError(message);
+        if (fatal) setStatus("error");
+      });
+    }
+
+    await providerRef.current.start();
+  }, [pump]);
 
   const start = useCallback(async () => {
     if (status === "running" || status === "starting") return;
@@ -374,85 +408,16 @@ export function useSimulator(): UseSimulatorResult {
      * The room starts before the microphone does.
      *
      * Arrival chat, idle chat and typed input need nothing from the mic, and
-     * the mic can take a second to come up or fail outright. Waiting on it
-     * meant a denied permission left the engine loop never started and the
-     * button stuck on "Starting". Now the loop runs first and the mic joins
-     * when it can; a mic problem is reported, not fatal.
+     * the mic can take a second to come up or fail outright. Everything up
+     * to here runs synchronously, so a caller can start() and immediately
+     * hand the engine a line — say() relies on that.
      */
     pausedRef.current = false;
     startTicking();
     setStatus("running");
 
-    // Mic capture and speech recognition are independent: recognition opens
-    // its own capture internally, while MicSession exists for the level
-    // meter and the loudness signal the classifier uses.
-    const mic = new MicSession();
-    micRef.current = mic;
-
-    mic.events.on("level", (level) => {
-      for (const handler of levelSubscribers.current) handler(level);
-    });
-    mic.events.on("error", ({ message }) => {
-      setError(message);
-    });
-
-    const micOk = await mic.start();
-    if (!micOk) {
-      // The error event above already said why. Chat carries on without it.
-      micRef.current = null;
-      return;
-    }
-    setMicLabel(mic.label);
-
-    const provider = createProvider();
-    providerRef.current = provider;
-
-    if (!provider) {
-      // No recognition in this browser. The session still runs — arrival,
-      // idle and typed input all work — it just cannot hear you.
-      setError(
-        "Speech recognition isn't available in this browser, so the microphone won't transcribe. Typed input still works. Chrome or Edge can hear you.",
-      );
-      return;
-    }
-
-    provider.events.on("final", ({ text }) => {
-      setInterim("");
-      // Loudness at the moment of speech sharpens the classifier: the same
-      // words shouted and muttered should not produce the same reaction.
-      const energy = micRef.current?.recentEnergy() ?? undefined;
-      const at = Date.now();
-      const outcome = engineRef.current?.handleTranscript(text, at, energy);
-      if (!outcome) return;
-
-      setHeard((previous) => {
-        const next = [
-          ...previous,
-          {
-            id: `${at}-mic-${text.length}`,
-            text,
-            at,
-            source: "microphone" as const,
-            heard: outcome.reacted,
-            outcome,
-          },
-        ];
-        return next.length > 30 ? next.slice(-30) : next;
-      });
-
-      // Accepted input invalidates the queue; the pump refills on the next tick.
-      if (outcome.reacted) void pump(engineRef.current!, at);
-    });
-
-    provider.events.on("interim", ({ text }) => setInterim(text));
-
-    provider.events.on("error", ({ message, fatal }) => {
-      setError(message);
-      if (fatal) setStatus("error");
-    });
-
-    await provider.start();
-  }, [status, ensureEngine, startTicking, pump]);
+    await listen();
+  }, [status, ensureEngine, startTicking, listen]);
 
   const stop = useCallback(() => {
     stopTicking();
@@ -491,26 +456,63 @@ export function useSimulator(): UseSimulatorResult {
   const resume = useCallback(async () => {
     if (status !== "paused") return;
 
-    const mic = new MicSession();
-    micRef.current = mic;
-    mic.events.on("level", (level) => {
-      for (const handler of levelSubscribers.current) handler(level);
-    });
-    mic.events.on("error", ({ message }) => {
-      setError(message);
-      setStatus("error");
-    });
-
-    // Permission is already granted at this point, so this does not
-    // re-prompt — it just reopens the stream.
-    if (!(await mic.start())) return;
-    setMicLabel(mic.label);
-
+    // Chat first, synchronously, then the mic — same order as start(), so a
+    // mic that fails to reopen cannot leave the room stuck on Paused.
     pausedRef.current = false;
     engineRef.current?.resume(Date.now());
-    void providerRef.current?.start();
     setStatus("running");
-  }, [status]);
+
+    await listen();
+  }, [status, listen]);
+
+  /**
+   * Accepts a line as though the streamer had spoken it.
+   *
+   * The same entry point speech uses, deliberately: a typed message that took
+   * a different path would test a different product.
+   */
+  const say = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+
+      /**
+       * Typing is an unambiguous intent to start — through the real entry.
+       *
+       * This used to flip the status to "running" and start the tick loop on
+       * its own, which skipped the microphone entirely: the button then read
+       * Pause, so Play never ran, and the mic stayed off until Clear. Typing
+       * while paused left the engine paused under a green pill. Both now go
+       * through start()/resume(), whose synchronous half has the engine
+       * running before the line below reaches it.
+       */
+      if (status === "idle" || status === "error") void start();
+      else if (status === "paused") void resume();
+
+      const engine = ensureEngine();
+      const at = Date.now();
+      const outcome = engine.handleTranscript(trimmed, at, undefined, true);
+      if (!outcome) return;
+
+      setHeard((previous) => {
+        const next = [
+          ...previous,
+          {
+            id: `${at}-typed-${trimmed.length}`,
+            text: trimmed,
+            at,
+            source: "typed" as const,
+            // Always. The streamer deliberately sent this.
+            heard: true,
+            outcome,
+          },
+        ];
+        return next.length > 30 ? next.slice(-30) : next;
+      });
+      void pump(engine, at);
+    },
+    [status, start, resume, ensureEngine, pump],
+  );
 
   /**
    * Wipes the session and returns to the idle state.
