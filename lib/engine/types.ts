@@ -97,8 +97,13 @@ export interface Viewer {
   emoteAffinity: number;
   /** Wall-clock ms of this viewer's last message; throttles repeat speakers. */
   lastSpokeAt: number;
-  /** Everything this viewer has said this session, normalised. */
-  said: Set<string>;
+  /**
+   * Everything this viewer has said this session, normalised, with when.
+   *
+   * Words are never repeated in a session; an emote block may come back
+   * after a while, the way people post KEKW more than once a stream.
+   */
+  said: Map<string, number>;
   /** When this viewer last performed each conversational action. */
   intents: Map<Intent, number>;
   /** Messages this session. */

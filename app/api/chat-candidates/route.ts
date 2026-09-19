@@ -134,7 +134,7 @@ export function createCandidatesHandler(deps: HandlerDeps) {
       // Validation runs server-side so a client cannot skip it.
       const validated = validateReactions(generated.reactions, candidateRequest.recent, {
         emotes: candidateRequest.emotes,
-        emoteEvent: candidateRequest.classification.intent === "directive",
+        directive: candidateRequest.classification.intent === "directive",
       });
 
       if (generated.status === "ok" && validated.reactions.length > 0) {

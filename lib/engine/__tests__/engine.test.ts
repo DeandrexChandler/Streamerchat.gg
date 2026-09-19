@@ -822,15 +822,46 @@ describe("viewers do not repeat themselves", () => {
     }
   });
 
-  it("never lets one viewer post the same emote block twice", async () => {
+  it("never lets one viewer post the same emote block twice within a minute", async () => {
     const { messages } = await drive(120_000, {
       settings: { messagesPerSecond: 0.2 },
       provider: saying(["KEKW", "KEKW KEKW", "KEKW KEKW KEKW"]),
       script: [[1000, "lmao"], [40_000, "lol"], [80_000, "haha"]],
     });
     for (const [, lines] of byUser(messages)) {
-      const blocks = lines.map((m) => m.text.split(" ")[0]);
-      expect(new Set(blocks).size).toBe(blocks.length);
+      for (let i = 0; i < lines.length; i += 1) {
+        for (let j = i + 1; j < lines.length; j += 1) {
+          if (lines[i].text.split(" ")[0] !== lines[j].text.split(" ")[0]) continue;
+          expect(lines[j].at - lines[i].at).toBeGreaterThanOrEqual(60_000);
+        }
+      }
+    }
+  });
+
+  it("lets a viewer post the same emote again later in the stream", async () => {
+    // People post KEKW more than once a stream. A lifetime ban ran viewers
+    // out of emotes mid-session and left slots unfilled.
+    const { messages } = await drive(300_000, {
+      settings: { messagesPerSecond: 0.2 },
+      provider: saying(["KEKW"]),
+      script: [[1000, "lmao"], [100_000, "lol"], [200_000, "haha"]],
+    });
+    const again = [...byUser(messages).values()].some(
+      (lines) => lines.filter((m) => m.text === "KEKW").length > 1,
+    );
+    expect(again).toBe(true);
+  });
+
+  it("still never repeats a worded line from the same viewer all session", async () => {
+    const { messages } = await drive(300_000, {
+      settings: { messagesPerSecond: 0.2 },
+      provider: saying(["that was insane", "no way"]),
+      script: [[1000, "lmao"], [100_000, "lol"], [200_000, "haha"]],
+    });
+    for (const [, lines] of byUser(messages)) {
+      const worded = lines.map((m) => m.text).filter((t) => /insane|no way/.test(t));
+      const base = worded.map((t) => (t.includes("insane") ? "insane" : "no way"));
+      expect(new Set(base).size).toBe(base.length);
     }
   });
 

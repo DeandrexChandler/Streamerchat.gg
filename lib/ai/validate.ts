@@ -147,10 +147,31 @@ export interface ValidationOptions {
   /** Emote names the pack can render, to recognise a bare-emote line. */
   emotes?: readonly string[];
   /**
-   * The streamer asked for emotes ("spam W"). A mostly-emote batch is the
-   * right answer, and the cap below does not apply.
+   * The streamer asked chat to post something ("spam W", "say hi").
+   *
+   * The engine posts the token itself from about half the room, so the
+   * model's batch is the talk around it. Lines that are only the token —
+   * "W", "WWWWW", "hiiiii" — are capped harder, or they stack on the
+   * engine's spam into a wall.
    */
-  emoteEvent?: boolean;
+  directive?: boolean;
+}
+
+/** Bare-token share a directive batch may carry: the engine supplies the spam. */
+const MAX_DIRECTIVE_BARE_SHARE = 0.1;
+
+/**
+ * Whether a line is only emotes and one repeated word.
+ *
+ * "W W W", "WWWWW", "hiiiii", "PogChamp hi" — nothing anyone reads.
+ * Repeated letters collapse, so "hiiiii" and "hi" are the same word.
+ */
+function isBare(text: string, emoteNames: ReadonlySet<string>): boolean {
+  const words = text
+    .split(/\s+/)
+    .filter((word) => word && !emoteNames.has(word))
+    .map((word) => word.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/(.)\1+/g, "$1"));
+  return new Set(words).size <= 1 && words.every((word) => word.length <= 3);
 }
 
 /**
@@ -224,12 +245,15 @@ export function validateReactions(
    * Kept from the front of the batch in the order the model wrote them, so
    * the ones that survive are the ones it reached for first.
    */
-  if (!options.emoteEvent && emoteNames.size > 0 && out.length > 0) {
-    const allowed = Math.max(1, Math.floor(out.length * MAX_EMOTE_ONLY_SHARE));
+  if (out.length > 0 && (options.directive || emoteNames.size > 0)) {
+    const share = options.directive ? MAX_DIRECTIVE_BARE_SHARE : MAX_EMOTE_ONLY_SHARE;
+    const allowed = Math.max(1, Math.floor(out.length * share));
     let kept = 0;
     for (let i = 0; i < out.length; i += 1) {
-      const words = out[i].text.split(/\s+/);
-      if (!words.every((word) => emoteNames.has(word))) continue;
+      const bare = options.directive
+        ? isBare(out[i].text, emoteNames)
+        : out[i].text.split(/\s+/).every((word) => emoteNames.has(word));
+      if (!bare) continue;
       if (kept < allowed) {
         kept += 1;
         continue;

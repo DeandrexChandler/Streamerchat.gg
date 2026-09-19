@@ -119,6 +119,17 @@ const RETRY_SLOT_MS = 400;
 
 
 
+/**
+ * How soon one viewer may post the same emote block again.
+ *
+ * Words are once per session per viewer. Emote blocks cannot be: people
+ * post KEKW many times a stream, and a lifetime ban made viewers run out of
+ * emotes mid-session — slots went unfilled and hype moments ran slower than
+ * the calm before them. A minute is long enough that nobody is seen posting
+ * the same block twice in the same moment.
+ */
+const EMOTE_BLOCK_WINDOW_MS = 60_000;
+
 /** Chat lines kept for the prompt, so a refill does not echo them. */
 const RECENT_LINES = 20;
 
@@ -209,6 +220,7 @@ export class SimulationEngine {
   private filter: Filter;
 
   private emotes: readonly Emote[];
+  private emoteNames = new Set<string>();
   private readonly topics = new TopicTracker();
   /** When the rate governor says the next message should land. */
   private nextEmitAt: number;
@@ -295,6 +307,7 @@ export class SimulationEngine {
     this.settings = { ...DEFAULT_SETTINGS, ...options.settings };
     this.rng = createRng(options.seed);
     this.emotes = options.emotes ?? [];
+    this.emoteNames = new Set(this.emotes.map((emote) => emote.name));
     this.filter = createFilter(this.settings);
 
     this.population = new Population(this.rng, rosterSizeFor(this.settings.messagesPerSecond));
@@ -334,6 +347,7 @@ export class SimulationEngine {
 
   setEmotes(emotes: readonly Emote[]): void {
     this.emotes = emotes;
+    this.emoteNames = new Set(emotes.map((emote) => emote.name));
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -949,7 +963,11 @@ export class SimulationEngine {
           ? [reaction.text, result.message.text]
           : [result.message.text]
       ).map(normaliseSaid);
-      if (said.some((text) => this.population.hasSaid(result.viewerId, text))) {
+      const block =
+        result.message.source !== "ai" ||
+        result.message.text.split(/\s+/).every((word) => this.emoteNames.has(word));
+      const window = block ? EMOTE_BLOCK_WINDOW_MS : Number.POSITIVE_INFINITY;
+      if (said.some((text) => this.population.hasSaid(result.viewerId, text, at, window))) {
         // This person has said this. Someone else may not have.
         barred.add(result.viewerId);
         continue;

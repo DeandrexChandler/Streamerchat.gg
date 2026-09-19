@@ -40,18 +40,26 @@ import type {
  */
 const EMOTE_FORWARD: Partial<Record<EmoteMoment, number>> = {
   /**
-   * Small everywhere but directives. The model already writes a few bare
-   * emote lines per batch; converting a majority of greetings on top of
-   * that is how "hello can yall hear me" got a wall of waves instead of
-   * "loud and clear". Words carry the answer; emotes decorate it.
+   * Targets about 15% emote-only lines on screen for ordinary talk, with
+   * the model's own one or two bare emotes per batch on top. Every intent
+   * gets some: only five were listed, so showing, story, questions and
+   * casual talk had none, and a normal sentence got back a wall of full
+   * sentences. Hype moments run a little higher.
+   *
+   * Directives are low on purpose. The spam itself comes from
+   * complyWithDirective; converting the talk around it to emotes as well is
+   * how "spam W" became 84% token-or-emote with nothing readable in it.
    */
-  greeting: 0.12,
-  farewell: 0.12,
-  directive: 0.75,
-  achievement: 0.15,
-  excitement: 0.12,
-  idle: 0.08,
+  greeting: 0.15,
+  farewell: 0.15,
+  achievement: 0.2,
+  excitement: 0.2,
+  directive: 0.1,
+  idle: 0.1,
 };
+
+/** Emote-only share for every intent not listed above. */
+const DEFAULT_EMOTE_FORWARD = 0.12;
 
 /**
  * Chance a worded line gets an emote appended when the model did not ask
@@ -196,16 +204,17 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
   }
 
   /**
-   * Compliance fades with the topic.
+   * About half the room complies, then fewer.
    *
-   * "spam W" should fill the screen with W and then move on to people talking
-   * *about* the spam, which is what a real chat does. Holding compliance at
-   * 100% for the topic's whole life is the wall-of-identical-tokens failure.
+   * "spam W" should put W all over the screen with people visibly talking
+   * around it, then move on to people talking *about* it. It was 85% then
+   * 45%, which with emote conversion on top made the first ten seconds 84%
+   * token-or-emote. Tuned for about half.
    */
   if (
     text === null &&
     topic?.intent === "directive" &&
-    rng.chance(stage === "reacting" ? 0.85 : stage === "developing" ? 0.45 : 0.15)
+    rng.chance(stage === "reacting" ? 0.6 : stage === "developing" ? 0.45 : 0.1)
   ) {
     const complied = complyWithDirective(topic.directiveTarget, speaker, emotes, reaction, rng);
     if (complied) {
@@ -223,8 +232,15 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
      * The generated line is dropped for this message, not for the batch: the
      * rest of the room still says the words.
      */
-    const forward = settings.emotesEnabled ? (EMOTE_FORWARD[moment] ?? 0) : 0;
-    const only = forward > 0 && rng.chance(forward) ? emoteReply(emotes, moment, reaction, rng) : null;
+    const forward = settings.emotesEnabled
+      ? (EMOTE_FORWARD[moment] ?? DEFAULT_EMOTE_FORWARD)
+      : 0;
+    // Same rule as the trailer below: only when the model said how the line
+    // feels, so the emote chosen has something to match.
+    const only =
+      forward > 0 && (reaction.emotion || reaction.emote) && rng.chance(forward)
+        ? emoteReply(emotes, moment, reaction, rng)
+        : null;
 
     if (only) {
       text = only;

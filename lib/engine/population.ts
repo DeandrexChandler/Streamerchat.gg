@@ -79,7 +79,7 @@ export class Population {
       verbosity: this.rng.float(...personality.verbosity),
       emoteAffinity: this.rng.float(...personality.emoteAffinity),
       lastSpokeAt: 0,
-      said: new Set(),
+      said: new Map(),
       intents: new Map(),
       spoken: 0,
     };
@@ -211,9 +211,15 @@ export class Population {
 
   // ------------------------------------------------------------- memory
 
-  /** Whether this viewer has already said this, normalised. */
-  hasSaid(viewerId: string, normalised: string): boolean {
-    return this.viewers.get(viewerId)?.said.has(normalised) === true;
+  /** Whether this viewer said this, normalised, within the window. Default: ever. */
+  hasSaid(
+    viewerId: string,
+    normalised: string,
+    now = 0,
+    withinMs = Number.POSITIVE_INFINITY,
+  ): boolean {
+    const at = this.viewers.get(viewerId)?.said.get(normalised);
+    return at !== undefined && now - at < withinMs;
   }
 
   /** When this viewer last did this, or undefined if never. */
@@ -225,7 +231,7 @@ export class Population {
   remember(viewerId: string, normalised: readonly string[], intent: Intent, at: number): void {
     const viewer = this.viewers.get(viewerId);
     if (!viewer) return;
-    for (const text of normalised) viewer.said.add(text);
+    for (const text of normalised) viewer.said.set(text, at);
     viewer.intents.set(intent, at);
     viewer.spoken += 1;
   }

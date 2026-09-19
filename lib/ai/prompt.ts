@@ -47,10 +47,10 @@ const MAX_RECENT_IN_PROMPT = 3;
 const RULES = [
   "Every line is someone talking TO the streamer about what they just said. Not about the stream in general, not to each other.",
   "Mostly lowercase, natural slang, the occasional ALL CAPS line. Typos and stretched words happen: heyyy, slayyy, YOOO, ur, rn, tho.",
-  "Most lines are four words or more. A few are one or two. Vary the length, the tone and the mood — some hyped, some deadpan, some confused, some warm, some blunt but never mean.",
+  "About a quarter of lines are short reactions, one to three words: 'bet', 'Ayo????', 'nah fr', 'mhmm', 'slayyy', 'W take'. The rest are four words or more. Vary the tone and the mood — some hyped, some deadpan, some confused, some warm, some blunt but never mean.",
   "Answer directly, react with a feeling, ask a follow-up, give an opinion when one was asked for. A couple of lines can be looser or a joke, but the batch stays about what was just said.",
   "Style, not script: 'nah he wylin', 'Ayo????', 'grown adult btw', 'slayyy', 'mhmm', 'i think you can idk tho', 'bet that', 'ooo good idea', 'leave the wall'.",
-  "Do not fall back on one-word filler like W, nice, real, same, lol unless it genuinely answers the line.",
+  "Short lines still react to what was said — not generic filler like nice, real, same, lol stacked up with nothing behind them.",
   "Attach an emote to a line with the \"emote\" field when it fits the feeling. Do not write lines that are only an emote name, except one or two per batch at most.",
   "No trailing punctuation on short lines. No hashtags. No quotation marks. No @mentions. Never number the lines.",
   "NEVER insult, mock, correct or express disappointment in the streamer. Not once, not as a joke. Teasing yourselves is fine.",
@@ -181,9 +181,23 @@ function situation(request: CandidateRequest): string[] {
     "The streamer just said, to chat:",
     `  "${utterance}"`,
     "",
-    "Answer THAT. Every line responds to it: answers it, feels something about it, asks about it, or gives the opinion it asked for. If it changes or contradicts something said earlier, chat notices.",
+    request.classification.intent === "directive" ? DIRECTIVE_NOTE : ANSWER_NOTE,
   ];
 }
+
+const ANSWER_NOTE =
+  "Answer THAT. Every line responds to it: answers it, feels something about it, asks about it, or gives the opinion it asked for. If it changes or contradicts something said earlier, chat notices.";
+
+/**
+ * The streamer asked chat to post something.
+ *
+ * The engine posts the requested token itself, from about half the room, so
+ * the model's job is the other half — the people reacting to being asked.
+ * Left to itself the model wrote the token too, and the two stacked into a
+ * wall with nothing readable in it.
+ */
+const DIRECTIVE_NOTE =
+  "They told chat to post something. About half of chat just posts it, and that part is already handled. Write what the rest of chat says: reacting to being asked, hyping it up, joking about it, the odd one adding a word or two to it. Do not write lines that are only the thing they asked for.";
 
 function describeSilence(seconds: number): string {
   if (seconds < 90) return `${Math.max(1, Math.round(seconds))} seconds`;

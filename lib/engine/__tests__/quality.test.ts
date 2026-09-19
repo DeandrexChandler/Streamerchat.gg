@@ -23,8 +23,9 @@ async function session(
   script: ReadonlyArray<readonly [number, string]>,
   durationMs: number,
   settings = {},
+  seed = 7,
 ) {
-  const engine = new SimulationEngine({ seed: 7, now: 0, emotes: FIXTURE_EMOTES, settings });
+  const engine = new SimulationEngine({ seed, now: 0, emotes: FIXTURE_EMOTES, settings });
   const messages: ChatMessage[] = [];
   const requests: CandidateRequest[] = [];
   const queue = [...script];
@@ -110,16 +111,34 @@ describe("normal active batches", () => {
 });
 
 describe("explicit emote events", () => {
-  it("let spam W be mostly W and emotes", async () => {
-    const { messages } = await session(wordy, [[1000, "spam W"]], 12_000);
-    const replies = messages.filter((m) => m.at >= 1000);
-    expect(replies.length).toBeGreaterThan(5);
+  it("make spam W about half W and emotes, with people talking around it", async () => {
+    // Was a wall: 84% token-or-emote in the first ten seconds, nothing
+    // readable in it. Target is about half. Averaged over seeds.
     const names = new Set([...EMOTE_NAMES, "W"]);
-    // The wall of W while the moment is hot; people start talking about it
-    // after — so measure the first wave, not the whole minute.
-    const wave = replies.slice(0, 10);
-    const emoteish = wave.filter((m) => m.text.split(" ").every((w) => names.has(w)));
-    expect(emoteish.length / wave.length).toBeGreaterThan(0.7);
+    let spam = 0;
+    let total = 0;
+    for (let seed = 1; seed <= 10; seed += 1) {
+      const { messages } = await session(wordy, [[1000, "spam W"]], 11_000, {}, seed);
+      const replies = messages.filter((m) => m.at >= 1000);
+      total += replies.length;
+      spam += replies.filter((m) => m.text.split(" ").every((w) => names.has(w))).length;
+    }
+    expect(total).toBeGreaterThan(50);
+    expect(spam / total).toBeGreaterThan(0.35);
+    expect(spam / total).toBeLessThan(0.65);
+  });
+
+  it("taper after the first ten seconds", async () => {
+    const names = new Set([...EMOTE_NAMES, "W"]);
+    let spam = 0;
+    let total = 0;
+    for (let seed = 1; seed <= 10; seed += 1) {
+      const { messages } = await session(wordy, [[1000, "spam W"]], 26_000, {}, seed);
+      const later = messages.filter((m) => m.at >= 11_000);
+      total += later.length;
+      spam += later.filter((m) => m.text.split(" ").every((w) => names.has(w))).length;
+    }
+    expect(spam / total).toBeLessThan(0.3);
   });
 });
 
@@ -144,10 +163,20 @@ describe("bare-emote cap in validation", () => {
     expect(reactions.every((r) => batch.some((b) => b.text === r.text))).toBe(true);
   });
 
-  it("lets a spam event be mostly emotes", () => {
-    const batch = [line("KEKW"), line("Pog"), line("Sadge"), line("W W W")];
-    const { reactions } = validateReactions(batch, [], { emotes, emoteEvent: true });
-    expect(reactions).toHaveLength(4);
+  it("caps bare-token lines harder in a directive batch, keeping the talk", () => {
+    // The engine posts the token itself from about half the room. The
+    // model's own "W", "WWWWW", "hiiiii" lines stacked on that into a wall.
+    const batch = [
+      line("W"), line("WWWWW"), line("W W W"), line("hiiiii"), line("KEKW"),
+      line("we are so spamming it"), line("my keyboard is smoking rn"),
+      line("anything for you dre"), line("W for the stream fr"), line("consider it spammed"),
+    ];
+    const { reactions } = validateReactions(batch, [], { emotes, directive: true });
+    const texts = reactions.map((r) => r.text);
+    expect(texts.filter((t) => ["W", "WWWWW", "W W W", "hiiiii", "KEKW"].includes(t))).toHaveLength(1);
+    for (const talk of ["we are so spamming it", "my keyboard is smoking rn", "anything for you dre", "W for the stream fr", "consider it spammed"]) {
+      expect(texts).toContain(talk);
+    }
   });
 });
 
@@ -164,12 +193,25 @@ describe("diagnostics", () => {
 
 describe("events and pace", () => {
   it("lifts activity during a hype moment and settles back after", async () => {
-    const provider = createMockProvider();
-    const { messages } = await session(provider, [[30_000, "LETS GO WE FINALLY DID IT"]], 120_000, { messagesPerSecond: 1 });
-    const rate = (from: number, to: number) => messages.filter((m) => m.at >= from && m.at < to).length / ((to - from) / 1000);
-    const before = rate(5_000, 30_000);
-    const burst = rate(30_000, 45_000);
-    const after = rate(80_000, 120_000);
+    // Averaged over seeds: gaps are Poisson, so any one 15s window is noisy.
+    // A single seed missed the bar on 3 of 20 even when the lift was real.
+    let before = 0;
+    let burst = 0;
+    let after = 0;
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const { messages } = await session(
+        createMockProvider(),
+        [[30_000, "LETS GO WE FINALLY DID IT"]],
+        120_000,
+        { messagesPerSecond: 1 },
+        seed,
+      );
+      const rate = (from: number, to: number) =>
+        messages.filter((m) => m.at >= from && m.at < to).length / ((to - from) / 1000);
+      before += rate(5_000, 30_000);
+      burst += rate(30_000, 45_000);
+      after += rate(80_000, 120_000);
+    }
     expect(burst).toBeGreaterThan(before * 1.3);
     expect(after).toBeLessThan(burst);
   });
@@ -193,5 +235,23 @@ describe("events and pace", () => {
     expect(b.phase).toBe("active");
     expect(a.utterance).toBe(b.utterance);
     expect(a.classification.intent).toBe(b.classification.intent);
+  });
+});
+
+describe("normal talk", () => {
+  it("carries some emote-only lines, not a wall of full sentences", async () => {
+    // "look at this roof" is `showing`, which had no emote-only share at all:
+    // only five intents were listed. Target is about 15%.
+    const names = new Set(EMOTE_NAMES);
+    let bare = 0;
+    let total = 0;
+    for (let seed = 1; seed <= 10; seed += 1) {
+      const { messages } = await session(wordy, [[1000, "look at this roof I just built"]], 21_000, {}, seed);
+      const replies = messages.filter((m) => m.at >= 1000);
+      total += replies.length;
+      bare += replies.filter((m) => m.text.split(" ").every((w) => names.has(w))).length;
+    }
+    expect(bare / total).toBeGreaterThan(0.08);
+    expect(bare / total).toBeLessThan(0.25);
   });
 });
