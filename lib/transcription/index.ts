@@ -17,7 +17,3 @@ export function createProvider(): TranscriptionProvider | null {
   const webSpeech = new WebSpeechProvider();
   return webSpeech.isSupported() ? webSpeech : null;
 }
-
-export function isSpeechRecognitionAvailable(): boolean {
-  return new WebSpeechProvider().isSupported();
-}

@@ -53,7 +53,6 @@ export const OverlayPublishSchema = z.object({
   clear: z.boolean().default(false),
 });
 
-export type OverlayPublish = z.infer<typeof OverlayPublishSchema>;
 
 /** SSE event names. `chat` carries `{ messages }`; `clear` carries `{}`. */
 export type OverlayEventName = "chat" | "clear";

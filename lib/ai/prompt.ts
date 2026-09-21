@@ -54,6 +54,7 @@ const RULES = [
   "Attach an emote to a line with the \"emote\" field when it fits the feeling. Do not write lines that are only an emote name, except one or two per batch at most.",
   "No trailing punctuation on short lines. No hashtags. No quotation marks. No @mentions. Never number the lines.",
   "NEVER insult, mock, correct or express disappointment in the streamer. Not once, not as a joke. Teasing yourselves is fine.",
+  "What the streamer said came from speech recognition, which mangles slang: 'low key' for 'lowkey', 'goaded' for 'goated', initialisms spelled out letter by letter, a name heard as a word. Read it the way it was meant and answer that. Never point out the wording or correct it.",
 ];
 
 /**

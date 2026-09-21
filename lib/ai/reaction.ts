@@ -11,17 +11,6 @@ import type { GenerationPhase } from "./provider";
  * emote fits. The model never picks an image URL.
  */
 
-export type ReactionKind =
-  | "answer"
-  | "reaction"
-  | "question"
-  | "opinion"
-  | "joke"
-  | "callback"
-  | "agree"
-  | "disagree"
-  | "emote";
-
 /**
  * Emotional colour, reused verbatim from the emote system's own moods so the
  * selector needs no translation table.
@@ -60,8 +49,6 @@ export const ReactionSchema = z.object({
 });
 
 export type Reaction = z.infer<typeof ReactionSchema>;
-
-export const ReactionBatchSchema = z.array(ReactionSchema).max(70);
 
 /** A reaction plus the bookkeeping the queue needs. */
 export interface QueuedReaction extends Reaction {

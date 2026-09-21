@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "simulate": "tsx scripts/simulate.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "sample": "tsx scripts/sample-chat.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

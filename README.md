@@ -66,9 +66,8 @@ minute by phase, slots that waited, lines dropped, dry ticks.
 | Variable | Purpose |
 |---|---|
 | `GOOGLE_API_KEY` | **Required.** Gemini, for all chat generation. |
-| `OPENAI_API_KEY` | Optional. Whisper transcription for browsers without the Web Speech API. Transcription only. |
 
-**Never prefix either with `NEXT_PUBLIC_`.** That inlines the value into the
+**Never prefix it with `NEXT_PUBLIC_`.** That inlines the value into the
 client bundle and ships your key to every visitor.
 
 The model is fixed at `gemini-3.5-flash-lite`. There is no model or
@@ -95,7 +94,7 @@ provider selection.
 app/
   (shell)/         simulator, settings, obs
   overlay/         OBS browser source
-  api/             chat-candidates, emotes, overlay relay, transcribe
+  api/             chat-candidates, emotes, overlay relay
 lib/
   ai/              provider contract, prompts, gemini, mock, validation, config
   engine/          engine, director, scheduler, population, roster, generation

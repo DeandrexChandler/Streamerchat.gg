@@ -49,12 +49,3 @@ export function loadOverlayKey(): string {
   }
 }
 
-/** Forgets the current key. The next load mints a new one. */
-export function resetOverlayKey(): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Nothing to do — the caller reloads either way.
-  }
-}

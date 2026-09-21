@@ -79,7 +79,7 @@ already said it.
 app/
   (shell)/         pages with app chrome — simulator, settings, obs
   overlay/         OBS browser source; NO chrome, deliberately outside (shell)
-  api/             chat-candidates (the one route that spends money), emotes, overlay, transcribe
+  api/             chat-candidates (the one route that spends money), emotes, overlay
 lib/
   ai/              provider contract, prompt per phase, gemini, mock (tests only), validate, config
   engine/          engine, director, scheduler, population, roster, generation, topics, classifier, attention, rng
