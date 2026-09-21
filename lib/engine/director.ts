@@ -3,6 +3,7 @@ import type { GenerationPhase } from "../ai/provider";
 import type { QueuedReaction } from "../ai/reaction";
 import { pickSemanticEmote, type EmoteMoment } from "../emotes/semantic";
 import type { Population } from "./population";
+import { strangerShareFor } from "./roster";
 import type { Rng } from "./rng";
 import type { MomentumBand, Topic, TopicStage } from "./topics";
 import type {
@@ -330,6 +331,18 @@ function pickTopicSpeaker(options: DirectOneOptions): Viewer | undefined {
    * greeted — and that has to hold *alongside* the topic's own speaker
    * choice, not instead of it.
    */
+  /**
+   * A name passing through.
+   *
+   * Rolled before the roster is consulted at all: a stranger has no history
+   * to collide with, so none of the rules below apply to them. This is what
+   * puts sixty names in four minutes on screen at a busy tier while the
+   * regulars still carry the conversation.
+   */
+  if (rng.chance(strangerShareFor(options.settings.messagesPerSecond))) {
+    return population.stranger();
+  }
+
   const barred = new Set(excludeSpeakers ?? []);
   if (!topic) return population.pickSpeaker(now, barred, pick);
 

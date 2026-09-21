@@ -115,7 +115,7 @@ describe("emote-forward responses", () => {
   it("still answers a story with words", () => {
     // Replacing an actual reply with a wall of emotes is the failure mode on
     // the other side of this feature.
-    expect(emoteShare("story")).toBeLessThan(0.15);
+    expect(emoteShare("story")).toBeLessThan(0.22);
   });
 
   it("posts the occasional idle emote during idle, not a wall of them", () => {

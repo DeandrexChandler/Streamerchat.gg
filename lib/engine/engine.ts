@@ -1020,13 +1020,16 @@ export class SimulationEngine {
       if (last !== undefined && now - last < cooldown) barred.add(viewer.id);
     }
     /**
-     * A preference, never a gag order.
+     * A preference for most things, an absolute for hello and goodbye.
      *
-     * If everyone in the room did this recently, the room still answers —
-     * a streamer saying hello to a chat that just said hello gets a hello
-     * back, from the same people. The per-line memory and the per-topic
-     * rule still stop any one of them saying it twice.
+     * When everyone has done a thing recently the bar normally lifts, so
+     * the room still answers rather than going silent. Greeting cannot work
+     * that way: with three regulars the whole room is on cooldown after
+     * three hellos, the bar lifted immediately, and the same name said hi
+     * twice nine seconds apart — the exact tell this rule exists to stop.
+     * Here the line goes unsaid instead, and the room is quieter for it.
      */
+    if (ONE_SHOT_INTENTS.has(intent)) return barred;
     return barred.size >= this.population.size ? new Set() : barred;
   }
 

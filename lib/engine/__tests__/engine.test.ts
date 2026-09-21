@@ -800,10 +800,11 @@ describe("viewers do not repeat themselves", () => {
   it("never lets one viewer post the same line twice in a session", async () => {
     const { messages } = await drive(300_000, {
       settings: { messagesPerSecond: 0.2 },
-      provider: saying(["same", "fair", "true", "yeah", "real", "facts"]),
+      provider: saying(["same", "fair", "true", "yeah", "real", "facts", "valid", "bet", "word", "sure", "right", "ok"]),
       script: [[1000, "hey"], [60_000, "hmm"], [120_000, "ok"], [180_000, "well"], [240_000, "so"]],
     });
-    expect(messages.length).toBeGreaterThan(15);
+    // Three regulars at this tier, each never repeating a line all session.
+    expect(messages.length).toBeGreaterThan(10);
     for (const [, lines] of byUser(messages)) {
       const texts = lines.map((m) => m.text);
       expect(new Set(texts).size).toBe(texts.length);
@@ -872,11 +873,12 @@ describe("viewers do not repeat themselves", () => {
     // person greeting twice.
     const { messages } = await drive(140_000, {
       settings: { messagesPerSecond: 0.2 },
-      provider: saying(["yo", "hey", "sup", "hii", "hello", "wassup"]),
+      provider: saying(["yo", "hey", "sup", "hii", "hello", "wassup", "heya", "ello", "hai", "yoo"]),
       script: [[1000, "hey everyone"], [90_000, "hi again chat"]],
     });
     const greetings = messages.filter((m) => m.kind === "greeting");
-    expect(greetings.length).toBeGreaterThan(6);
+    // Two waves in a three-person room.
+    expect(greetings.length).toBeGreaterThan(3);
     for (const [, lines] of byUser(greetings)) {
       for (let i = 1; i < lines.length; i++) {
         expect(lines[i].at - lines[i - 1].at).toBeGreaterThan(15_000);
@@ -929,22 +931,44 @@ describe("viewers do not repeat themselves", () => {
 
 describe("viewer identity", () => {
   it.each([
-    [0.2, 5],
-    [0.5, 8],
-    [1, 10],
-    [4, 10],
-  ])("keeps the roster at %s/sec to %i people", async (rate, size) => {
+    [0.2, 3],
+    [0.5, 4],
+    [1, 6],
+    [1.5, 8],
+    [2, 10],
+    [4, 12],
+  ])("keeps %s/sec to %i regulars", async (rate, size) => {
     const { engine } = await drive(5_000, { settings: { messagesPerSecond: rate } });
     expect(engine.stats().simulated).toBe(size);
   });
 
-  it("never shows more than ten distinct names at a slow tier", async () => {
-    const { messages } = await drive(300_000, {
-      settings: { messagesPerSecond: 1 },
-      script: [[1000, "hey"], [60_000, "what do you think"], [120_000, "let's go"], [200_000, "so anyway"]],
+  it("shows only regulars at the slowest tier", async () => {
+    // Three viewers who each turn up once are not a chat. The slowest tier
+    // has no stranger tail at all, so every name is one he will see again.
+    const { messages, engine } = await drive(300_000, {
+      settings: { messagesPerSecond: 0.2 },
+      script: [[1000, "hey"], [100_000, "what do you think"], [200_000, "let's go"]],
     });
-    expect(messages.length).toBeGreaterThan(100);
-    expect(new Set(messages.map((m) => m.username)).size).toBeLessThanOrEqual(10);
+    expect(messages.length).toBeGreaterThan(20);
+    expect(new Set(messages.map((m) => m.username)).size).toBe(engine.stats().simulated);
+  });
+
+  it("lets a long tail of one-off names through at a busy tier", async () => {
+    // Both real mid-size chats showed 64 to 68 distinct names in four
+    // minutes while their top ten carried about 40%. A flat roster cannot.
+    const { messages, engine } = await drive(240_000, {
+      settings: { messagesPerSecond: 1 },
+      script: [[1000, "hey"], [60_000, "what do you think"], [120_000, "let's go"]],
+    });
+    const names = [...new Set(messages.map((m) => m.username))];
+    expect(names.length).toBeGreaterThan(30);
+
+    // The regulars still carry the conversation.
+    const counts = new Map<string, number>();
+    for (const m of messages) counts.set(m.username, (counts.get(m.username) ?? 0) + 1);
+    const top = [...counts.values()].sort((a, b) => b - a).slice(0, engine.stats().simulated);
+    const share = top.reduce((a, b) => a + b, 0) / messages.length;
+    expect(share).toBeGreaterThan(0.5);
   });
 
   it("keeps a name's colour and identity for the whole session", async () => {
@@ -963,16 +987,14 @@ describe("viewer identity", () => {
     for (const message of messages) expect(message.color).toMatch(/^#[0-9A-F]{6}$/);
   });
 
-  it("turns the room over slowly at the top tier, never growing it", async () => {
+  it("keeps the regular roster fixed while strangers churn past", async () => {
     const { messages, engine } = await drive(300_000, {
       settings: { messagesPerSecond: 4 },
       script: [[1000, "hey"], [100_000, "what do you think"], [200_000, "let's go"]],
     });
-    const names = new Set(messages.map((m) => m.username));
-    // Five minutes at one swap a minute: a handful of new faces, not a feed.
-    expect(names.size).toBeGreaterThan(10);
-    expect(names.size).toBeLessThanOrEqual(16);
-    expect(engine.stats().simulated).toBe(10);
+    // Most names at CHAOS are strangers; the regular roster does not grow.
+    expect(new Set(messages.map((m) => m.username)).size).toBeGreaterThan(50);
+    expect(engine.stats().simulated).toBe(12);
   });
 
   it("never turns over a slow room", async () => {
@@ -1025,6 +1047,9 @@ describe("viewer identity", () => {
   });
 
   it("makes people take turns outside a hype moment", async () => {
+    // Four regulars at this tier, so somebody following themselves now and
+    // then is what a small room does. It is the wall of one name that is
+    // the tell, and the consecutive cap covers that.
     const { messages } = await drive(120_000, {
       settings: { messagesPerSecond: 0.5 },
       script: [[1000, "so yesterday something happened at work"]],
@@ -1033,6 +1058,21 @@ describe("viewer identity", () => {
     for (let i = 1; i < messages.length; i++) {
       if (messages[i].username === messages[i - 1].username) backToBack += 1;
     }
-    expect(backToBack / Math.max(1, messages.length)).toBeLessThan(0.1);
+    expect(backToBack / Math.max(1, messages.length)).toBeLessThan(0.2);
+  });
+
+  it("gives strangers no history to run out of", async () => {
+    // A regular never repeats a line all session. A stranger has no session:
+    // two different one-off names may well say the same thing.
+    const { messages } = await drive(120_000, {
+      settings: { messagesPerSecond: 4 },
+      provider: saying(["W", "insane", "no way"]),
+      script: [[1000, "we just won"]],
+    });
+    expect(messages.length).toBeGreaterThan(50);
+    for (const [, lines] of byUser(messages)) {
+      const texts = lines.map((m) => m.text);
+      expect(new Set(texts).size).toBe(texts.length);
+    }
   });
 });

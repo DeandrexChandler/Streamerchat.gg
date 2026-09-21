@@ -27,8 +27,16 @@ export interface PickOptions {
   burst?: boolean;
 }
 
+/**
+ * One-off names, kept only so their ids resolve while their message is in
+ * flight and so a name is never reissued. Bounded: a long session at CHAOS
+ * would otherwise accumulate thousands.
+ */
+const STRANGER_MEMORY = 60;
+
 export class Population {
   private readonly viewers = new Map<string, Viewer>();
+  private readonly strangers = new Map<string, Viewer>();
   private readonly takenNames = new Set<string>();
   private cooldownMs = DEFAULT_COOLDOWN_MS;
   /**
@@ -55,11 +63,34 @@ export class Population {
   }
 
   get(id: string): Viewer | undefined {
-    return this.viewers.get(id);
+    return this.viewers.get(id) ?? this.strangers.get(id);
   }
 
-  /** Adds one viewer with a personality sampled by archetype weight. */
+  /**
+   * A name passing through: one message, no history, never seen again.
+   *
+   * Built the same way a regular is, so it is indistinguishable on screen —
+   * the difference is only that nothing here persists or accumulates.
+   */
+  stranger(): Viewer {
+    const viewer = this.build();
+    this.strangers.set(viewer.id, viewer);
+    if (this.strangers.size > STRANGER_MEMORY) {
+      const oldest = this.strangers.keys().next().value;
+      if (oldest !== undefined) this.strangers.delete(oldest);
+    }
+    return viewer;
+  }
+
+  /** Adds one regular with a personality sampled by archetype weight. */
   add(): Viewer {
+    const viewer = this.build();
+    this.viewers.set(viewer.id, viewer);
+    return viewer;
+  }
+
+  /** Builds a viewer without filing it anywhere. */
+  private build(): Viewer {
     const personality = this.rng.weighted(PERSONALITY_LIST, (p) => p.weight);
     const { name, words } = generateUsername(
       this.rng,
@@ -84,7 +115,6 @@ export class Population {
       spoken: 0,
     };
 
-    this.viewers.set(viewer.id, viewer);
     return viewer;
   }
 
@@ -200,7 +230,7 @@ export class Population {
   }
 
   markSpoke(viewerId: string, at: number): void {
-    const viewer = this.viewers.get(viewerId);
+    const viewer = this.get(viewerId);
     if (viewer) viewer.lastSpokeAt = at;
   }
 
@@ -218,18 +248,18 @@ export class Population {
     now = 0,
     withinMs = Number.POSITIVE_INFINITY,
   ): boolean {
-    const at = this.viewers.get(viewerId)?.said.get(normalised);
+    const at = this.get(viewerId)?.said.get(normalised);
     return at !== undefined && now - at < withinMs;
   }
 
   /** When this viewer last did this, or undefined if never. */
   lastDid(viewerId: string, intent: Intent): number | undefined {
-    return this.viewers.get(viewerId)?.intents.get(intent);
+    return this.get(viewerId)?.intents.get(intent);
   }
 
   /** Records a message against its viewer. */
   remember(viewerId: string, normalised: readonly string[], intent: Intent, at: number): void {
-    const viewer = this.viewers.get(viewerId);
+    const viewer = this.get(viewerId);
     if (!viewer) return;
     for (const text of normalised) viewer.said.set(text, at);
     viewer.intents.set(intent, at);
@@ -238,6 +268,7 @@ export class Population {
 
   /** A new session: everyone forgets what they said. Identities stay. */
   forget(): void {
+    this.strangers.clear();
     for (const viewer of this.viewers.values()) {
       viewer.said.clear();
       viewer.intents.clear();
