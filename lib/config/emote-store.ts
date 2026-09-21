@@ -101,35 +101,3 @@ export function mergeEmotes(
   }
   return applyEmoteTags([...byName.values()], tags);
 }
-
-/** Id of the auto-imported popular pack, so the UI can label it. */
-export const AUTO_PACK_ID = "7tv-popular";
-
-const AUTO_FLAG_KEY = "streamerchat-gg:emote-auto-imported:v1";
-
-/**
- * Whether the first-run import has already happened.
- *
- * Tracked separately from "is a pack present" on purpose: deleting the pack is
- * a deliberate choice, and re-importing on the next launch would silently
- * override it.
- */
-export function hasAutoImported(): boolean {
-  if (typeof window === "undefined") return true;
-  try {
-    return window.localStorage.getItem(AUTO_FLAG_KEY) === "1";
-  } catch {
-    // No storage means we cannot remember a refusal either, so claim it is
-    // done rather than re-importing on every render.
-    return true;
-  }
-}
-
-export function markAutoImported(): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(AUTO_FLAG_KEY, "1");
-  } catch {
-    // Non-fatal; worst case it retries next launch.
-  }
-}

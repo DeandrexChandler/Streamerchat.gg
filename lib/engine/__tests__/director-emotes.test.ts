@@ -53,7 +53,7 @@ function direct(
     stage: "reacting",
     band: "viral",
     population: new Population(createRng(seed + 1000), 20),
-    settings: { ...DEFAULT_SETTINGS, emotesEnabled: true },
+    settings: DEFAULT_SETTINGS,
     emotes: EMOTES,
     reaction: reaction("some generated sentence", intent, { phase }),
     phase,
@@ -171,16 +171,8 @@ describe("emote-forward responses", () => {
     }
   });
 
-  it("leaves the generated line alone when emotes are switched off", () => {
-    for (let seed = 0; seed < 60; seed += 1) {
-      const result = direct(seed, {
-        settings: { ...DEFAULT_SETTINGS, emotesEnabled: false },
-        reaction: reaction("hey there", "greeting"),
-      });
-      if (result) expect(result.message.text).toBe("hey there");
-    }
-  });
-
+  // No pack is the only way to turn emotes off: there is no toggle, and no
+  // default pack, so a fresh install runs as pure text until one is imported.
   it("never posts emotes when the pack is empty", () => {
     for (let seed = 0; seed < 40; seed += 1) {
       const result = direct(seed, { emotes: [], reaction: reaction("hey", "greeting") });

@@ -1,11 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import {
-  AUTO_PACK_ID,
-  hasAutoImported,
-  localEmotePackStore,
-  markAutoImported,
-  mergeEmotes,
-} from "../emote-store";
+import { describe, expect, it } from "vitest";
+import { mergeEmotes } from "../emote-store";
 
 /**
  * Minimal localStorage stand-in.
@@ -45,28 +39,5 @@ describe("mergeEmotes", () => {
     const mine = { ...FIXTURE_EMOTES[0], id: "mine", url: "https://example.test/x.webp" };
     const merged = mergeEmotes([pack("a", [FIXTURE_EMOTES[0]]), pack("b", [mine])]);
     expect(merged.find((e) => e.name === "KEKW")!.id).toBe("mine");
-  });
-});
-
-describe("auto-import bookkeeping", () => {
-  beforeEach(() => storage.clear());
-
-  it("starts un-imported", () => {
-    expect(hasAutoImported()).toBe(false);
-  });
-
-  it("remembers once marked", () => {
-    markAutoImported();
-    expect(hasAutoImported()).toBe(true);
-  });
-
-  it("stays marked after the pack is deleted, so it does not come back", () => {
-    markAutoImported();
-    localEmotePackStore.save([]);
-    expect(hasAutoImported()).toBe(true);
-  });
-
-  it("names the auto-imported pack so the UI can label it", () => {
-    expect(AUTO_PACK_ID).toBe("7tv-popular");
   });
 });

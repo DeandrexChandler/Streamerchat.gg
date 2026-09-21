@@ -139,7 +139,7 @@ describe("event composition", () => {
         stage: "developing",
         band: "low",
         population: new Population(createRng(seed + 500), 12),
-        settings: { ...DEFAULT_SETTINGS, emotesEnabled: true },
+        settings: DEFAULT_SETTINGS,
         emotes: EMOTES,
         reaction: {
           text: "that was actually wild",
