@@ -303,14 +303,31 @@ describe("emotes and words interleave", () => {
       .map((m) => m.text.split(" ").every((w) => names.has(w)));
   };
 
-  it("never posts more than two emote-only lines in a row", async () => {
+  it("never lets either kind run away", async () => {
+    // Not a cap on emotes: a rule that forbids two in a row is itself a
+    // tell. The share is steered against what just went out, so three
+    // together can happen and five cannot — and the same correction is what
+    // stops a long block of sentences.
     for (let seed = 1; seed <= 6; seed += 1) {
-      let run = 0;
+      let emotes = 0;
+      let words = 0;
       for (const isEmote of await shapes(seed)) {
-        run = isEmote ? run + 1 : 0;
-        expect(run).toBeLessThanOrEqual(2);
+        emotes = isEmote ? emotes + 1 : 0;
+        words = isEmote ? 0 : words + 1;
+        expect(emotes).toBeLessThanOrEqual(4);
+        expect(words).toBeLessThanOrEqual(22);
       }
     }
+  });
+
+  it("allows a couple of emotes together rather than strictly alternating", async () => {
+    // The other failure: perfectly alternating shapes reads as a machine.
+    let pairs = 0;
+    for (let seed = 1; seed <= 6; seed += 1) {
+      const all = await shapes(seed);
+      for (let i = 1; i < all.length; i += 1) if (all[i] && all[i - 1]) pairs += 1;
+    }
+    expect(pairs).toBeGreaterThan(0);
   });
 
   it("still hits the emote share while interleaving it", async () => {
@@ -322,8 +339,8 @@ describe("emotes and words interleave", () => {
       emotes += all.filter(Boolean).length;
     }
     expect(total).toBeGreaterThan(200);
-    expect(emotes / total).toBeGreaterThan(0.08);
-    expect(emotes / total).toBeLessThan(0.28);
+    expect(emotes / total).toBeGreaterThan(0.12);
+    expect(emotes / total).toBeLessThan(0.4);
   });
 
   it("spreads them through the stream rather than front-loading the batch", async () => {

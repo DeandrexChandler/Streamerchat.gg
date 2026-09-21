@@ -52,19 +52,35 @@ const EMOTE_FORWARD: Partial<Record<EmoteMoment, number>> = {
    * complyWithDirective; converting the talk around it to emotes as well is
    * how "spam W" became 84% token-or-emote with nothing readable in it.
    */
-  greeting: 0.15,
-  farewell: 0.15,
-  achievement: 0.2,
-  excitement: 0.2,
+  greeting: 0.3,
+  farewell: 0.3,
+  achievement: 0.32,
+  excitement: 0.32,
   directive: 0.1,
-  idle: 0.1,
+  idle: 0.22,
 };
 
-/** Emote-only share for every intent not listed above. */
-const DEFAULT_EMOTE_FORWARD = 0.12;
+/**
+ * Emote-only share for every intent not listed above.
+ *
+ * A quarter, not an eighth. At 12% the average gap between emotes was
+ * eight messages, so chat read as a block of sentences with an occasional
+ * emote dropped in — and no amount of steering fixes that, because the
+ * share itself sets how far apart they land. A quarter puts one every
+ * three or four messages, which is what interleaving actually looks like,
+ * and sits well under what both real channels measured.
+ */
+const DEFAULT_EMOTE_FORWARD = 0.25;
 
-/** Emotes alone, this many in a row, and the next line has words. */
-const MAX_EMOTE_RUN = 2;
+/**
+ * How hard the emote share is pushed back toward its target.
+ *
+ * At 1 the correction is gentle and long runs of both kinds survive. At 2
+ * a run of three has already driven the chance to nothing and a dry
+ * stretch has tripled it, which interleaves the two without forbidding
+ * anything.
+ */
+const STEER_GAIN = 2;
 
 /**
  * Chance a worded line gets an emote appended when the model did not ask
@@ -256,17 +272,22 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
         : (EMOTE_FORWARD[moment] ?? DEFAULT_EMOTE_FORWARD);
 
     /**
-     * Steered toward the target rather than sampled at it.
+     * Steered toward the target rather than sampled at it, or capped.
      *
-     * An independent coin flip per message hits the right average and still
-     * clumps: runs are what independent draws do. Correcting against what
-     * just went out keeps the same share while interleaving it, and the
-     * hard stop at two in a row is what the streamer actually asked for.
+     * An independent coin flip hits the right average and still clumps,
+     * because runs are what independent draws do. A hard cap fixes that and
+     * replaces it with a different tell: emotes that can never appear twice
+     * running is a rule you can feel. The chance is pushed against whatever
+     * just went out instead — hard enough that a fifth emote in a row is
+     * vanishingly unlikely, loose enough that three or four happen when the
+     * moment carries them.
+     *
+     * The same correction shortens the other kind of run: a stretch with no
+     * emotes drives the chance up, which stops five sentences running as
+     * surely as it stops five emotes.
      */
-    const forward =
-      (options.emoteRun ?? 0) >= MAX_EMOTE_RUN
-        ? 0
-        : Math.max(0, Math.min(0.7, target + (target - (options.recentEmoteShare ?? target))));
+    const recent = options.recentEmoteShare ?? target;
+    const forward = Math.max(0, Math.min(0.85, target + STEER_GAIN * (target - recent)));
     // Same rule as the trailer below: only when the model said how the line
     // feels, so the emote chosen has something to match.
     const only =

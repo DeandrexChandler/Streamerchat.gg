@@ -144,11 +144,30 @@ const SCREEN_TRIGGER_COOLDOWN_MS = 12_000;
 /** How long a screen event keeps colouring the room after it was seen. */
 const EVENT_LIFETIME_MS = 20_000;
 
+/**
+ * How much eagerness leans on release order, against a random draw of 0..1.
+ *
+ * Small. A strict sort grouped every bare emote at the front of the batch;
+ * it also meant the longest lines always sorted last, and a batch that is
+ * superseded before it drains quietly loses whatever sorted last. A gentle
+ * lean keeps reflexive lines arriving a little earlier without either.
+ */
+const EAGERNESS_LEAN = 0.4;
+
 /** Messages the emote/words mix is measured over. */
 const SHAPE_WINDOW = 10;
 
 /** How far down the queue to look for a line of the other shape. */
 const LOOKAHEAD = 6;
+
+/**
+ * Emotes in a row before the queue is searched for words.
+ *
+ * Four, not two: a couple in a row is chat, and stepping in that early is
+ * the cap the streamer did not want. This only fires once a run is long
+ * enough to read as the room getting stuck.
+ */
+const LOOKAHEAD_AFTER = 4;
 
 /** Chat lines kept for the prompt, so a refill does not echo them. */
 const RECENT_LINES = 20;
@@ -846,12 +865,16 @@ export class SimulationEngine {
      * A strict sort put every bare-emote line at the front of the batch,
      * because the model gives those eagerness 1 and a written sentence 0.2.
      * The room then posted five or six emotes in a row and switched back to
-     * words — the clumping the streamer noticed. The jitter is wide enough
-     * to interleave the two ends while a reflexive line still tends to
-     * arrive before a composed one.
+     * words — the clumping the streamer noticed.
+     *
+     * The jitter is wide enough to span most of that range, for a second
+     * reason: a batch is often superseded before it drains, so whatever
+     * sorts last is quietly dropped. Under a strict sort that was always
+     * the longest lines, and chat lost the sentences it had been asked to
+     * write. A reflexive line still leans earlier; it is no longer a queue.
      */
     for (const reaction of queued) {
-      reaction.order = (reaction.eagerness ?? 0.5) + this.rng.float(-0.35, 0.35);
+      reaction.order = (reaction.eagerness ?? 0.5) * EAGERNESS_LEAN + this.rng.float(0, 1);
     }
     queued.sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
 
@@ -1017,7 +1040,11 @@ export class SimulationEngine {
      * two kinds interleaved.
      */
     let index = 0;
-    if (this.emoteRun() >= 2 && this.reactions[0] && this.isEmoteOnly(this.reactions[0].text)) {
+    if (
+      this.emoteRun() >= LOOKAHEAD_AFTER &&
+      this.reactions[0] &&
+      this.isEmoteOnly(this.reactions[0].text)
+    ) {
       const found = this.reactions
         .slice(0, LOOKAHEAD)
         .findIndex((candidate) => !this.isEmoteOnly(candidate.text));

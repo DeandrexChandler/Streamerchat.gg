@@ -156,7 +156,8 @@ describe("buildPrompt", () => {
 
     it("asks for words first and emotes as attachments", () => {
       const prompt = buildPrompt(request());
-      expect(prompt).toMatch(/four words or more/i);
+      expect(prompt).toMatch(/half your lines are one to three words/i);
+      expect(prompt).toMatch(/four-to-ten word thoughts/i);
       expect(prompt).toMatch(/do not write lines that are only an emote name/i);
       expect(prompt).toMatch(/talking to the streamer/i);
       expect(prompt).toMatch(/no @mentions/i);
