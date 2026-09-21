@@ -100,6 +100,13 @@ scripts/simulate.ts  headless harness with the mock provider
 docs/                product-scope, architecture, roadmap
 ```
 
+## Branching
+
+**Never commit to `main`.** Work happens on a branch and reaches `main`
+through a pull request, even working solo: the branch is what makes a
+change reviewable and revertable as a unit. `main` is only ever
+fast-forwarded by a merged PR, never pushed to directly.
+
 ## Non-negotiables
 
 **Randomness goes through `lib/engine/rng.ts`, never `Math.random()`.**

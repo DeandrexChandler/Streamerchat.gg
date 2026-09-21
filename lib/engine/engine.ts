@@ -144,6 +144,12 @@ const SCREEN_TRIGGER_COOLDOWN_MS = 12_000;
 /** How long a screen event keeps colouring the room after it was seen. */
 const EVENT_LIFETIME_MS = 20_000;
 
+/** Messages the emote/words mix is measured over. */
+const SHAPE_WINDOW = 10;
+
+/** How far down the queue to look for a line of the other shape. */
+const LOOKAHEAD = 6;
+
 /** Chat lines kept for the prompt, so a refill does not echo them. */
 const RECENT_LINES = 20;
 
@@ -244,6 +250,15 @@ export class SimulationEngine {
   private emitSequence = 0;
   /** Recent speakers as [viewerId, username]. */
   private recentSpeakers: Array<readonly [string, string]> = [];
+  /**
+   * Whether each of the last few messages was emotes alone.
+   *
+   * Chat is a mix, and a mix is not the same as the right average: five
+   * emotes then five sentences has the same share as alternating them and
+   * reads nothing like it. This is what the next message is balanced
+   * against.
+   */
+  private recentShapes: boolean[] = [];
 
   // ---------------------------------------------------------- conversation
 
@@ -396,6 +411,7 @@ export class SimulationEngine {
     this.lastClassification = null;
     this.recentLines = [];
     this.recentSpeakers = [];
+    this.recentShapes = [];
     this.lastSpeakerId = null;
     this.consecutive = 0;
     this.lastTurnoverAt = now;
@@ -824,9 +840,20 @@ export class SimulationEngine {
       phase: pending.phase,
       wave: pending.wave,
     }));
-    // Most eager first within the batch. Absent eagerness sorts to the
-    // middle, so an unannotated batch still releases in a plausible order.
-    queued.sort((a, b) => (b.eagerness ?? 0.5) - (a.eagerness ?? 0.5));
+    /**
+     * Eager first, but only as a lean.
+     *
+     * A strict sort put every bare-emote line at the front of the batch,
+     * because the model gives those eagerness 1 and a written sentence 0.2.
+     * The room then posted five or six emotes in a row and switched back to
+     * words — the clumping the streamer noticed. The jitter is wide enough
+     * to interleave the two ends while a reflexive line still tends to
+     * arrive before a composed one.
+     */
+    for (const reaction of queued) {
+      reaction.order = (reaction.eagerness ?? 0.5) + this.rng.float(-0.35, 0.35);
+    }
+    queued.sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
 
     if (pending.supersedes) {
       this.reactions = queued;
@@ -958,11 +985,45 @@ export class SimulationEngine {
    * queue topped up, so in a healthy session this only goes quiet for the
    * length of one request.
    */
+  /** How many of the last messages in a row were emotes alone. */
+  private emoteRun(): number {
+    let run = 0;
+    for (let i = this.recentShapes.length - 1; i >= 0 && this.recentShapes[i]; i -= 1) run += 1;
+    return run;
+  }
+
+  /** Share of the recent window that was emotes alone. */
+  private recentEmoteShare(): number {
+    if (this.recentShapes.length === 0) return 0;
+    const emotes = this.recentShapes.filter(Boolean).length;
+    return emotes / this.recentShapes.length;
+  }
+
+  private isEmoteOnly(text: string): boolean {
+    const words = text.trim().split(/\s+/);
+    return words.length > 0 && words.every((word) => this.emoteNames.has(word));
+  }
+
   private produceOne(at: number): boolean {
     // Peeked, not popped. Consumed only once a message actually exists —
     // pulling it off first meant a tick with no available speaker silently
     // discarded a generated line.
-    const reaction = this.reactions[0];
+    /**
+     * Take the head, unless it would extend a run of emotes.
+     *
+     * The model writes bare-emote lines of its own, and no amount of
+     * shuffling stops two landing together. Looking a little way down the
+     * queue for something with words costs nothing and is what keeps the
+     * two kinds interleaved.
+     */
+    let index = 0;
+    if (this.emoteRun() >= 2 && this.reactions[0] && this.isEmoteOnly(this.reactions[0].text)) {
+      const found = this.reactions
+        .slice(0, LOOKAHEAD)
+        .findIndex((candidate) => !this.isEmoteOnly(candidate.text));
+      if (found > 0) index = found;
+    }
+    const reaction = this.reactions[index];
     if (!reaction) return false;
 
     const topic = reaction.phase === "active" ? this.currentTopic(at) : null;
@@ -1019,6 +1080,8 @@ export class SimulationEngine {
         event: at - this.eventAt < EVENT_LIFETIME_MS ? this.event : undefined,
         excludeSpeakers: barred,
         burst,
+        emoteRun: this.emoteRun(),
+        recentEmoteShare: this.recentEmoteShare(),
         population: this.population,
         settings: this.settings,
         emotes: this.emotes,
@@ -1052,7 +1115,7 @@ export class SimulationEngine {
         continue;
       }
 
-      this.reactions.shift();
+      this.reactions.splice(index, 1);
       this.population.remember(result.viewerId, said, intent, at);
       if (reaction.wave || ONE_SHOT_INTENTS.has(intent)) {
         const wave = this.waveSpeakers.get(reaction.batchId) ?? new Set<string>();
@@ -1062,6 +1125,8 @@ export class SimulationEngine {
       this.consecutive = result.viewerId === this.lastSpeakerId ? this.consecutive + 1 : 1;
       this.lastSpeakerId = result.viewerId;
       if (topic) this.topics.recordParticipation(topic, result.viewerId);
+      this.recentShapes.push(this.isEmoteOnly(result.message.text));
+      if (this.recentShapes.length > SHAPE_WINDOW) this.recentShapes.shift();
       this.scheduler.enqueueAt(result.message, at);
       return true;
     }
@@ -1074,7 +1139,7 @@ export class SimulationEngine {
      * line that fails twice is one nobody in the room can say — everyone who
      * could has — and it is dropped rather than left to block the batch.
      */
-    this.reactions.shift();
+    this.reactions.splice(index, 1);
     const attempts = (reaction.attempts ?? 0) + 1;
     if (attempts < 2) this.reactions.push({ ...reaction, attempts });
     else this.linesDropped += 1;

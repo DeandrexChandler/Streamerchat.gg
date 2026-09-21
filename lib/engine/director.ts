@@ -63,6 +63,9 @@ const EMOTE_FORWARD: Partial<Record<EmoteMoment, number>> = {
 /** Emote-only share for every intent not listed above. */
 const DEFAULT_EMOTE_FORWARD = 0.12;
 
+/** Emotes alone, this many in a row, and the next line has words. */
+const MAX_EMOTE_RUN = 2;
+
 /**
  * Chance a worded line gets an emote appended when the model did not ask
  * for one but did say how the line feels. Only then: an emote chosen with
@@ -162,6 +165,10 @@ export interface DirectOneOptions {
   burst?: boolean;
   /** What the screen is doing, when capture is on. Drives composition. */
   event?: GameEvent;
+  /** How many messages in a row have been emotes alone. */
+  emoteRun?: number;
+  /** Share of the recent window that was emotes alone, 0..1. */
+  recentEmoteShare?: number;
   now: number;
   /** Monotonic counter, so two messages in one millisecond cannot share an id. */
   sequence: number;
@@ -242,11 +249,24 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
      * emotes over a menu is noise, the same wall over a death is chat.
      * Without capture this falls back to the intent, as before.
      */
-    const forward = !settings.emotesEnabled
+    const target = !settings.emotesEnabled
       ? 0
       : options.event
         ? profileFor(options.event).emoteShare
         : (EMOTE_FORWARD[moment] ?? DEFAULT_EMOTE_FORWARD);
+
+    /**
+     * Steered toward the target rather than sampled at it.
+     *
+     * An independent coin flip per message hits the right average and still
+     * clumps: runs are what independent draws do. Correcting against what
+     * just went out keeps the same share while interleaving it, and the
+     * hard stop at two in a row is what the streamer actually asked for.
+     */
+    const forward =
+      (options.emoteRun ?? 0) >= MAX_EMOTE_RUN
+        ? 0
+        : Math.max(0, Math.min(0.7, target + (target - (options.recentEmoteShare ?? target))));
     // Same rule as the trailer below: only when the model said how the line
     // feels, so the emote chosen has something to match.
     const only =
