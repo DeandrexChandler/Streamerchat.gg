@@ -10,6 +10,7 @@ import { MAX_EMOTES_IN_PROMPT } from "../ai/prompt";
 import { shouldReact } from "./attention";
 import { classify } from "./classifier";
 import { ONE_SHOT_INTENTS, directOne } from "./director";
+import { profileFor, type GameEvent } from "../ai/moment";
 import {
   FAILURE_BACKOFF_MS,
   INITIAL_LATENCY_MS,
@@ -130,6 +131,19 @@ const RETRY_SLOT_MS = 400;
  */
 const EMOTE_BLOCK_WINDOW_MS = 60_000;
 
+/**
+ * How often a screen change may pull a batch forward.
+ *
+ * A death deserves a reaction; a flickering health bar does not deserve
+ * four. Twelve seconds is roughly one extra call a minute on a chaotic
+ * game, which is the difference between about five calls a minute and
+ * eight.
+ */
+const SCREEN_TRIGGER_COOLDOWN_MS = 12_000;
+
+/** How long a screen event keeps colouring the room after it was seen. */
+const EVENT_LIFETIME_MS = 20_000;
+
 /** Chat lines kept for the prompt, so a refill does not echo them. */
 const RECENT_LINES = 20;
 
@@ -161,6 +175,8 @@ export interface EngineStats {
   slotsWaited: number;
   /** Lines dropped because nobody in the room could ever say them. */
   linesDropped: number;
+  /** What the model last saw on screen, when capture is on. */
+  event?: GameEvent;
   /** Smoothed provider latency the planner is sizing against. */
   latencyMs: number;
 }
@@ -267,6 +283,19 @@ export class SimulationEngine {
   /** What the queue currently holds, for staleness checks. */
   private current: Pending | null = null;
   private lastFailureAt = Number.NEGATIVE_INFINITY;
+
+  /**
+   * What the screen was last doing, and when something big last happened.
+   *
+   * The event drives composition: how emote-heavy the room is and how fast
+   * it moves. Chat is only as loud as the moment deserves, which is the
+   * whole reason emote spam reads as noise when nothing is on screen.
+   */
+  private event: GameEvent | undefined;
+  private eventAt = 0;
+  /** A screen change waiting to be turned into a request. */
+  private pendingScreenEvent = false;
+  private lastScreenTriggerAt = Number.NEGATIVE_INFINITY;
   /** Batches served this phase. Startup uses it to greet only once. */
   private phaseBatches = 0;
   /** Paused: nothing is planned and nothing is released. */
@@ -370,6 +399,9 @@ export class SimulationEngine {
     this.lastSpeakerId = null;
     this.consecutive = 0;
     this.lastTurnoverAt = now;
+    this.event = undefined;
+    this.eventAt = 0;
+    this.pendingScreenEvent = false;
     this.population.forget();
     this.topics.reset();
     this.dropBatch();
@@ -392,6 +424,20 @@ export class SimulationEngine {
     this.lastSpeechAt = now;
     this.nextEmitAt = now;
     if (this.phase === "idle") this.phase = this.history.length > 0 ? "active" : "startup";
+  }
+
+  /**
+   * The screen moved enough to be worth reacting to.
+   *
+   * Only a request for a batch, never a message: the engine still has to
+   * ask the model what actually happened, and the model still has to say
+   * something worth posting. Rate-limited here rather than at the caller
+   * so a flashing game cannot spend the key.
+   */
+  screenEvent(now: number): void {
+    if (now - this.lastScreenTriggerAt < SCREEN_TRIGGER_COOLDOWN_MS) return;
+    this.lastScreenTriggerAt = now;
+    this.pendingScreenEvent = true;
   }
 
   /** Clears queued messages. Used on stop and clear. */
@@ -551,6 +597,21 @@ export class SimulationEngine {
     if (this.inFlight) return null;
     if (now - this.lastFailureAt < FAILURE_BACKOFF_MS) return null;
 
+    /**
+     * Something happened on screen.
+     *
+     * This is the one thing that pulls the room out of idle without a word
+     * being said: dying in silence gets a reaction rather than "is he still
+     * there". Treated as active, because it is — the streamer is playing,
+     * they are just not narrating.
+     */
+    const screenEvent = this.pendingScreenEvent && this.lastClassification !== null;
+    if (screenEvent) {
+      this.pendingScreenEvent = false;
+      this.phase = "active";
+      this.phaseBatches = 0;
+    }
+
     // The streamer said something the queue does not answer yet. Out now,
     // however full the queue is with lines about the previous sentence.
     const freshReply =
@@ -567,6 +628,7 @@ export class SimulationEngine {
     if (
       !supersede &&
       !freshReply &&
+      !screenEvent &&
       this.reactions.length > lowWaterFor(rate, this.latencyMs)
     ) {
       return null;
@@ -711,7 +773,12 @@ export class SimulationEngine {
    * longer matches the moment — the streamer spoke while it was in flight —
    * is discarded, and the next `nextGeneration` asks for the right thing.
    */
-  supplyReactions(batch: readonly Reaction[], now: number, ticket?: number): void {
+  supplyReactions(
+    batch: readonly Reaction[],
+    now: number,
+    ticket?: number,
+    event?: GameEvent,
+  ): void {
     const pending = this.inFlight;
     if (ticket !== undefined && ticket !== pending?.id) {
       // Not the reply we are waiting for, but it still says how long the
@@ -727,6 +794,10 @@ export class SimulationEngine {
 
     this.observeLatency(now - pending.requestedAt);
     this.issuedAt.delete(pending.id);
+    if (event) {
+      this.event = event;
+      this.eventAt = now;
+    }
 
     /**
      * Stale means the room changed, not that the streamer kept talking.
@@ -869,7 +940,14 @@ export class SimulationEngine {
   /** The configured rate lifted by whatever momentum the room has. */
   private effectiveRate(now: number): number {
     const activity = Math.min(1.9, this.topics.activity(now));
-    return this.settings.messagesPerSecond * (RATE_FLOOR + RATE_GAIN * activity);
+    /**
+     * What is on screen pushes against the slider rather than replacing it.
+     * A death is louder than downtime at every tier, and the tier still
+     * decides what "loud" means.
+     */
+    const fresh = now - this.eventAt < EVENT_LIFETIME_MS;
+    const event = fresh ? profileFor(this.event).rate : 1;
+    return this.settings.messagesPerSecond * (RATE_FLOOR + RATE_GAIN * activity) * event;
   }
 
   /**
@@ -938,6 +1016,7 @@ export class SimulationEngine {
         band: this.topics.band(topic ? this.topics.momentumOf(topic, at) : 0),
         reaction,
         phase: reaction.phase ?? this.phase,
+        event: at - this.eventAt < EVENT_LIFETIME_MS ? this.event : undefined,
         excludeSpeakers: barred,
         burst,
         population: this.population,
@@ -1111,6 +1190,7 @@ export class SimulationEngine {
       slotsWaited: this.slotsWaited,
       linesDropped: this.linesDropped,
       latencyMs: this.latencyMs,
+      event: this.event,
     };
   }
 }

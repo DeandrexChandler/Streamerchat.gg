@@ -1,5 +1,6 @@
 import type { Classification } from "../engine/types";
 import type { Reaction } from "./reaction";
+import type { GameEvent } from "./moment";
 
 /**
  * The AI tier is behind an interface for one reason: tests and the headless
@@ -66,6 +67,15 @@ export interface CandidateRequest {
   streamer?: string;
   topic?: string;
   count: number;
+  /**
+   * A downscaled JPEG of the streamer's screen, base64, no data URL prefix.
+   *
+   * Rides along with a batch the engine was going to request anyway, which
+   * is the only reason it is affordable: a frame is roughly 260 input
+   * tokens against five calls a minute, so about three cents a stream hour.
+   * Absent when capture is off, which is the default.
+   */
+  frame?: string;
 }
 
 /**
@@ -84,6 +94,8 @@ export type ProviderStatus =
 
 export interface GenerationResult {
   reactions: Reaction[];
+  /** What the model saw happening, when it was given a frame. */
+  event?: GameEvent;
   status: ProviderStatus;
   /** The provider's own message, when it gave one. For logs, never the UI. */
   detail?: string;

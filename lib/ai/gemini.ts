@@ -6,6 +6,7 @@ import type {
   ProviderStatus,
 } from "./provider";
 import { parseReactions } from "./parse";
+import { GAME_EVENTS, type GameEvent } from "./moment";
 
 /**
  * Gemini implementation of the candidate provider.
@@ -98,7 +99,15 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
             },
             body: JSON.stringify({
               contents: [
-                { role: "user", parts: [{ text: buildPrompt(request) }] },
+                {
+                  role: "user",
+                  parts: request.frame
+                    ? [
+                        { text: buildPrompt(request) },
+                        { inlineData: { mimeType: "image/jpeg", data: request.frame } },
+                      ]
+                    : [{ text: buildPrompt(request) }],
+                },
               ],
               generationConfig: {
                 // High temperature on purpose. The deterministic tiers already
@@ -153,12 +162,13 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
           return { reactions: [], status: "empty", detail: `finishReason ${finish}` };
         }
 
+        const event = parseEvent(text);
         const reactions = parseReactions(text);
         if (reactions.length === 0) {
           console.warn(`[ai] ${model} output could not be parsed: ${text.slice(0, 200)}`);
           return { reactions, status: "bad-response", detail: text.slice(0, 200) };
         }
-        return { reactions, status: "ok" };
+        return { reactions, status: "ok", event };
       } catch (error) {
         // Timeout, DNS, connection reset. Logged with the reason, because a
         // silent empty batch looks identical to a refusal.
@@ -168,6 +178,20 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
       }
     },
   };
+}
+
+/**
+ * The event label, when the model was shown a frame and returned one.
+ *
+ * Read off the raw JSON rather than through the reaction parser, which
+ * salvages truncated payloads and would happily invent a label from a
+ * fragment. An unrecognised or missing word is simply no label.
+ */
+function parseEvent(text: string): GameEvent | undefined {
+  const found = /"event"\s*:\s*"([a-z-]+)"/i.exec(text)?.[1]?.toLowerCase();
+  return (GAME_EVENTS as readonly string[]).includes(found ?? "")
+    ? (found as GameEvent)
+    : undefined;
 }
 
 /**

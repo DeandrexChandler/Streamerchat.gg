@@ -86,6 +86,9 @@ export interface ControlPanelProps {
   micLabel: string;
   /** Emotes currently loaded. Zero disables the emote-only mode. */
   emoteCount: number;
+  /** True while the streamer's screen is being captured for chat. */
+  watching: boolean;
+  onWatchingChange: (on: boolean) => void;
   subscribeLevel: (handler: (level: number) => void) => () => void;
   /** Wipes the log and resets the session back to Play. */
   onClear: () => void;
@@ -98,6 +101,8 @@ export function ControlPanel({
   settings,
   micLabel,
   emoteCount,
+  watching,
+  onWatchingChange,
   subscribeLevel,
   onClear,
   onChange,
@@ -125,6 +130,12 @@ export function ControlPanel({
           label="Emotes"
           checked={settings.emotesEnabled}
           onChange={(emotesEnabled) => onChange({ emotesEnabled })}
+        />
+        <Toggle
+          label="Watch my screen"
+          checked={watching}
+          hint="Chat reacts to the game, not just what you say. Sends a small screenshot with each batch to the AI. Off by default."
+          onChange={onWatchingChange}
         />
         <Toggle
           label="Emote only"

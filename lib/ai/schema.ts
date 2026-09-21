@@ -68,6 +68,11 @@ export const CandidateRequestSchema = z
     streamer: z.string().max(40).nullish().transform((v) => v ?? undefined),
     topic: z.string().max(80).nullish().transform((v) => v ?? undefined),
     count: z.number().int().min(1).max(70).default(16),
+    /**
+     * Base64 JPEG of the streamer's screen. Capped well under the route's
+     * body limit: the client downscales to 384px, which lands around 20KB.
+     */
+    frame: z.string().max(300_000).optional(),
   })
   .refine(
     (request) => request.phase !== "active" || request.utterance.trim().length > 0,

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MicSession } from "../audio/mic-session";
+import { ScreenCapture } from "../audio/screen-capture";
 import { DEFAULT_SETTINGS, localSettingsStore } from "../config/settings";
 import type { SimulationSettings } from "../config/settings";
 import {
@@ -12,6 +13,7 @@ import {
 } from "../config/emote-store";
 import type { EmotePack } from "../emotes/seventv";
 import type { Reaction } from "../ai/reaction";
+import type { GameEvent } from "../ai/moment";
 import type { Emote } from "../engine/types";
 import {
   SimulationEngine,
@@ -46,6 +48,16 @@ export type SimulatorStatus =
 
 /** How often the engine is advanced. Chat does not need frame-rate updates. */
 const TICK_MS = 200;
+
+/**
+ * Mean brightness change across a 32x32 thumbnail that counts as an event.
+ *
+ * Deliberately high. Ordinary play moves the screen constantly; this is
+ * meant to fire on a scene cut, a death screen, a flashbang — the things
+ * chat would actually shout about. The engine rate-limits on top, so a
+ * generous threshold costs a wasted comparison rather than a wasted call.
+ */
+const SCREEN_EVENT_THRESHOLD = 0.18;
 
 /**
  * Hard ceiling on rendered messages, whatever the buffer setting works out to.
@@ -105,6 +117,17 @@ export interface UseSimulatorResult {
 
   /** Feed a line in as though it had been spoken. Same path as speech. */
   say: (text: string) => void;
+
+  /** True while the streamer's screen is being captured for chat. */
+  watching: boolean;
+  /**
+   * Turns screen capture on or off.
+   *
+   * Opt-in: off until asked for. On means a downscaled frame rides along
+   * with batches the engine was going to request anyway, so chat can react
+   * to the game rather than only to speech.
+   */
+  setWatching: (on: boolean) => Promise<void>;
 }
 
 export function useSimulator(): UseSimulatorResult {
@@ -130,6 +153,7 @@ export function useSimulator(): UseSimulatorResult {
   const [settings, setSettings] = useState<SimulationSettings>(DEFAULT_SETTINGS);
   const [emotes, setEmotes] = useState<Emote[]>(() => []);
   const [overlaySubscribers, setOverlaySubscribers] = useState(0);
+  const [watching, setWatching] = useState(false);
 
   const engineRef = useRef<SimulationEngine | null>(null);
   const micRef = useRef<MicSession | null>(null);
@@ -148,6 +172,8 @@ export function useSimulator(): UseSimulatorResult {
    * reaction is never held behind a fifteen-second arrival batch.
    */
   const inFlightRef = useRef<{ ticket: number; controller: AbortController } | null>(null);
+  /** The screen, when the streamer has turned capture on. */
+  const screenRef = useRef<ScreenCapture | null>(null);
 
   /** Level subscribers, kept outside React entirely. */
   const levelSubscribers = useRef(new Set<(level: number) => void>());
@@ -236,25 +262,37 @@ export function useSimulator(): UseSimulatorResult {
     inFlightRef.current?.controller.abort();
     const controller = new AbortController();
     inFlightRef.current = { ticket, controller };
-    console.debug(`[chat] → ${request.phase}${request.continuation ? "+" : ""} ×${request.count}`);
+
+    // Rides along with a request the engine was going to make anyway. That
+    // is the only reason a frame per batch is affordable.
+    const frame = screenRef.current?.grab() ?? undefined;
+    console.debug(
+      `[chat] → ${request.phase}${request.continuation ? "+" : ""}${frame ? "+frame" : ""} ×${request.count}`,
+    );
 
     try {
       const response = await fetch("/api/chat-candidates", {
         method: "POST",
         headers: { "content-type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify(request),
+        body: JSON.stringify(frame ? { ...request, frame } : request),
         signal: controller.signal,
       });
-      const body = (await response.json()) as { reactions?: Reaction[]; status?: string };
+      const body = (await response.json()) as {
+        reactions?: Reaction[];
+        status?: string;
+        event?: GameEvent;
+      };
 
       if (!response.ok || body.status !== "ok" || !body.reactions?.length) {
         console.debug(`[chat] ← nothing for ${request.phase} (the server log says why)`);
         engine.generationFailed(Date.now(), ticket);
         return;
       }
-      console.debug(`[chat] ← ${body.reactions.length} lines for ${request.phase}`);
-      engine.supplyReactions(body.reactions, Date.now(), ticket);
+      console.debug(
+        `[chat] ← ${body.reactions.length} lines for ${request.phase}${body.event ? `, saw ${body.event}` : ""}`,
+      );
+      engine.supplyReactions(body.reactions, Date.now(), ticket, body.event);
     } catch (error) {
       // An abort is the engine having moved on; there is nothing to report.
       if (!controller.signal.aborted) engine.generationFailed(Date.now(), ticket);
@@ -272,6 +310,18 @@ export function useSimulator(): UseSimulatorResult {
       if (!engine || pausedRef.current) return;
 
       const now = Date.now();
+
+      /**
+       * Did the screen move enough to be worth reacting to?
+       *
+       * Polled on the engine's own tick rather than a frame loop: four
+       * samples a second is plenty to catch a death, and this keeps the
+       * whole thing on one clock. The engine decides what to do with it and
+       * rate-limits itself.
+       */
+      const moved = screenRef.current?.changed() ?? 0;
+      if (moved > SCREEN_EVENT_THRESHOLD) engine.screenEvent(now);
+
       const released = engine.tick(now);
       void pump(engine, now);
 
@@ -394,6 +444,38 @@ export function useSimulator(): UseSimulatorResult {
 
     await providerRef.current.start();
   }, [pump]);
+
+  /**
+   * Turns screen capture on or off.
+   *
+   * Off is the default and stays the current product: speech only, no
+   * permission, nothing leaving the machine. On asks for a window and then
+   * sends a small frame with each batch, which is worth saying plainly
+   * because those frames go to Google.
+   */
+  const setWatchingScreen = useCallback(async (on: boolean) => {
+    if (!on) {
+      screenRef.current?.stop();
+      screenRef.current = null;
+      setWatching(false);
+      return;
+    }
+    if (screenRef.current?.active) return;
+
+    const capture = new ScreenCapture();
+    // Stopping the share from the browser's own bar has to turn the toggle
+    // off too, or the UI claims to be watching a screen that is gone.
+    const ok = await capture.start(() => {
+      screenRef.current = null;
+      setWatching(false);
+    });
+    if (!ok) {
+      setWatching(false);
+      return;
+    }
+    screenRef.current = capture;
+    setWatching(true);
+  }, []);
 
   const start = useCallback(async () => {
     if (status === "running" || status === "starting") return;
@@ -563,6 +645,7 @@ export function useSimulator(): UseSimulatorResult {
       if (tickRef.current !== null) clearInterval(tickRef.current);
       providerRef.current?.stop();
       micRef.current?.stop();
+      screenRef.current?.stop();
     };
   }, []);
 
@@ -585,5 +668,7 @@ export function useSimulator(): UseSimulatorResult {
     subscribeLevel,
     overlaySubscribers,
     say,
+    watching,
+    setWatching: setWatchingScreen,
   };
 }

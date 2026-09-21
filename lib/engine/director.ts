@@ -4,6 +4,7 @@ import type { QueuedReaction } from "../ai/reaction";
 import { pickSemanticEmote, type EmoteMoment } from "../emotes/semantic";
 import type { Population } from "./population";
 import { strangerShareFor } from "./roster";
+import { profileFor, type GameEvent } from "../ai/moment";
 import type { Rng } from "./rng";
 import type { MomentumBand, Topic, TopicStage } from "./topics";
 import type {
@@ -159,6 +160,8 @@ export interface DirectOneOptions {
   excludeSpeakers?: ReadonlySet<string>;
   /** A hype moment: the speaking cooldown is waived. */
   burst?: boolean;
+  /** What the screen is doing, when capture is on. Drives composition. */
+  event?: GameEvent;
   now: number;
   /** Monotonic counter, so two messages in one millisecond cannot share an id. */
   sequence: number;
@@ -233,9 +236,17 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
      * The generated line is dropped for this message, not for the batch: the
      * rest of the room still says the words.
      */
-    const forward = settings.emotesEnabled
-      ? (EMOTE_FORWARD[moment] ?? DEFAULT_EMOTE_FORWARD)
-      : 0;
+    /**
+     * What is on screen decides how emote-heavy the room is, when it is
+     * known. That is the whole point of looking at the screen: a wall of
+     * emotes over a menu is noise, the same wall over a death is chat.
+     * Without capture this falls back to the intent, as before.
+     */
+    const forward = !settings.emotesEnabled
+      ? 0
+      : options.event
+        ? profileFor(options.event).emoteShare
+        : (EMOTE_FORWARD[moment] ?? DEFAULT_EMOTE_FORWARD);
     // Same rule as the trailer below: only when the model said how the line
     // feels, so the emote chosen has something to match.
     const only =

@@ -1,4 +1,5 @@
 import type { CandidateRequest, IdleStage } from "./provider";
+import { GAME_EVENTS } from "./moment";
 
 /**
  * Builds the generation prompt.
@@ -103,9 +104,17 @@ export function buildPrompt(request: CandidateRequest): string {
     );
   }
 
+  if (request.frame) {
+    lines.push(
+      "",
+      "The image is the streamer's screen right now. React to what is actually happening in it, not to the game in general. If it contradicts what they said, chat notices that too.",
+      `Also return "event": one of ${GAME_EVENTS.join(" | ")} — what the screen shows. Use "unknown" if you cannot tell, "downtime" if nothing is happening.`,
+    );
+  }
+
   lines.push(
     "",
-    `Return JSON: an object with one key "reactions", holding an array of exactly ${count} objects.`,
+    `Return JSON: an object with${request.frame ? ' an "event" string and' : ""} one key "reactions", holding an array of exactly ${count} objects.`,
     "Each object:",
     '  { "text": string,',
     '    "emotion": one of hype | funny | sad | confused | love | chill,',

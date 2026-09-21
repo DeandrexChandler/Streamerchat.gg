@@ -62,8 +62,16 @@ Consequences that must stay true:
   `GOOGLE_API_KEY`. No selection anywhere. If Gemini is down or the key is
   out of credit, the answer is to add credit — never another provider.
 - **Idle is always on**, at sixty seconds, escalating through four stages.
-- **The roster is at most ten people**, sized by tier, with stable names and
-  colours and per-viewer memory. See `lib/engine/roster.ts`.
+- **The room is regulars plus strangers.** Regulars persist, accumulate
+  memory and are who the streamer learns: 3 at the slowest tier up to 12 at
+  CHAOS. Strangers pass through once and carry no history, rising from none
+  of the traffic to 55%. See `lib/engine/roster.ts`.
+- **What is on screen decides the character of chat**, when the streamer has
+  turned capture on. A frame rides along with batches the engine already
+  makes, the model names what it sees from a closed list, and
+  `lib/ai/moment.ts` turns that into how emote-heavy and how fast the room
+  is. Capture is opt-in and off by default; without it chat falls back to
+  reading intent from speech.
 
 ## Avoid both failure modes
 

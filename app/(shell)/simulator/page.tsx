@@ -91,6 +91,8 @@ function Simulator() {
         settings={settings}
         micLabel={simulator.micLabel}
         emoteCount={simulator.emotes.length}
+        watching={simulator.watching}
+        onWatchingChange={(on) => void simulator.setWatching(on)}
         subscribeLevel={simulator.subscribeLevel}
         onClear={simulator.clear}
         onChange={simulator.updateSettings}

@@ -7,6 +7,7 @@ import { validateReactions } from "@/lib/ai/validate";
 import { CandidateRequestSchema } from "@/lib/ai/schema";
 import { describeShape, shapeOf } from "@/lib/ai/diagnostics";
 import type { Reaction } from "@/lib/ai/reaction";
+import type { GameEvent } from "@/lib/ai/moment";
 
 /**
  * Chat batch generation.
@@ -32,7 +33,11 @@ import type { Reaction } from "@/lib/ai/reaction";
 
 export const dynamic = "force-dynamic";
 
-const MAX_BODY_BYTES = 32 * 1024;
+/**
+ * Raised from 32KB to carry a screen frame. The frame itself is capped by
+ * the schema; this is the envelope around it.
+ */
+const MAX_BODY_BYTES = 512 * 1024;
 
 /** The only two things a client ever learns. */
 export type BatchStatus = "ok" | "unavailable";
@@ -40,6 +45,8 @@ export type BatchStatus = "ok" | "unavailable";
 export interface BatchResponse {
   reactions: Reaction[];
   status: BatchStatus;
+  /** What the model saw on screen, when it was given a frame. */
+  event?: GameEvent;
 }
 
 export interface HandlerDeps {
@@ -148,9 +155,16 @@ export function createCandidatesHandler(deps: HandlerDeps) {
             `${validated.echoed ? " | echoes only" : ""}` +
             `${dropped ? ` | dropped ${dropped}` : ""}`,
         );
-        log.log(`[ai]   ${describeShape(shapeOf(validated.reactions, candidateRequest))}`);
+        log.log(
+          `[ai]   ${describeShape(shapeOf(validated.reactions, candidateRequest))}` +
+            `${candidateRequest.frame ? ` | saw ${generated.event ?? "?"}` : ""}`,
+        );
         return NextResponse.json(
-          { reactions: validated.reactions, status: "ok" } satisfies BatchResponse,
+          {
+            reactions: validated.reactions,
+            status: "ok",
+            ...(generated.event ? { event: generated.event } : {}),
+          } satisfies BatchResponse,
           noStore,
         );
       }
@@ -177,6 +191,7 @@ export function createCandidatesHandler(deps: HandlerDeps) {
 function describe(request: {
   phase: string;
   continuation: boolean;
+  frame?: string;
   utterance: string;
   count: number;
   history: readonly string[];
