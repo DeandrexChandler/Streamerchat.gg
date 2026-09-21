@@ -206,9 +206,22 @@ function extractDirectiveTarget(raw: string): string | undefined {
       continue;
     }
     if (token.length > 20) continue;
-    return token;
+    return singular(token);
   }
   return undefined;
+}
+
+/**
+ * "spam W's" means spam W. The plural is how people say it out loud, not
+ * part of what chat posts.
+ *
+ * The bare "s" only comes off an all-caps stem (Ws, Ls, KEKWs, 1s), because
+ * plenty of real emote names end in a lowercase s. A lone letter is
+ * uppercased: speech recognition hears "w's", and chat posts W.
+ */
+function singular(token: string): string {
+  const stem = token.replace(/['’]s$/i, "").replace(/^([A-Z0-9]+)s$/, "$1") || token;
+  return stem.length === 1 ? stem.toUpperCase() : stem;
 }
 
 const SUBJECT_SIGNALS: ReadonlyArray<readonly [Classification["subject"], readonly string[]]> = [

@@ -168,7 +168,14 @@ describe("understands how people actually talk", () => {
 describe("directives to chat", () => {
   it.each([
     ["spam W", "W"],
-    ["spam w in chat", "w"],
+    ["spam w in chat", "W"],
+    ["spam W's", "W"],
+    ["spam w's chat", "W"],
+    ["chat spam Ws", "W"],
+    ["spam L’s", "L"],
+    ["spam KEKWs", "KEKW"],
+    ["spam 1s", "1"],
+    ["spam Clueless", "Clueless"],
     ["everyone say pog", "pog"],
     ["chat say hello", "hello"],
     ["type KEKW", "KEKW"],
