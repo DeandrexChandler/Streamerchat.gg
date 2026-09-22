@@ -49,13 +49,13 @@ environment. The model was chosen by measurement (see `lib/ai/gemini.ts`).
 
 | Phase | Begins | Ends | What the AI is asked for |
 |---|---|---|---|
-| Startup | Play | first accepted input, or 60s | early-arrival chat; one greeting per person, then chatter |
-| Active | accepted mic or typed input | next input, or 60s of silence | reactions to what was said; continuations when the batch drains and nothing new was said |
-| Idle | 60s without accepted input | next input | reactions to the silence, escalating through four stages |
+| Startup | Play | first accepted input, or 5 min | early-arrival chat; one greeting per person, then chatter |
+| Active | accepted mic or typed input, or a screen event | next input, or 5 min with no input and no screen event | reactions to what was said; continuations when the batch drains, drifting to general chatter after 60s |
+| Idle | 5 min without input or screen event | next input or screen event | reactions to the silence, escalating through four stages |
 
-Idle is always on. Its stages by silence: 1–2.5 min *the streamer is
-focused*; 2.5–5 min *the streamer may be busy*; 5–10 min *is the streamer
-still there?*; 10+ min *chat is entertaining itself*. Each stage is a
+Idle is always on. Its stages by silence: 5–8 min *the streamer is
+focused*; 8–12 min *the streamer may be busy*; 12–20 min *is the streamer
+still there?*; 20+ min *chat is entertaining itself*. Each stage is a
 different prompt, and a stage change invalidates what was queued for the
 previous one.
 

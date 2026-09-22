@@ -61,7 +61,9 @@ Consequences that must stay true:
 - **One provider, one model, fixed.** Gemini `gemini-3.5-flash-lite` via
   `GOOGLE_API_KEY`. No selection anywhere. If Gemini is down or the key is
   out of credit, the answer is to add credit — never another provider.
-- **Idle is always on**, at sixty seconds, escalating through four stages.
+- **Idle is always on**, after five minutes with nothing said and nothing
+  happening on screen, escalating through four stages (5 / 8 / 12 / 20 min).
+  Before that, chat moves off the last line after a minute and just hangs out.
 - **The room is regulars plus strangers.** Regulars persist, accumulate
   memory and are who the streamer learns: 3 at the slowest tier up to 12 at
   CHAOS. Strangers pass through once and carry no history, rising from none

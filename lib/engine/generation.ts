@@ -8,8 +8,14 @@ import type { IdleStage } from "../ai/provider";
  * the whole planning path testable with a scripted provider.
  */
 
-/** Silence before chat stops reacting and starts noticing. */
-export const IDLE_AFTER_MS = 60_000;
+/**
+ * Silence before chat starts noticing it.
+ *
+ * Five minutes, not one: a streamer playing a game goes quiet for minutes
+ * at a time, and a chat that asks "u there?" a minute in reads as one that
+ * gave up. The gap before this is normal chatter, not a countdown.
+ */
+export const IDLE_AFTER_MS = 300_000;
 
 /**
  * How long a batch should last, in seconds of chat at the configured rate,
@@ -77,9 +83,9 @@ export function lowWaterFor(messagesPerSecond: number, latencyMs = INITIAL_LATEN
  * settles into one before moving on.
  */
 const IDLE_STAGES: ReadonlyArray<readonly [afterMs: number, stage: IdleStage]> = [
-  [600_000, 4],
-  [300_000, 3],
-  [150_000, 2],
+  [1_200_000, 4],
+  [720_000, 3],
+  [480_000, 2],
   [IDLE_AFTER_MS, 1],
 ];
 
