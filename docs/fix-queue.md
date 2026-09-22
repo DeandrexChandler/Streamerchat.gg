@@ -64,20 +64,21 @@ better, unless the press itself triggers the batch.
 
 ---
 
-## 4. One chatter posting four times in a row, replying to themselves
+## 4. One chatter posting four times in a row, replying to themselves — done
 
-**Seen:** a single name posting four consecutive messages, and appearing to
-hold a conversation with itself. Twitch itself caps this.
-
-**Now:** `MAX_CONSECUTIVE = 5` in `lib/engine/roster.ts`. Too high. The
-self-reply reads worse than the repetition and may be a separate cause —
-the model writes lines that answer each other and the engine can hand two
-of them to the same viewer.
-
-**Shape of the fix:** lower the cap to 2 or 3, and check whether consecutive
-messages from one viewer are being allowed to form a question/answer pair.
-Worth measuring what the real channels did: the sampler in
-`scripts/sample-chat.ts` already reports this.
+- Cause of the self-replies: in a developing topic the director brought back
+  a past participant without the speaking cooldown, so whoever just spoke
+  was often next, on lines that build on each other. Returning voices now
+  sit out their cooldown like everyone else.
+- `MAX_CONSECUTIVE` 5 → 3.
+- Rolling cap: no viewer posts more than 3 lines in 10 seconds, in a row or
+  not (`MAX_POSTS_IN_WINDOW`, `POST_WINDOW_MS` in `lib/engine/roster.ts`).
+  Free again once the window passes.
+- The sampler now reports back-to-back share, longest run and most lines by
+  one person in 5s. caseoh_ (803 lines) and valkyrae (17 lines, 4 chatters):
+  0% back to back, at most 3–5 in 5s.
+- Not done: the model marking which line answers which. Revisit if a
+  question and its answer still land on one name a few lines apart.
 
 ---
 

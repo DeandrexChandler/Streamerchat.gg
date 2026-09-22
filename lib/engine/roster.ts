@@ -94,6 +94,16 @@ export function turnoverIntervalFor(messagesPerSecond: number): number | null {
  *
  * Someone can fire off a few lines in a row during a hype moment — that is
  * what excitement looks like — but past this it is one person monopolising
- * the room.
+ * the room. Four in a row read as one account talking to itself.
  */
-export const MAX_CONSECUTIVE = 5;
+export const MAX_CONSECUTIVE = 3;
+
+/**
+ * The most one viewer may post inside a rolling window, in a row or not.
+ *
+ * The consecutive cap alone lets A B A B A through, which is two people
+ * holding the room between them. Measured: nobody in a sampled caseoh_ or
+ * valkyrae chat posted more than this in ten seconds except bots.
+ */
+export const MAX_POSTS_IN_WINDOW = 3;
+export const POST_WINDOW_MS = 10_000;

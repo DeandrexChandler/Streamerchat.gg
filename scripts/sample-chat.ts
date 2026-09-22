@@ -119,6 +119,26 @@ function report(): void {
   console.log(`top 10 chatters ${pct(topTen)} of all messages`);
   console.log(`same user, same line twice  ${pct(repeatedByOwner)}`);
 
+  // Back to back: the same name on two lines in a row, and the longest run.
+  let backToBack = 0;
+  let run = 1;
+  let longestRun = 1;
+  let busiest = 0;
+  for (let i = 1; i < total; i += 1) {
+    run = lines[i].user === lines[i - 1].user ? run + 1 : 1;
+    if (run > 1) backToBack += 1;
+    longestRun = Math.max(longestRun, run);
+  }
+  // Most lines one person posted inside any five seconds.
+  for (let i = 0; i < total; i += 1) {
+    let n = 0;
+    for (let j = i; j < total && lines[j].at - lines[i].at < 5_000; j += 1) {
+      if (lines[j].user === lines[i].user) n += 1;
+    }
+    busiest = Math.max(busiest, n);
+  }
+  console.log(`back to back    ${pct(backToBack)}  (longest run ${longestRun}, most in 5s by one person ${busiest})`);
+
   const buckets = [1, 2, 3, 4, 6, 9, 15];
   console.log("\nlength spread:");
   let previous = 0;
