@@ -115,7 +115,7 @@ export function ControlPanel({
 }: ControlPanelProps) {
   return (
     <aside className="flex h-full w-56 flex-col gap-4 overflow-y-auto rounded-lg border border-gray-300 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5">
         <MuteButton
           muted={muted}
           live={status === "running"}

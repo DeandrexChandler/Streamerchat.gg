@@ -47,7 +47,7 @@ export function MuteButton({
       aria-label={label}
       aria-pressed={muted}
       title={muted ? "Mic muted — chat still hears what you type. Click to unmute." : "Mute the mic without stopping chat"}
-      className={`relative flex size-10 shrink-0 items-center justify-center rounded-full transition-colors focus:ring-2 focus:ring-purple-500 focus:outline-none ${
+      className={`relative flex size-7 shrink-0 items-center justify-center rounded-full transition-colors focus:ring-2 focus:ring-purple-500 focus:outline-none ${
         muted
           ? "bg-red-500/15 text-red-500 hover:bg-red-500/25 dark:text-red-400"
           : hearing
@@ -64,7 +64,7 @@ export function MuteButton({
           transform: "scale(calc(1 + var(--level, 0) * 0.35))",
         }}
       />
-      {muted ? <MicOff className="size-4" /> : <Mic className="size-4" />}
+      {muted ? <MicOff className="size-3.5" /> : <Mic className="size-3.5" />}
     </button>
   );
 }
