@@ -50,7 +50,6 @@ export class MicSession {
   private readonly historyFrames: number;
 
   private running = false;
-  private deviceLabel = "";
 
   constructor(options: MicSessionOptions = {}) {
     this.historyFrames = options.historyFrames ?? 120;
@@ -58,10 +57,6 @@ export class MicSession {
 
   get isRunning(): boolean {
     return this.running;
-  }
-
-  get label(): string {
-    return this.deviceLabel;
   }
 
   static isSupported(): boolean {
@@ -101,8 +96,6 @@ export class MicSession {
       this.fail(...describeGetUserMediaError(error));
       return false;
     }
-
-    this.deviceLabel = this.stream.getAudioTracks()[0]?.label ?? "Microphone";
 
     this.context = new AudioContext();
     // Browsers may hand back a suspended context when there was no user

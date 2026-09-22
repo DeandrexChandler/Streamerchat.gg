@@ -89,7 +89,6 @@ function Simulator() {
         status={status}
         stats={simulator.stats}
         settings={settings}
-        micLabel={simulator.micLabel}
         emoteCount={simulator.emotes.length}
         watching={simulator.watching}
         onWatchingChange={(on) => void simulator.setWatching(on)}

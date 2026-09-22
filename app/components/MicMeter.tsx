@@ -18,12 +18,11 @@ export interface MicMeterProps {
   /** From useSimulator(). Returns an unsubscribe function. */
   subscribe: (handler: (level: number) => void) => () => void;
   active: boolean;
-  label?: string;
   /** Off by choice, not broken: said in the heading rather than a new line. */
   muted?: boolean;
 }
 
-export function MicMeter({ subscribe, active, label, muted = false }: MicMeterProps) {
+export function MicMeter({ subscribe, active, muted = false }: MicMeterProps) {
   const fillRef = useRef<HTMLDivElement>(null);
   const peakRef = useRef<HTMLSpanElement>(null);
   const lastPainted = useRef(-1);
@@ -73,12 +72,6 @@ export function MicMeter({ subscribe, active, label, muted = false }: MicMeterPr
           style={{ width: "var(--level, 0%)" }}
         />
       </div>
-
-      {label && (
-        <p className="truncate text-[11px] text-gray-400 dark:text-gray-500" title={label}>
-          {label}
-        </p>
-      )}
     </div>
   );
 }

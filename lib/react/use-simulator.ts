@@ -89,7 +89,6 @@ export interface UseSimulatorResult {
   /** Recent utterances with their classification. Newest last. */
   heard: HeardUtterance[];
   error: string | null;
-  micLabel: string;
   stats: EngineStats;
   settings: SimulationSettings;
 
@@ -134,7 +133,6 @@ export function useSimulator(): UseSimulatorResult {
   const [interim, setInterim] = useState("");
   const [heard, setHeard] = useState<HeardUtterance[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [micLabel, setMicLabel] = useState("");
   const [stats, setStats] = useState<EngineStats>({
     audience: 0,
     simulated: 0,
@@ -376,7 +374,6 @@ export function useSimulator(): UseSimulatorResult {
       if (micRef.current === mic) micRef.current = null;
       return;
     }
-    setMicLabel(mic.label);
 
     if (!providerRef.current) {
       const provider = createProvider();
@@ -482,7 +479,6 @@ export function useSimulator(): UseSimulatorResult {
         micRef.current?.stop();
         micRef.current = null;
         setInterim("");
-        setMicLabel("");
         return;
       }
       if (status === "running" && !micRef.current) await listen();
@@ -544,7 +540,6 @@ export function useSimulator(): UseSimulatorResult {
 
     engineRef.current?.pause();
     setInterim("");
-    setMicLabel("");
     setStatus("paused");
   }, [status]);
 
@@ -639,7 +634,6 @@ export function useSimulator(): UseSimulatorResult {
     setHeard([]);
     setInterim("");
     setError(null);
-    setMicLabel("");
     setStatus("idle");
   }, [stopTicking]);
 
@@ -668,7 +662,6 @@ export function useSimulator(): UseSimulatorResult {
     interim,
     heard,
     error,
-    micLabel,
     stats,
     settings,
     emotes,
