@@ -35,6 +35,12 @@ UI and dashboard redesign. Better settings information architecture. OBS
 validation and polish. Custom viewers (up to ten, same shape as generated
 ones). Saved session settings.
 
+Screen-share privacy warning: when "Watch my screen" is turned on, say
+plainly that frames of the shared window go to Google, and to avoid sharing
+anything sensitive (passwords, DMs, email, banking, personal info). Suggest
+sharing the game window rather than the whole screen. Today the only notice
+is the toggle's hover hint.
+
 ## Phase 4 — Hosted product
 
 Accounts. Authentication. Security hardening. Database. Billing. Usage
@@ -46,5 +52,8 @@ limits. Deployment. Monetisation.
 - Analytics.
 - Marketing pages.
 - Any second AI provider or model selector.
+- Hotkey screen capture (fix queue item 3). Dropped: capturing only on a
+  keypress makes chat later to react, not sooner, unless the press itself
+  triggers the batch — and the streamer's hands are on the game.
 - Fixing the two pre-existing `react-hooks/set-state-in-effect` lint
   findings in `ChatList.tsx` — real, unrelated to the core loop.

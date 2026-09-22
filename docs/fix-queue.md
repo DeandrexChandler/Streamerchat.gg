@@ -18,41 +18,30 @@ switched back; unmuting reopens the mic only while chat is running.
 
 ---
 
-## 2. "Watch my screen" is far too slow to respond
+## 2. "Watch my screen" is far too slow to respond — done
 
-**Seen:** noticeable lag between something happening and chat reacting.
+Where the time went, worst case about 20–30s from a death to chat noticing:
+up to 12s of trigger cooldown, waiting for any refill already on the wire,
+a full-size batch (~4s), and then its lines appended *behind* a queue of up
+to 24s of chat about whatever came before.
 
-**Now:** a frame rides along with a batch, and the whole batch waits on one
-Gemini call. Measured latency in this session was 5.5 to 7.5 seconds, with
-one 12 second timeout. `SCREEN_TRIGGER_COOLDOWN_MS` in
-`lib/engine/engine.ts` adds up to 12 more before a screen change can pull a
-batch forward. Worst case is roughly 20 seconds from event to first line.
+Now: the screen batch is small (6–12 lines, measured 1.2–2.6s against
+3.9–4.1s for 30), goes to the front of the queue, drops a routine refill
+that was in the way, and the prompt leads with "something just changed on
+screen". Cooldown 12s → 8s. It also works before the streamer has said
+anything, once the arrival wave is out. Expected event-to-first-line: about
+2–3 seconds.
 
-**Owner's direction:** paid solutions are acceptable here. Look at how
-Cluely and Clicky handle screen-aware latency.
-
-**Shape of the fix:** the batch model is the problem, not the provider —
-one slow call gates every line. Worth considering a small fast call for the
-event label only, separate from the batch that writes the words, so chat
-can react before it knows what to say. Note this breaks the "never one call
-per message" rule in CLAUDE.md if done carelessly.
+Not done: a streaming/realtime model (what Cluely-style tools use). That is
+a second Gemini model and breaks the one-model rule; revisit only if 2–3s
+still feels slow live.
 
 ---
 
-## 3. Capture on a hotkey rather than continuously
+## 3. Capture on a hotkey rather than continuously — dropped
 
-**Owner's idea:** only capture when a hotkey is pressed, which sidesteps the
-privacy surface of continuous capture.
-
-**Now:** `ScreenCapture` in `lib/audio/screen-capture.ts` holds the stream
-for the whole session once the toggle is on, and `grab()` is called on every
-batch.
-
-**Shape of the fix:** keep the stream but only `grab()` on the hotkey, or
-only start the stream on the hotkey. The first is far simpler and already
-most of the privacy benefit, since nothing leaves the machine between
-presses. Interacts with item 2: hotkey capture makes latency worse, not
-better, unless the press itself triggers the batch.
+Makes reactions later, not sooner. Recorded in the roadmap's deferred list,
+along with a screen-share privacy warning for Phase 3.
 
 ---
 

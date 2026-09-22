@@ -128,6 +128,14 @@ describe("buildPrompt", () => {
       expect(prompt).toContain("look at this roof I just built");
     });
 
+    it("leads a screen batch with the image, not the last thing said", () => {
+      const prompt = buildPrompt(request({ screen: true, frame: "abc", silenceSeconds: 40 }));
+      expect(prompt).toMatch(/something just changed on screen/i);
+      expect(prompt).not.toMatch(/stay about that line/i);
+      // Without a frame there is nothing to react to; it reads as a normal reply.
+      expect(buildPrompt(request({ screen: true }))).not.toMatch(/changed on screen/i);
+    });
+
     it("escalates idle framing with the stage", () => {
       const one = buildPrompt(request({ phase: "idle", idleStage: 1, silenceSeconds: 70 }));
       const four = buildPrompt(request({ phase: "idle", idleStage: 4, silenceSeconds: 700 }));
