@@ -10,7 +10,7 @@ lives — so picking one up later does not mean re-deriving it.
 
 ## 1. No way to mute the mic while chat keeps going — done
 
-A mic button beside the chat input: its ring moves with your voice while
+A mic button beside the mic meter in the control panel: its ring moves with your voice while
 live, and it turns red with a struck-through mic when muted. It releases the microphone the same
 way Pause does (recording indicator off) while chat, typed input, idle and
 screen events carry on. Stays muted across Pause, Play and Clear until

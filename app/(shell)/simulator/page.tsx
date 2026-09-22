@@ -6,7 +6,6 @@ import { ChatList } from "@/app/components/chat/ChatList";
 import { useSimulator } from "@/lib/react/use-simulator";
 import { ControlPanel } from "./ControlPanel";
 import { EmoteBanner } from "./EmoteBanner";
-import { MuteButton } from "./MuteButton";
 import { TranscriptPanel } from "./TranscriptPanel";
 
 /**
@@ -95,6 +94,7 @@ function Simulator() {
         watching={simulator.watching}
         onWatchingChange={(on) => void simulator.setWatching(on)}
         muted={simulator.muted}
+        onMutedChange={(on) => void simulator.setMuted(on)}
         subscribeLevel={simulator.subscribeLevel}
         onClear={simulator.clear}
         onChange={simulator.updateSettings}
@@ -172,13 +172,7 @@ function Simulator() {
             does — the original layout, and the one place a streamer's hand
             already expects to go. */}
         <div className="flex-shrink-0 border-t border-gray-700 bg-[#1f1f23] p-3">
-          <div className="flex items-center gap-2">
-            <MuteButton
-              muted={simulator.muted}
-              live={live}
-              onChange={(on) => void simulator.setMuted(on)}
-              subscribe={simulator.subscribeLevel}
-            />
+          <div className="flex gap-2">
             <input
               type="text"
               value={typed}

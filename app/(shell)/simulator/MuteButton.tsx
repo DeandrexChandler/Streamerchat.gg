@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { Mic, MicOff } from "lucide-react";
 
 /**
- * The mic, as a button beside the chat input.
+ * The mic, as a button beside the level meter.
  *
  * Live, its ring swells with your voice, so it doubles as proof the mic is
  * hearing you. Muted, it goes red with a struck-through mic. The level is
@@ -47,12 +47,12 @@ export function MuteButton({
       aria-label={label}
       aria-pressed={muted}
       title={muted ? "Mic muted — chat still hears what you type. Click to unmute." : "Mute the mic without stopping chat"}
-      className={`relative flex size-9 shrink-0 items-center justify-center rounded-full transition-colors focus:ring-2 focus:ring-purple-500 focus:outline-none ${
+      className={`relative flex size-10 shrink-0 items-center justify-center rounded-full transition-colors focus:ring-2 focus:ring-purple-500 focus:outline-none ${
         muted
-          ? "bg-red-500/15 text-red-400 hover:bg-red-500/25"
+          ? "bg-red-500/15 text-red-500 hover:bg-red-500/25 dark:text-red-400"
           : hearing
-            ? "bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
-            : "bg-[#464649] text-gray-300 hover:bg-[#55555a]"
+            ? "bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25 dark:text-emerald-300"
+            : "bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
       }`}
     >
       <span
