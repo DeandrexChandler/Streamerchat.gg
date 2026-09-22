@@ -6,6 +6,7 @@ import { ChatList } from "@/app/components/chat/ChatList";
 import { useSimulator } from "@/lib/react/use-simulator";
 import { ControlPanel } from "./ControlPanel";
 import { EmoteBanner } from "./EmoteBanner";
+import { MuteButton } from "./MuteButton";
 import { TranscriptPanel } from "./TranscriptPanel";
 
 /**
@@ -94,7 +95,6 @@ function Simulator() {
         watching={simulator.watching}
         onWatchingChange={(on) => void simulator.setWatching(on)}
         muted={simulator.muted}
-        onMutedChange={(on) => void simulator.setMuted(on)}
         subscribeLevel={simulator.subscribeLevel}
         onClear={simulator.clear}
         onChange={simulator.updateSettings}
@@ -172,7 +172,13 @@ function Simulator() {
             does — the original layout, and the one place a streamer's hand
             already expects to go. */}
         <div className="flex-shrink-0 border-t border-gray-700 bg-[#1f1f23] p-3">
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <MuteButton
+              muted={simulator.muted}
+              live={live}
+              onChange={(on) => void simulator.setMuted(on)}
+              subscribe={simulator.subscribeLevel}
+            />
             <input
               type="text"
               value={typed}
@@ -185,7 +191,7 @@ function Simulator() {
                   submitTyped();
                 }
               }}
-              placeholder="Say something, or type it here..."
+              placeholder={simulator.muted ? "Mic muted — type to chat..." : "Say something, or type it here..."}
               aria-label="Send a message as the streamer"
               className="min-w-0 flex-1 rounded bg-[#464649] px-3 py-2 text-sm text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:outline-none"
             />
@@ -267,7 +273,7 @@ function Simulator() {
         <TranscriptPanel
           heard={simulator.heard}
           interim={simulator.interim}
-          listening={live}
+          listening={live && !simulator.muted}
         />
       </div>
     </div>

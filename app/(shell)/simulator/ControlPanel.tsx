@@ -89,9 +89,8 @@ export interface ControlPanelProps {
   /** True while the streamer's screen is being captured for chat. */
   watching: boolean;
   onWatchingChange: (on: boolean) => void;
-  /** Mic off by choice; chat keeps going on typed input. */
+  /** Mic off by choice. The control lives by the chat input; this only dims the meter. */
   muted: boolean;
-  onMutedChange: (on: boolean) => void;
   subscribeLevel: (handler: (level: number) => void) => () => void;
   /** Wipes the log and resets the session back to Play. */
   onClear: () => void;
@@ -107,7 +106,6 @@ export function ControlPanel({
   watching,
   onWatchingChange,
   muted,
-  onMutedChange,
   subscribeLevel,
   onClear,
   onChange,
@@ -131,12 +129,6 @@ export function ControlPanel({
       </div>
 
       <div className="space-y-2.5 border-t border-gray-200 pt-4 dark:border-gray-700">
-        <Toggle
-          label="Mute mic"
-          checked={muted}
-          hint="Turns the microphone off without stopping chat. Type to talk to chat instead."
-          onChange={onMutedChange}
-        />
         <Toggle
           label="Watch my screen"
           checked={watching}
