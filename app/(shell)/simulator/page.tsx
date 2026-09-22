@@ -93,6 +93,8 @@ function Simulator() {
         emoteCount={simulator.emotes.length}
         watching={simulator.watching}
         onWatchingChange={(on) => void simulator.setWatching(on)}
+        muted={simulator.muted}
+        onMutedChange={(on) => void simulator.setMuted(on)}
         subscribeLevel={simulator.subscribeLevel}
         onClear={simulator.clear}
         onChange={simulator.updateSettings}
