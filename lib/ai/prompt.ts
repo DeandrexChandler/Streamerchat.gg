@@ -137,7 +137,9 @@ function opening(request: CandidateRequest): string {
     case "idle":
       return `You are the live chat of a small Twitch stream. ${who}`;
     default:
-      return drifting(request)
+      return reactingToScreen(request)
+        ? `You are the live chat of a small Twitch stream. Something just happened on the streamer's screen. ${who} They are reacting to it, right now.`
+        : drifting(request)
         ? `You are the live chat of a small Twitch stream. ${who} The streamer is busy playing and chat is just hanging out.`
         : request.continuation
         ? `You are the live chat of a small Twitch stream. ${who} They are still talking to the streamer about what the streamer said.`
@@ -153,6 +155,11 @@ function opening(request: CandidateRequest): string {
  * room being a room: the game, each other, small talk, the odd callback.
  */
 export const DRIFT_AFTER_S = 60;
+
+/** Something just happened on screen, and there is a frame to show it. */
+function reactingToScreen(request: CandidateRequest): boolean {
+  return request.screen === true && request.frame !== undefined;
+}
 
 function drifting(request: CandidateRequest): boolean {
   return request.phase === "active" && request.continuation && request.silenceSeconds >= DRIFT_AFTER_S;
@@ -189,6 +196,17 @@ function situation(request: CandidateRequest): string[] {
   }
 
   // Active.
+  if (reactingToScreen(request)) {
+    return [
+      ...earlier,
+      ...(earlier.length > 0 ? [""] : []),
+      ...(utterance
+        ? [`The streamer last said "${utterance}", about ${describeSilence(silenceSeconds)} ago.`, ""]
+        : []),
+      "Something just changed on screen. Chat is reacting to THAT, the instant it happened: what the image shows, how it feels, what it means for the run. Short and fast — this is the first second of the reaction, not the analysis.",
+    ];
+  }
+
   if (drifting(request)) {
     return [
       ...earlier,

@@ -73,8 +73,11 @@ export const CandidateRequestSchema = z
      * body limit: the client downscales to 384px, which lands around 20KB.
      */
     frame: z.string().max(300_000).optional(),
+    screen: z.boolean().optional(),
   })
   .refine(
-    (request) => request.phase !== "active" || request.utterance.trim().length > 0,
+    // A screen batch may come before the streamer has said anything: the
+    // game is what is being reacted to.
+    (request) => request.phase !== "active" || request.screen === true || request.utterance.trim().length > 0,
     { message: "an active batch needs something the streamer said", path: ["utterance"] },
   );

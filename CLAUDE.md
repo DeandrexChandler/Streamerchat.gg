@@ -72,8 +72,9 @@ Consequences that must stay true:
   turned capture on. A frame rides along with batches the engine already
   makes, the model names what it sees from a closed list, and
   `lib/ai/moment.ts` turns that into how emote-heavy and how fast the room
-  is. Capture is opt-in and off by default; without it chat falls back to
-  reading intent from speech.
+  is. A big change on screen pulls a small batch (6–12 lines) to the front
+  of the queue, so chat reacts in about two seconds. Capture is opt-in and
+  off by default; without it chat falls back to reading intent from speech.
 
 ## Avoid both failure modes
 

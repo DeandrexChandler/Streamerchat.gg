@@ -137,11 +137,22 @@ const EMOTE_BLOCK_WINDOW_MS = 60_000;
  * How often a screen change may pull a batch forward.
  *
  * A death deserves a reaction; a flickering health bar does not deserve
- * four. Twelve seconds is roughly one extra call a minute on a chaotic
- * game, which is the difference between about five calls a minute and
- * eight.
+ * four. The batch it pulls is small, so eight seconds costs about what
+ * twelve did with a full one.
  */
-const SCREEN_TRIGGER_COOLDOWN_MS = 12_000;
+const SCREEN_TRIGGER_COOLDOWN_MS = 8_000;
+
+/**
+ * Lines in a screen-triggered batch: a few seconds of chat, no more.
+ *
+ * Latency grows with output. Measured with a frame attached: 8 lines came
+ * back in 1.6-2.6s, 30 in 3.9-4.1s. The point of this batch is to be on
+ * screen while the moment is still on screen; the normal refill behind it
+ * carries the room after.
+ */
+const SCREEN_BATCH_SECONDS = 6;
+const SCREEN_BATCH_MIN = 6;
+const SCREEN_BATCH_MAX = 12;
 
 /** How long a screen event keeps colouring the room after it was seen. */
 const EVENT_LIFETIME_MS = 20_000;
@@ -236,6 +247,8 @@ interface Pending {
    * arrives, and are dropped then.
    */
   supersedes: boolean;
+  /** Pulled forward by something on screen. Never preempted by another. */
+  screen?: boolean;
 }
 
 /**
@@ -623,6 +636,10 @@ export class SimulationEngine {
   nextGeneration(now: number): CandidateRequest | null {
     if (this.paused) return null;
 
+    // Arrival goes first: hellos and the chatter right after them. A screen
+    // batch superseding the greeting wave would wipe the hellos off the queue.
+    if (this.phase === "startup" && this.phaseBatches < 2) this.pendingScreenEvent = false;
+
     const silenceMs = now - this.lastSpeechAt;
     const stage = idleStageFor(this.quietFor(now));
 
@@ -643,6 +660,18 @@ export class SimulationEngine {
     const supersede =
       stage !== null && (this.current === null || this.current.idleStage !== stage);
 
+    /**
+     * A routine refill does not hold up a reaction to the screen.
+     *
+     * Waiting for it was up to a whole provider round trip before the
+     * screen batch could even leave. A refill only tops up the queue, so
+     * dropping it costs nothing the screen batch does not replace. A reply
+     * to speech, an arrival wave or another screen batch is not routine and
+     * is waited for.
+     */
+    if (this.inFlight && this.pendingScreenEvent && !this.inFlight.wave && !this.inFlight.screen) {
+      this.inFlight = null;
+    }
     if (this.inFlight) return null;
     if (now - this.lastFailureAt < FAILURE_BACKOFF_MS) return null;
 
@@ -651,14 +680,16 @@ export class SimulationEngine {
      *
      * This is the one thing that pulls the room out of idle without a word
      * being said: dying in silence gets a reaction rather than "is he still
-     * there". Treated as active, because it is — the streamer is playing,
-     * they are just not narrating.
+     * there". Treated as active once the streamer has said anything, because
+     * it is — they are playing, just not narrating.
      */
-    const screenEvent = this.pendingScreenEvent && this.lastClassification !== null;
+    const screenEvent = this.pendingScreenEvent;
     if (screenEvent) {
       this.pendingScreenEvent = false;
-      this.phase = "active";
-      this.phaseBatches = 0;
+      if (this.lastClassification !== null) {
+        this.phase = "active";
+        this.phaseBatches = 0;
+      }
     }
 
     // The streamer said something the queue does not answer yet. Out now,
@@ -692,6 +723,39 @@ export class SimulationEngine {
       count,
     };
     const silenceSeconds = Math.round(silenceMs / 1000);
+
+    /**
+     * Small, first in line, and about the screen.
+     *
+     * It supersedes the queue: appended, its lines waited behind up to a
+     * full batch of chat about whatever came before, which was most of the
+     * delay between a death and chat noticing. The old lines keep flowing
+     * until it lands, as at any other transition.
+     */
+    if (screenEvent) {
+      this.inFlight = {
+        id: this.issue(now),
+        requestedAt: now,
+        supersedes: true,
+        wave: false,
+        screen: true,
+        phase: "active",
+        utteranceId: this.utteranceId,
+        idleStage: null,
+        intent: "mundane",
+      };
+      return {
+        ...shared,
+        count: Math.max(SCREEN_BATCH_MIN, Math.min(SCREEN_BATCH_MAX, Math.round(rate * SCREEN_BATCH_SECONDS))),
+        phase: "active",
+        utterance: this.lastUtterance,
+        history: this.history.slice(0, -1),
+        classification: this.lastClassification ?? STARTUP_CLASSIFICATION,
+        continuation: false,
+        screen: true,
+        silenceSeconds,
+      };
+    }
 
     if (this.phase === "startup") {
       const first = this.phaseBatches === 0;

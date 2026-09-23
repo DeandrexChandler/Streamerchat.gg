@@ -76,6 +76,11 @@ export interface CandidateRequest {
    * Absent when capture is off, which is the default.
    */
   frame?: string;
+  /**
+   * Pulled forward because the screen just changed. The prompt leads with
+   * the image instead of the last thing said. Only meaningful with a frame.
+   */
+  screen?: boolean;
 }
 
 /**

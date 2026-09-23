@@ -89,16 +89,81 @@ describe("screen events", () => {
         );
       }
     }
-    // A minute of constant motion against a twelve second cooldown.
-    expect(triggers).toBeLessThanOrEqual(5);
-    expect(triggers).toBeGreaterThan(2);
+    // A minute of constant motion against an eight second cooldown.
+    expect(triggers).toBeLessThanOrEqual(8);
+    expect(triggers).toBeGreaterThan(4);
   });
 
-  it("does nothing before the streamer has said anything", () => {
+  it("lets the arrival wave go first", () => {
     const engine = started();
     engine.screenEvent(1_000);
-    // Startup still owns the room; a screen event cannot skip arrival.
+    // Superseding the hellos with a screen batch would wipe them.
     expect(engine.nextGeneration(1_000)?.phase).toBe("startup");
+  });
+
+  it("reacts to the screen after arrival even if the streamer never speaks", () => {
+    // Playing without narrating from the moment Play is pressed.
+    const engine = started();
+    // The greeting wave and the chatter after it, each small enough that
+    // the next is due at once.
+    for (let at = 0; at < 2; at += 1) {
+      expect(engine.nextGeneration(at * 1_000)?.phase).toBe("startup");
+      engine.supplyReactions([{ text: `arrival ${at}` }], at * 1_000, engine.generationTicket!);
+    }
+    engine.screenEvent(20_000);
+    const request = engine.nextGeneration(20_000);
+    expect(request?.screen).toBe(true);
+  });
+
+  it("asks for a small batch that goes to the front of the queue", () => {
+    // Latency grows with output, and lines appended behind a full queue
+    // waited out every one of them: most of the lag after a death.
+    const engine = started(2);
+    engine.handleTranscript("okay lets go", 0, undefined, true);
+    stock(engine, 0);
+    expect(engine.pendingReactions).toBe(40);
+
+    engine.screenEvent(1_000);
+    const request = engine.nextGeneration(1_000);
+    expect(request?.screen).toBe(true);
+    expect(request!.count).toBeLessThanOrEqual(12);
+
+    engine.supplyReactions(
+      Array.from({ length: request!.count }, (_, i) => ({ text: `he died ${i}` })),
+      3_000,
+      engine.generationTicket!,
+    );
+    expect(engine.pendingReactions).toBe(request!.count);
+  });
+
+  it("does not wait behind a routine refill", () => {
+    const engine = started();
+    engine.handleTranscript("okay lets go", 0, undefined, true);
+    engine.nextGeneration(0);
+    engine.supplyReactions([{ text: "a" }], 500, engine.generationTicket!);
+
+    // Queue nearly empty: a continuation goes out and is still on the wire.
+    const refill = engine.nextGeneration(1_000);
+    expect(refill?.continuation).toBe(true);
+    const staleTicket = engine.generationTicket!;
+
+    engine.screenEvent(2_000);
+    const screen = engine.nextGeneration(2_000);
+    expect(screen?.screen).toBe(true);
+    expect(engine.generationTicket).not.toBe(staleTicket);
+
+    // The abandoned refill landing late changes nothing.
+    engine.supplyReactions([{ text: "late" }], 4_000, staleTicket);
+    expect(engine.generationTicket).not.toBeNull();
+  });
+
+  it("waits for a reply to something the streamer just said", () => {
+    const engine = started();
+    engine.handleTranscript("okay lets go", 0, undefined, true);
+    expect(engine.nextGeneration(0)?.continuation).toBe(false);
+    engine.screenEvent(1_000);
+    // The streamer is waiting on that reply; it is not routine.
+    expect(engine.nextGeneration(1_000)).toBeNull();
   });
 
   it("carries the event the model reported into stats", () => {
