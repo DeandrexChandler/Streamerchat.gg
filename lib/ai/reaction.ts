@@ -71,4 +71,6 @@ export interface QueuedReaction extends Reaction {
   attempts?: number;
   /** Part of the first reply to an input: one line per person. */
   wave?: boolean;
+  /** Release order within the batch: eagerness, jittered so shapes interleave. */
+  order?: number;
 }

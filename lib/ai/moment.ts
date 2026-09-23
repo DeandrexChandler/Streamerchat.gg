@@ -29,7 +29,8 @@ export type GameEvent = (typeof GAME_EVENTS)[number];
  * What chat looks like for each event.
  *
  * `emoteShare` is the fraction of lines rendered as emotes alone, `short`
- * the fraction that are one to three words. Taken from measurement: a real
+ * the fraction that are one to three words. Even the quiet end runs near a
+ * fifth: below that, emotes land too far apart to read as a mix. Taken from measurement: a real
  * mid-size chat ran about 40% emote-only through a hype beat and under 10%
  * through conversation, and the difference tracks what is on screen rather
  * than how fast chat is moving.
@@ -53,16 +54,16 @@ const PROFILES: Record<GameEvent, EventProfile> = {
   boss: { emoteShare: 0.3, short: 0.4, rate: 1.5 },
 
   // Something new to look at. Chat talks about it rather than spamming.
-  discovery: { emoteShare: 0.18, short: 0.3, rate: 1.2 },
-  struggling: { emoteShare: 0.25, short: 0.35, rate: 1.2 },
+  discovery: { emoteShare: 0.26, short: 0.3, rate: 1.2 },
+  struggling: { emoteShare: 0.3, short: 0.35, rate: 1.2 },
 
   // Nothing is happening, which is when chat talks to the streamer and to
   // itself. The conversational end of the range.
-  downtime: { emoteShare: 0.1, short: 0.25, rate: 1 },
-  menu: { emoteShare: 0.12, short: 0.3, rate: 0.9 },
+  downtime: { emoteShare: 0.2, short: 0.25, rate: 1 },
+  menu: { emoteShare: 0.18, short: 0.3, rate: 0.9 },
 
   // No frame, or the model could not tell. Middle of the road.
-  unknown: { emoteShare: 0.15, short: 0.27, rate: 1 },
+  unknown: { emoteShare: 0.25, short: 0.27, rate: 1 },
 };
 
 export function profileFor(event: GameEvent | undefined): EventProfile {

@@ -255,3 +255,100 @@ describe("normal talk", () => {
     expect(bare / total).toBeLessThan(0.25);
   });
 });
+
+describe("emotes and words interleave", () => {
+  /**
+   * The reported symptom: "chat would spew out word chats and switch to
+   * emotes for 5-6 messages before returning to words."
+   *
+   * The cause was the batch being sorted strictly by eagerness. The model
+   * gives a bare emote eagerness 1 and a written sentence 0.2, so every
+   * emote in a batch arrived together.
+   */
+  const EAGER_EMOTES: CandidateProvider = {
+    name: "eager-emotes",
+    async generate(request) {
+      const lines: Array<[string, number]> = [
+        ["KEKW", 1], ["Pog", 1], ["Sadge", 0.95], ["NODDERS", 0.95],
+        ["W take", 0.9], ["Ayo????", 0.9], ["mhmm", 0.85],
+        ["is it stable tho", 0.5], ["wait that looks so sick dre", 0.4],
+        ["bro spent four hours on the rafters", 0.35],
+        ["i think you need a chimney", 0.3], ["does it leak in game", 0.25],
+      ];
+      return {
+        status: "ok",
+        reactions: Array.from({ length: request.count }, (_, i) => {
+          const [text, eagerness] = lines[i % lines.length];
+          return {
+            text: i >= lines.length ? `${text} ${Math.floor(i / lines.length)}` : text,
+            emotion: "hype" as const,
+            eagerness,
+          };
+        }),
+      };
+    },
+  };
+
+  const shapes = async (seed: number) => {
+    const names = new Set(EMOTE_NAMES);
+    const { messages } = await session(
+      EAGER_EMOTES,
+      [[1000, "look at this roof I just built"]],
+      90_000,
+      {},
+      seed,
+    );
+    return messages
+      .filter((m) => m.at >= 1000)
+      .map((m) => m.text.split(" ").every((w) => names.has(w)));
+  };
+
+  it("never lets either kind run away", async () => {
+    // Not a cap on emotes: a rule that forbids two in a row is itself a
+    // tell. The share is steered against what just went out, so three
+    // together can happen and five cannot — and the same correction is what
+    // stops a long block of sentences.
+    for (let seed = 1; seed <= 6; seed += 1) {
+      let emotes = 0;
+      let words = 0;
+      for (const isEmote of await shapes(seed)) {
+        emotes = isEmote ? emotes + 1 : 0;
+        words = isEmote ? 0 : words + 1;
+        expect(emotes).toBeLessThanOrEqual(4);
+        expect(words).toBeLessThanOrEqual(22);
+      }
+    }
+  });
+
+  it("allows a couple of emotes together rather than strictly alternating", async () => {
+    // The other failure: perfectly alternating shapes reads as a machine.
+    let pairs = 0;
+    for (let seed = 1; seed <= 6; seed += 1) {
+      const all = await shapes(seed);
+      for (let i = 1; i < all.length; i += 1) if (all[i] && all[i - 1]) pairs += 1;
+    }
+    expect(pairs).toBeGreaterThan(0);
+  });
+
+  it("still hits the emote share while interleaving it", async () => {
+    let emotes = 0;
+    let total = 0;
+    for (let seed = 1; seed <= 6; seed += 1) {
+      const all = await shapes(seed);
+      total += all.length;
+      emotes += all.filter(Boolean).length;
+    }
+    expect(total).toBeGreaterThan(200);
+    expect(emotes / total).toBeGreaterThan(0.12);
+    expect(emotes / total).toBeLessThan(0.4);
+  });
+
+  it("spreads them through the stream rather than front-loading the batch", async () => {
+    // Strict eagerness ordering put every emote in the first third.
+    const all = await shapes(3);
+    const third = Math.floor(all.length / 3);
+    const first = all.slice(0, third).filter(Boolean).length;
+    const last = all.slice(-third).filter(Boolean).length;
+    expect(Math.abs(first - last)).toBeLessThan(Math.max(4, third * 0.3));
+  });
+});

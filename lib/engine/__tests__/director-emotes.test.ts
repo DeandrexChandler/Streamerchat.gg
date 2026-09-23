@@ -88,18 +88,19 @@ function emoteShare(
 }
 
 describe("emote-forward responses", () => {
-  it("answers a greeting mostly in words, with a few emote-only lines mixed in", () => {
-    // Words carry the answer; emotes decorate it. A majority of bare emotes
-    // is how "hello can yall hear me" got a wall of waves.
+  it("answers a greeting mostly in words, with emotes mixed through", () => {
+    // Words carry the answer; emotes punctuate it. A majority of bare
+    // emotes is how "hello can yall hear me" got a wall of waves, but too
+    // few and they land so far apart that chat reads as a block of prose.
     const share = emoteShare("greeting");
-    expect(share).toBeGreaterThan(0.04);
-    expect(share).toBeLessThan(0.3);
+    expect(share).toBeGreaterThan(0.15);
+    expect(share).toBeLessThan(0.45);
   });
 
-  it("keeps hype emote-only lines a minority too", () => {
+  it("keeps hype emote-only lines a minority, but a visible one", () => {
     const share = emoteShare("excitement");
-    expect(share).toBeGreaterThan(0.04);
-    expect(share).toBeLessThan(0.35);
+    expect(share).toBeGreaterThan(0.15);
+    expect(share).toBeLessThan(0.5);
   });
 
   it("never staples an emote onto a line the model gave no feeling for", () => {
@@ -115,7 +116,7 @@ describe("emote-forward responses", () => {
   it("still answers a story with words", () => {
     // Replacing an actual reply with a wall of emotes is the failure mode on
     // the other side of this feature.
-    expect(emoteShare("story")).toBeLessThan(0.22);
+    expect(emoteShare("story")).toBeLessThan(0.4);
   });
 
   it("posts the occasional idle emote during idle, not a wall of them", () => {

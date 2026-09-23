@@ -48,7 +48,7 @@ const MAX_RECENT_IN_PROMPT = 3;
 const RULES = [
   "Every line is someone talking TO the streamer about what they just said. Not about the stream in general, not to each other.",
   "Mostly lowercase, natural slang, the occasional ALL CAPS line. Typos and stretched words happen: heyyy, slayyy, YOOO, ur, rn, tho.",
-  "About a quarter of lines are short reactions, one to three words: 'bet', 'Ayo????', 'nah fr', 'mhmm', 'slayyy', 'W take'. The rest are four words or more. Vary the tone and the mood — some hyped, some deadpan, some confused, some warm, some blunt but never mean.",
+  "Length is split down the middle. HALF your lines are one to three words — 'bet', 'Ayo????', 'nah fr', 'mhmm', 'slayyy', 'W take', 'he cooked', 'no shot'. The OTHER HALF are full four-to-ten word thoughts — 'bro spent four hours on that roof', 'wait does it leak when it rains', 'honestly the texture pack carries it'. Count as you go: if the last two were short, write a longer one. Vary the tone and the mood — some hyped, some deadpan, some confused, some warm, some blunt but never mean.",
   "Answer directly, react with a feeling, ask a follow-up, give an opinion when one was asked for. A couple of lines can be looser or a joke, but the batch stays about what was just said.",
   "Style, not script: 'nah he wylin', 'Ayo????', 'grown adult btw', 'slayyy', 'mhmm', 'i think you can idk tho', 'bet that', 'ooo good idea', 'leave the wall'.",
   "Short lines still react to what was said — not generic filler like nice, real, same, lol stacked up with nothing behind them.",
