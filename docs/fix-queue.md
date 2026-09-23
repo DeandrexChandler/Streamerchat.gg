@@ -1,7 +1,7 @@
 # Fix queue
 
 Reported from a five minute live session, 2026-09-20. One at a time, in
-whatever order the owner picks. Nothing here is started.
+whatever order the owner picks.
 
 Each entry records what was seen, what the code does now, and where it
 lives — so picking one up later does not mean re-deriving it.
@@ -96,31 +96,14 @@ the game is doing the talking.
 
 ---
 
-## 6. Remove the Emotes toggle
+## 6. Remove the Emotes toggle — done
 
-**Owner's reasoning:** redundant. Someone who does not want emotes imports
-none.
-
-**Now:** `emotesEnabled` in `lib/config/settings.ts`, rendered as a Toggle
-in `ControlPanel.tsx`, and read in `lib/engine/director.ts` in four places.
-
-**Shape of the fix:** delete the setting and the toggle; the director's
-existing empty-pack handling already covers the no-emotes case. Check
-`emoteOnlyMode` separately — it is a different switch and was not mentioned.
+The setting and toggle are gone. An empty pack is the only way to turn
+emotes off.
 
 ---
 
-## 7. Remove the default emote list
+## 7. Remove the default emote list — done
 
-**Owner's reasoning:** no emotes unless the user imports them.
-
-**Now:** first run auto-imports the top 150 popular 7TV emotes —
-`lib/react/use-simulator.ts` around line 197, guarded by `hasAutoImported()`
-in `lib/config/emote-store.ts`.
-
-**Shape of the fix:** delete the auto-import and the flag that guards it.
-Note the consequence: a fresh install has no emotes at all until the user
-visits the emotes page, so every emote share in the engine reads as zero
-and chat is pure text. That is the intended behaviour but it changes what a
-first session looks like, and the tests that assume a stocked pack will
-need to say so explicitly.
+No first-run import. A fresh install is pure text until a pack is imported
+from the emotes page; the banner in the simulator says so.

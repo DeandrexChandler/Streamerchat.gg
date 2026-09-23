@@ -127,11 +127,6 @@ export function ControlPanel({
 
       <div className="space-y-2.5 border-t border-gray-200 pt-4 dark:border-gray-700">
         <Toggle
-          label="Emotes"
-          checked={settings.emotesEnabled}
-          onChange={(emotesEnabled) => onChange({ emotesEnabled })}
-        />
-        <Toggle
           label="Watch my screen"
           checked={watching}
           hint="Chat reacts to the game, not just what you say. Sends a small screenshot with each batch to the AI. Off by default."

@@ -5,11 +5,9 @@ import Link from "next/link";
 import { X } from "lucide-react";
 
 /**
- * Shown only when chat has no emotes at all — the first-run import failed, or
- * every pack was deleted.
- *
- * With auto-import working this is rarely seen, which is the point: it is an
- * error affordance, not an onboarding step.
+ * Shown when chat has no emotes at all. Nothing is imported by default, so a
+ * fresh install sees this until a pack is added; dismissing it means the
+ * streamer wants chat as plain text.
  */
 const DISMISS_KEY = "streamerchat-gg:emote-banner-dismissed:v1";
 
@@ -50,7 +48,7 @@ export function EmoteBanner({ emoteCount }: { emoteCount: number }) {
   return (
     <div className="flex flex-shrink-0 items-center gap-3 border-b border-amber-900/50 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
       <span>
-        Chat has no emotes — the automatic import couldn&apos;t reach 7TV.{" "}
+        Chat has no emotes yet.{" "}
         <Link
           href="/settings/emotes"
           className="underline underline-offset-2 hover:text-amber-100"

@@ -19,8 +19,6 @@ export const SimulationSettingsSchema = z.object({
    */
   messagesPerSecond: z.number().min(0.2).max(4).default(1),
 
-  emotesEnabled: z.boolean().default(true),
-
   /**
    * Every message is emotes and nothing else — what real chat does during a
    * clutch moment. Requires an imported pack; with no emotes the director

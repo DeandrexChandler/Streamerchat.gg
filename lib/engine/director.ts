@@ -265,11 +265,9 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
      * emotes over a menu is noise, the same wall over a death is chat.
      * Without capture this falls back to the intent, as before.
      */
-    const target = !settings.emotesEnabled
-      ? 0
-      : options.event
-        ? profileFor(options.event).emoteShare
-        : (EMOTE_FORWARD[moment] ?? DEFAULT_EMOTE_FORWARD);
+    const target = options.event
+      ? profileFor(options.event).emoteShare
+      : (EMOTE_FORWARD[moment] ?? DEFAULT_EMOTE_FORWARD);
 
     /**
      * Steered toward the target rather than sampled at it, or capped.
@@ -299,7 +297,6 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
       text = only;
       source = "emote";
     } else if (
-      settings.emotesEnabled &&
       !isEmoteOnly(text, emotes) &&
       (reaction.emote || (reaction.emotion && rng.chance(EMOTE_TRAILER)))
     ) {

@@ -15,11 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import {
-  AUTO_PACK_ID,
-  localEmotePackStore,
-  mergeEmotes,
-} from "@/lib/config/emote-store";
+import { localEmotePackStore, mergeEmotes } from "@/lib/config/emote-store";
 import { EmoteTagger } from "./EmoteTagger";
 import type { EmotePack } from "@/lib/emotes/seventv";
 
@@ -195,11 +191,6 @@ export default function EmotesPage() {
                           <p className="truncate text-sm font-medium">
                             {pack.name}
                           </p>
-                          {pack.id === AUTO_PACK_ID && (
-                            <Badge variant="secondary" className="shrink-0">
-                              Added automatically
-                            </Badge>
-                          )}
                         </div>
                         <p className="text-xs text-muted-foreground">
                           {pack.emotes.length} emotes

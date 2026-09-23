@@ -5,13 +5,7 @@ import { MicSession } from "../audio/mic-session";
 import { ScreenCapture } from "../audio/screen-capture";
 import { DEFAULT_SETTINGS, localSettingsStore } from "../config/settings";
 import type { SimulationSettings } from "../config/settings";
-import {
-  hasAutoImported,
-  localEmotePackStore,
-  markAutoImported,
-  mergeEmotes,
-} from "../config/emote-store";
-import type { EmotePack } from "../emotes/seventv";
+import { localEmotePackStore, mergeEmotes } from "../config/emote-store";
 import type { Reaction } from "../ai/reaction";
 import type { GameEvent } from "../ai/moment";
 import type { Emote } from "../engine/types";
@@ -191,29 +185,6 @@ export function useSimulator(): UseSimulatorResult {
     emotesRef.current = merged;
     setEmotes(merged);
     engineRef.current?.setEmotes(merged);
-
-    // First run: pull a real emote vocabulary so chat is not text-only out of
-    // the box. Once, and never again after the user deletes it.
-    if (packs.length === 0 && !hasAutoImported()) {
-      void (async () => {
-        try {
-          const res = await fetch("/api/emotes?popular=150", { cache: "no-store" });
-          if (!res.ok) return;
-          const pack = (await res.json()) as EmotePack;
-          if (!pack?.emotes?.length) return;
-
-          markAutoImported();
-          localEmotePackStore.save([pack]);
-          const withPack = mergeEmotes([pack]);
-          emotesRef.current = withPack;
-          setEmotes(withPack);
-          engineRef.current?.setEmotes(withPack);
-        } catch {
-          // Offline or 7TV down. Chat runs emote-free and the banner offers a
-          // retry; nothing here may block the simulator from starting.
-        }
-      })();
-    }
 
     // The OBS relay is created here rather than on start(), because the key
     // comes from localStorage and this is the first point at which it can be
