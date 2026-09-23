@@ -41,6 +41,19 @@ function tierFor(messagesPerSecond: number) {
   return best;
 }
 
+/**
+ * Up to this rate, chat is a conversation with a few people the streamer
+ * knows by name, and the model writes each line as one of them.
+ *
+ * Above it the room is a crowd: names scroll past unread, and sending a
+ * dozen profiles with every call would cost input tokens for nothing.
+ */
+export const CONVERSATIONAL_MAX_RATE = 0.5;
+
+export function isConversational(messagesPerSecond: number): boolean {
+  return messagesPerSecond <= CONVERSATIONAL_MAX_RATE;
+}
+
 /** Persistent names: the people the streamer comes to recognise. */
 export function rosterSizeFor(messagesPerSecond: number): number {
   return tierFor(messagesPerSecond)[1];

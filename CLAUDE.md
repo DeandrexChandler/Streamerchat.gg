@@ -46,6 +46,14 @@ usernames and colours, personalities, per-viewer memory, repetition rules,
 emote selection, safety filtering, compact context, queue refill, the
 displayed viewer count.
 
+One exception, at the slow tiers only (≤ 0.5/sec, `isConversational` in
+`lib/engine/roster.ts`): the room is three or four regulars the streamer
+talks to by name, so the model is given the roster and writes each line as
+a named person. The engine still enforces everything else — an invented
+name is dropped server-side, and the caps on who may speak, how often and
+whether they are repeating themselves all still hold. Above that tier the
+model never sees a name.
+
 The AI owns: wording and conversational content, in batches — startup,
 active, continuation, idle — never one call per message.
 
@@ -68,6 +76,10 @@ Consequences that must stay true:
   memory and are who the streamer learns: 3 at the slowest tier up to 12 at
   CHAOS. Strangers pass through once and carry no history, rising from none
   of the traffic to 55%. See `lib/engine/roster.ts`.
+- **Regulars remember, and survive the session.** A few topics, a few lines
+  and what the streamer said to them, per person, saved to browser storage
+  (`lib/config/roster-store.ts`) and shown to the model at the slow tiers.
+  Kept deliberately small: it rides in every prompt.
 - **What is on screen decides the character of chat**, when the streamer has
   turned capture on. A frame rides along with batches the engine already
   makes, the model names what it sees from a closed list, and

@@ -81,6 +81,26 @@ export interface CandidateRequest {
    * the image instead of the last thing said. Only meaningful with a frame.
    */
   screen?: boolean;
+  /**
+   * Who is in the room, at the slow tiers only.
+   *
+   * When present the model writes each line as one of these people and says
+   * which, because a chat of three is a conversation with people the
+   * streamer knows by name — and nobody can answer to their name if the
+   * model has never seen it.
+   */
+  roster?: readonly RosterEntry[];
+  /** The regular the streamer just addressed by name, if any. */
+  addressed?: string;
+}
+
+/** One regular, as the model is told about them. */
+export interface RosterEntry {
+  name: string;
+  /** Their archetype in a couple of words: "hype viewer", "lurker". */
+  persona: string;
+  /** What they have been on about this stream. Empty on their first line. */
+  notes?: string;
 }
 
 /**
@@ -97,8 +117,16 @@ export type ProviderStatus =
   | "bad-response"  // 2xx that could not be parsed
   | "empty";        // parsed fine, contained nothing
 
+/** What one call cost, as the provider counted it. */
+export interface TokenUsage {
+  input: number;
+  output: number;
+}
+
 export interface GenerationResult {
   reactions: Reaction[];
+  /** Tokens billed for this call, when the provider reported them. */
+  usage?: TokenUsage;
   /** What the model saw happening, when it was given a frame. */
   event?: GameEvent;
   status: ProviderStatus;

@@ -4,6 +4,7 @@ import type {
   CandidateRequest,
   GenerationPhase,
   IdleStage,
+  RosterEntry,
 } from "../ai/provider";
 import type { QueuedReaction, Reaction } from "../ai/reaction";
 import { MAX_EMOTES_IN_PROMPT } from "../ai/prompt";
@@ -18,9 +19,12 @@ import {
   idleStageFor,
   lowWaterFor,
 } from "./generation";
+import type { SavedViewer } from "../config/roster-store";
+import { PERSONALITIES } from "../data/personalities";
 import { Population } from "./population";
 import { createFilter, type Filter } from "./profanity";
 import {
+  isConversational,
   MAX_CONSECUTIVE,
   MAX_POSTS_IN_WINDOW,
   POST_WINDOW_MS,
@@ -57,6 +61,8 @@ export interface EngineOptions {
   seed?: number;
   /** Wall-clock origin. Defaults to Date.now(). */
   now?: number;
+  /** Regulars from previous sessions, so they come back knowing the stream. */
+  roster?: readonly SavedViewer[];
 }
 
 /**
@@ -116,6 +122,9 @@ const BURST_INTENTS: ReadonlySet<Intent> = new Set<Intent>([
  * spinning.
  */
 const SPEAKER_ATTEMPTS = 4;
+
+/** How many slots a line waits for the person it was written for. */
+const NAMED_ATTEMPTS = 8;
 
 /** How soon to try again when a slot found nobody eligible to speak. */
 const RETRY_SLOT_MS = 400;
@@ -352,6 +361,9 @@ export class SimulationEngine {
 
   // ------------------------------------------------------------- room
 
+  /** The regular the streamer named in their last utterance, if any. */
+  private addressed: string | undefined;
+
   /** Who spoke last, and how many times in a row. */
   private lastSpeakerId: string | null = null;
   private consecutive = 0;
@@ -391,6 +403,9 @@ export class SimulationEngine {
     this.filter = createFilter(this.settings);
 
     this.population = new Population(this.rng, rosterSizeFor(this.settings.messagesPerSecond));
+    if (options.roster?.length) {
+      this.population.restore(options.roster, rosterSizeFor(this.settings.messagesPerSecond));
+    }
     this.population.setCooldown(speakingCooldownFor(this.settings.messagesPerSecond));
     this.scheduler = new Scheduler(this.effectiveRateLimit());
 
@@ -450,6 +465,7 @@ export class SimulationEngine {
     this.recentShapes = [];
     this.lastSpeakerId = null;
     this.consecutive = 0;
+    this.addressed = undefined;
     this.postTimes.clear();
     this.lastTurnoverAt = now;
     this.event = undefined;
@@ -615,6 +631,21 @@ export class SimulationEngine {
     if (this.history.length > HISTORY_LINES) this.history.shift();
     this.scheduler.trimBeyond(now, 1_500);
 
+    /**
+     * Said to one of them, by name.
+     *
+     * Speech recognition breaks a username into words — "hazel irl" for
+     * hazelirl — so the match ignores spacing and punctuation entirely, and
+     * falls back to a distinctive word of the name on its own.
+     */
+    this.addressed = isConversational(this.settings.messagesPerSecond)
+      ? this.matchName(text)
+      : undefined;
+    if (this.addressed) {
+      const viewer = this.population.byName(this.addressed);
+      if (viewer) this.population.rememberAddressed(viewer.id, text);
+    }
+
     const topic = this.topics.observe(classification, text, now);
     return { classification, reacted: topic !== null, queued: this.scheduler.pending };
   }
@@ -716,6 +747,9 @@ export class SimulationEngine {
 
     const count = batchSizeFor(rate, this.latencyMs);
     const shared = {
+      ...(isConversational(this.settings.messagesPerSecond)
+        ? { roster: this.room(), ...(this.addressed ? { addressed: this.addressed } : {}) }
+        : {}),
       emotes: this.emotes.slice(0, MAX_EMOTES_IN_PROMPT).map((emote) => emote.name),
       recent: [...this.recentLines],
       streamer: this.settings.streamerName || undefined,
@@ -855,6 +889,65 @@ export class SimulationEngine {
       continuation,
       silenceSeconds,
     };
+  }
+
+  /** The regulars and their memory, for the caller to persist. */
+  exportRoster(): SavedViewer[] {
+    return this.population.export();
+  }
+
+  /**
+   * The regular the streamer just named, if any.
+   *
+   * Two passes: the whole name with everything but letters and digits
+   * stripped, which survives "hazel irl" and "Hazel-irl"; then a single
+   * distinctive word of a name, but only when it belongs to exactly one
+   * person in the room, so "clover" does not address wobblyclover by
+   * accident when someone else is clover_bee.
+   */
+  private matchName(text: string): string | undefined {
+    const flat = text.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const words = new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+    const regulars = this.population.all();
+
+    for (const viewer of regulars) {
+      if (flat.includes(viewer.name.toLowerCase().replace(/[^a-z0-9]/g, ""))) return viewer.name;
+    }
+
+    let found: string | undefined;
+    for (const viewer of regulars) {
+      const distinctive = viewer.nameWords.filter((word) => word.length >= 5 && words.has(word));
+      if (distinctive.length === 0) continue;
+      // A word two people share names nobody.
+      if (found) return undefined;
+      found = viewer.name;
+    }
+    return found;
+  }
+
+  /**
+   * Who is in the room, for the prompt.
+   *
+   * Only built at the slow tiers. A regular with nothing behind them yet is
+   * still listed — the name is the point — and the notes fill in as the
+   * session goes.
+   */
+  private room(): RosterEntry[] {
+    return this.population.all().map((viewer) => {
+      const { topics, lines, addressed } = viewer.memory;
+      const notes = [
+        topics.length > 0 ? `into: ${topics.join(", ")}` : "",
+        lines.length > 0 ? `has said: ${lines.map((line) => `"${line}"`).join(", ")}` : "",
+        addressed.length > 0
+          ? `streamer said to them: ${addressed.map((line) => `"${line}"`).join(", ")}`
+          : "",
+      ].filter(Boolean);
+      return {
+        name: viewer.name,
+        persona: PERSONALITIES[viewer.personality].label.toLowerCase(),
+        ...(notes.length > 0 ? { notes: notes.join("; ") } : {}),
+      };
+    });
   }
 
   /**
@@ -1105,6 +1198,18 @@ export class SimulationEngine {
     return words.length > 0 && words.every((word) => this.emoteNames.has(word));
   }
 
+  /**
+   * Whether the viewer a line was written for is currently held back by the
+   * back-to-back or rolling caps. Lines with no name are never busy.
+   */
+  private speakerBusy(reaction: QueuedReaction | undefined, at: number): boolean {
+    const viewer = reaction?.from ? this.population.byName(reaction.from) : undefined;
+    if (!viewer) return false;
+    if (this.lastSpeakerId === viewer.id && this.consecutive >= MAX_CONSECUTIVE) return true;
+    const times = this.postTimes.get(viewer.id) ?? [];
+    return times.filter((t) => at - t < POST_WINDOW_MS).length >= MAX_POSTS_IN_WINDOW;
+  }
+
   private produceOne(at: number): boolean {
     // Peeked, not popped. Consumed only once a message actually exists —
     // pulling it off first meant a tick with no available speaker silently
@@ -1128,6 +1233,18 @@ export class SimulationEngine {
         .findIndex((candidate) => !this.isEmoteOnly(candidate.text));
       if (found > 0) index = found;
     }
+    /**
+     * A line belongs to the person the model wrote it for, so when that
+     * person may not speak yet the *line* waits, not the room. Someone
+     * else's line a little further down goes out instead.
+     */
+    if (this.speakerBusy(this.reactions[index], at)) {
+      const free = this.reactions
+        .slice(0, LOOKAHEAD)
+        .findIndex((candidate) => !this.speakerBusy(candidate, at));
+      if (free >= 0) index = free;
+    }
+
     const reaction = this.reactions[index];
     if (!reaction) return false;
 
@@ -1146,9 +1263,18 @@ export class SimulationEngine {
      * name answered "can yall hear me" twice while two others said nothing.
      */
     const spoken = this.waveSpeakers.get(reaction.batchId);
+    /**
+     * The wave rule is the engine choosing; a named line already chose.
+     *
+     * Leaving it on meant a batch that gave one regular three lines wedged
+     * the queue: they had spoken, the wave barred them, and nobody else
+     * could say their words. One-shot intents still hold for everyone —
+     * saying hello twice is wrong whoever decided it.
+     */
+    const named = reaction.from ? this.population.byName(reaction.from) : undefined;
     if (
       ONE_SHOT_INTENTS.has(intent) ||
-      (reaction.wave && (spoken?.size ?? 0) < this.population.size)
+      (!named && reaction.wave && (spoken?.size ?? 0) < this.population.size)
     ) {
       for (const id of spoken ?? []) barred.add(id);
     }
@@ -1186,6 +1312,7 @@ export class SimulationEngine {
       const result = directOne({
         topic,
         stage,
+        speaker: named,
         band: this.topics.band(topic ? this.topics.momentumOf(topic, at) : 0),
         reaction,
         phase: reaction.phase ?? this.phase,
@@ -1228,7 +1355,13 @@ export class SimulationEngine {
       }
 
       this.reactions.splice(index, 1);
-      this.population.remember(result.viewerId, said, intent, at);
+      this.population.remember(result.viewerId, said, intent, at, {
+        line: result.message.text,
+        // The live topic when there is one, and otherwise what the streamer
+        // was last on about: a quiet sentence can fall below the topic floor
+        // and still be the thing this person just replied to.
+        topics: topic?.keywords ?? this.lastClassification?.keywords,
+      });
       if (reaction.wave || ONE_SHOT_INTENTS.has(intent)) {
         const wave = this.waveSpeakers.get(reaction.batchId) ?? new Set<string>();
         wave.add(result.viewerId);
@@ -1254,8 +1387,17 @@ export class SimulationEngine {
      */
     this.reactions.splice(index, 1);
     const attempts = (reaction.attempts ?? 0) + 1;
-    if (attempts < 2) this.reactions.push({ ...reaction, attempts });
-    else this.linesDropped += 1;
+    /**
+     * A line written for a named person waits longer.
+     *
+     * Anyone can say an unattributed line, so two tries means nobody could.
+     * A named line has exactly one possible speaker, who is often simply
+     * mid-cooldown in a room of three — and at a slow tier there is time to
+     * wait for them.
+     */
+    if (attempts < (reaction.from ? NAMED_ATTEMPTS : 2)) {
+      this.reactions.push({ ...reaction, attempts });
+    } else this.linesDropped += 1;
     this.slotsWaited += 1;
     return false;
   }

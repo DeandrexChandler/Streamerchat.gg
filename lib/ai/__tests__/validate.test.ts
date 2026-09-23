@@ -136,3 +136,25 @@ describe("validateCandidates", () => {
     });
   });
 });
+
+describe("attribution", () => {
+  it("keeps a name the room actually contains", () => {
+    const { reactions } = validateReactions(
+      [{ text: "that roof is cursed", from: "hazelirl" }],
+      [],
+      { roster: ["hazelirl", "milo894"] },
+    );
+    expect(reactions[0].from).toBe("hazelirl");
+  });
+
+  it("drops an invented name but keeps the line", () => {
+    // The words are still chat; the engine picks a speaker as it always has.
+    const { reactions } = validateReactions(
+      [{ text: "no shot", from: "someone_made_up" }],
+      [],
+      { roster: ["hazelirl"] },
+    );
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].from).toBeUndefined();
+  });
+});

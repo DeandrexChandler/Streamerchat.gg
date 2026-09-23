@@ -101,48 +101,23 @@ Nothing here is started.
 
 ---
 
-## 8. Chatters don't know their own names, or each other's
+## 8. Chatters don't know their own names, or each other's — done
 
-**Seen:** the streamer says "hi hazel irl". hazelirl doesn't know it's being
-addressed, and chat answers "i hope whoever you're talking about is good".
-
-**Now:** the model never sees usernames. The prompt asks for "N separate
-messages from N different viewers" (`opening()` in `lib/ai/prompt.ts`), and
-the engine gives each line to a viewer afterwards (`directOne` in
-`lib/engine/director.ts`). No line is written *as* anyone, so nobody can
-answer to their name. The classifier has no idea of usernames, and speech
-recognition will mangle them ("hazel irl" for `hazelirl`).
-
-**Shape of the fix:** the roster goes into the prompt, and the model writes
-each line for a named viewer, so the engine assigns speakers from what the
-model chose rather than picking them itself. Names are matched loosely
-against the transcript (spacing, homophones), so an addressed viewer
-answers first and everyone else knows who was meant. This changes the core
-split in CLAUDE.md (the engine owns who speaks) for this case, so it needs
-a decision before it's built. Probably only at the low tiers, where the room
-is 3–4 regulars.
+At the slow tiers the prompt carries the roster and every line comes back
+with `"from"`. The engine matches a name in speech ignoring spacing and
+punctuation, so "hi hazel irl" addresses hazelirl, and the prompt says who
+was addressed. Verified live: hazelirl answered, milo894 replied to hazel
+by name.
 
 ---
 
-## 9. No memory: the same chatter keeps saying the same kind of thing
+## 9. No memory: the same chatter keeps saying the same kind of thing — done
 
-**Seen:** one chatter keeps saying "fair enough", "valid", "truuue". Never
-back to back, but it's the same empty agreement every time, with no sense
-that this person remembers anything said earlier in the stream.
-
-**Now:** per-viewer memory is only the list of exact lines they have said
-(`Population.remember` / `hasSaid`), used to stop exact repeats. It never
-reaches the model. Personalities (`lib/data/personalities.ts`) steer
-activity, verbosity and emote use. They never become a voice in the prompt.
-The prompt also asks for half the lines to be one to three words
-(`RULES` in `lib/ai/prompt.ts`), which is where "valid" / "fair enough"
-come from. At 0.2/sec a batch is about 10 lines, so half are filler.
-
-**Shape of the fix:** at the low tiers, each regular carries a short
-profile into the prompt: who they are, what they've said and asked this
-stream, running jokes, what they think of the streamer. Short lines should
-be much rarer at 0.2 than at CHAOS. The model writes as each person, so
-recurring people sound like recurring people. Ties into item 8.
+Each regular carries a short profile — topics, their last few lines, what
+the streamer said to them — into the prompt, and it is saved to browser
+storage so they come back tomorrow with it. The length rule also changes at
+these tiers: mostly real sentences, about one line in four short, and no
+stacked "valid" / "fair enough".
 
 ---
 
@@ -181,20 +156,12 @@ on. The hot word list should probably be a setting.
 
 ---
 
-## 12. Measure cost against quality before redesigning
+## 12. Measure cost against quality — partly done
 
-**Why:** items 8 and 9 put names, profiles and memory into every prompt,
-which costs more input per call. The owner wants to go back to the drawing
-board on cost versus quality rather than guess.
-
-**Now:** `gemini-3.5-flash-lite`, about 4–5 calls a minute at every tier,
-`maxOutputTokens` 4,000, one frame roughly 260 input tokens. No per-session
-cost figure exists anywhere.
-
-**Shape of the fix:** log input/output tokens per call on the server, add
-a cost-per-hour line to the session trace, then compare a memory-heavy
-prompt at 0.2/sec against today's. A low tier makes few lines, so richer
-prompts may cost little in absolute terms. Measure before deciding.
+The route now logs tokens per call and a running total, plus a cost figure
+when `AI_PRICE_PER_M_INPUT` and `AI_PRICE_PER_M_OUTPUT` are set. Still to
+do: read those numbers off a real session and decide whether the memory
+prompt is worth its input tokens at each tier.
 
 ---
 

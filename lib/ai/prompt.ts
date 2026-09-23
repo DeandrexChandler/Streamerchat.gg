@@ -45,10 +45,28 @@ const MAX_RECENT_IN_PROMPT = 3;
  * not a substitute for saying it — a batch that was a third bare emotes
  * read as noise, however good the words between them were.
  */
+/** The room is three or four people the streamer knows. */
+function conversational(request: CandidateRequest): boolean {
+  return (request.roster?.length ?? 0) > 0;
+}
+
+/**
+ * The length split, which is not the same job at three viewers as at forty.
+ *
+ * In a crowd, one-word reactions are most of what chat is. In a room of
+ * three regulars the same split reads as three people who have nothing to
+ * say: "valid", "fair enough", "truuue" on a loop. Sentences carry a
+ * conversation; short lines punctuate it.
+ */
+const LENGTH_CROWD =
+  "Length is split down the middle. HALF your lines are one to three words — 'bet', 'Ayo????', 'nah fr', 'mhmm', 'slayyy', 'W take', 'he cooked', 'no shot'. The OTHER HALF are full four-to-ten word thoughts — 'bro spent four hours on that roof', 'wait does it leak when it rains', 'honestly the texture pack carries it'. Count as you go: if the last two were short, write a longer one. Vary the tone and the mood — some hyped, some deadpan, some confused, some warm, some blunt but never mean.";
+
+const LENGTH_ROOM =
+  "This is a small room, so people actually talk. MOST lines are real four-to-twelve word thoughts — a question, an opinion, a story, something they noticed, something they remember from earlier. About one line in four is a short reaction ('bet', 'no shot', 'mhmm'). Never stack short agreements: 'valid', 'fair enough', 'truuue' twice in a batch is the tell that nobody is really there. Vary the tone and the mood — some hyped, some deadpan, some confused, some warm, some blunt but never mean.";
+
 const RULES = [
   "Every line is someone talking TO the streamer about what they just said. Not about the stream in general, not to each other.",
   "Mostly lowercase, natural slang, the occasional ALL CAPS line. Typos and stretched words happen: heyyy, slayyy, YOOO, ur, rn, tho.",
-  "Length is split down the middle. HALF your lines are one to three words — 'bet', 'Ayo????', 'nah fr', 'mhmm', 'slayyy', 'W take', 'he cooked', 'no shot'. The OTHER HALF are full four-to-ten word thoughts — 'bro spent four hours on that roof', 'wait does it leak when it rains', 'honestly the texture pack carries it'. Count as you go: if the last two were short, write a longer one. Vary the tone and the mood — some hyped, some deadpan, some confused, some warm, some blunt but never mean.",
   "Answer directly, react with a feeling, ask a follow-up, give an opinion when one was asked for. A couple of lines can be looser or a joke, but the batch stays about what was just said.",
   "Style, not script: 'nah he wylin', 'Ayo????', 'grown adult btw', 'slayyy', 'mhmm', 'i think you can idk tho', 'bet that', 'ooo good idea', 'leave the wall'.",
   "Short lines still react to what was said — not generic filler like nice, real, same, lol stacked up with nothing behind them.",
@@ -78,7 +96,14 @@ export function buildPrompt(request: CandidateRequest): string {
 
   const lines: string[] = [opening(request)];
 
-  lines.push("", "Rules:", ...RULES.map((rule) => `- ${rule}`));
+  lines.push(
+    "",
+    "Rules:",
+    `- ${conversational(request) ? LENGTH_ROOM : LENGTH_CROWD}`,
+    ...RULES.map((rule) => `- ${rule}`),
+  );
+
+  if (request.roster?.length) lines.push("", ...room(request));
 
   if (streamer || topic) {
     lines.push("");
@@ -116,7 +141,9 @@ export function buildPrompt(request: CandidateRequest): string {
     "",
     `Return JSON: an object with${request.frame ? ' an "event" string and' : ""} one key "reactions", holding an array of exactly ${count} objects.`,
     "Each object:",
-    '  { "text": string,',
+    ...(conversational(request)
+      ? ['  { "from": the exact name of the viewer saying it, from the list above,', '    "text": string,']
+      : ['  { "text": string,']),
     '    "emotion": one of hype | funny | sad | confused | love | chill,',
     '    "kind": one of answer | reaction | question | opinion | joke | callback | emote,',
     '    "emote": optional — one name from the emotes list to attach to this line, only if its feeling fits,',
@@ -163,6 +190,37 @@ function reactingToScreen(request: CandidateRequest): boolean {
 
 function drifting(request: CandidateRequest): boolean {
   return request.phase === "active" && request.continuation && request.silenceSeconds >= DRIFT_AFTER_S;
+}
+
+/**
+ * The room, by name, with the little the engine remembers about each person.
+ *
+ * This is what makes a regular a person rather than a label stuck on the
+ * next line out of the queue: the model writes *as* hazelirl, knowing what
+ * hazelirl has been on about, so hazelirl can answer to their own name and
+ * the others can answer to it too.
+ */
+function room(request: CandidateRequest): string[] {
+  const roster = request.roster ?? [];
+  const lines = [
+    "The people in chat right now. These are regulars — they have been here before, they remember this stream, and they know each other:",
+    ...roster.map((entry) => {
+      const notes = entry.notes ? ` — ${entry.notes}` : "";
+      return `  ${entry.name} (${entry.persona})${notes}`;
+    }),
+    "",
+    'Every line is written AS one of these people, in their own voice, and carries "from" with their exact name. Nobody else exists: do not invent names. Spread the lines around rather than giving one person most of them.',
+    "They can talk to each other and use each other's names, without an @.",
+  ];
+
+  if (request.addressed) {
+    lines.push(
+      "",
+      `The streamer is talking TO ${request.addressed}. ${request.addressed} answers — that is their line, in their voice, about what was said to them. The others react to that exchange: agreeing, teasing ${request.addressed}, adding their own take. Nobody wonders who was meant.`,
+    );
+  }
+
+  return lines;
 }
 
 /** The part of the prompt that changes with the moment. */

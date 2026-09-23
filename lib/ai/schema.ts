@@ -74,6 +74,22 @@ export const CandidateRequestSchema = z
      */
     frame: z.string().max(300_000).optional(),
     screen: z.boolean().optional(),
+    /**
+     * The room, at the slow tiers. Capped: twelve regulars is the largest
+     * roster the engine builds, and a short profile each is all the model
+     * is given.
+     */
+    roster: z
+      .array(
+        z.object({
+          name: z.string().max(40),
+          persona: z.string().max(40),
+          notes: z.string().max(400).optional(),
+        }),
+      )
+      .max(12)
+      .optional(),
+    addressed: z.string().max(40).optional(),
   })
   .refine(
     // A screen batch may come before the streamer has said anything: the

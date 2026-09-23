@@ -6,6 +6,7 @@ import { ScreenCapture } from "../audio/screen-capture";
 import { DEFAULT_SETTINGS, localSettingsStore } from "../config/settings";
 import type { SimulationSettings } from "../config/settings";
 import { localEmotePackStore, mergeEmotes } from "../config/emote-store";
+import { localRosterStore } from "../config/roster-store";
 import type { Reaction } from "../ai/reaction";
 import type { GameEvent } from "../ai/moment";
 import type { Emote } from "../engine/types";
@@ -42,6 +43,9 @@ export type SimulatorStatus =
 
 /** How often the engine is advanced. Chat does not need frame-rate updates. */
 const TICK_MS = 200;
+
+/** How often the regulars are written to storage. Cheap, and rarely needed. */
+const ROSTER_SAVE_MS = 20_000;
 
 /**
  * Mean brightness change across a 32x32 thumbnail that counts as an event.
@@ -159,6 +163,7 @@ export function useSimulator(): UseSimulatorResult {
   const settingsRef = useRef<SimulationSettings>(DEFAULT_SETTINGS);
   const emotesRef = useRef<Emote[]>([]);
   const pausedRef = useRef(false);
+  const lastRosterSaveAt = useRef(0);
   /** Read inside callbacks that must not re-create on every toggle. */
   const mutedRef = useRef(false);
   const overlayRef = useRef<OverlayTransport | null>(null);
@@ -209,6 +214,8 @@ export function useSimulator(): UseSimulatorResult {
       engineRef.current = new SimulationEngine({
         settings: settingsRef.current,
         emotes: emotesRef.current,
+        // The regulars from previous streams, with what they remember.
+        roster: localRosterStore.load(),
       });
     }
     return engineRef.current;
@@ -300,6 +307,14 @@ export function useSimulator(): UseSimulatorResult {
 
       const released = engine.tick(now);
       void pump(engine, now);
+
+      // The regulars outlive the session, so they are written out as the
+      // session goes rather than only on the way out — a closed tab, a
+      // crash or a refresh must not cost the streamer their chat.
+      if (now - lastRosterSaveAt.current > ROSTER_SAVE_MS) {
+        lastRosterSaveAt.current = now;
+        localRosterStore.save(engine.exportRoster());
+      }
 
       // The scheduler is the only source of released messages, so this is the
       // one place the overlay is fed — nothing else can reach OBS.
@@ -511,6 +526,7 @@ export function useSimulator(): UseSimulatorResult {
   }, [status, ensureEngine, startTicking, listen]);
 
   const stop = useCallback(() => {
+    if (engineRef.current) localRosterStore.save(engineRef.current.exportRoster());
     stopTicking();
     providerRef.current?.stop();
     providerRef.current = null;
@@ -613,6 +629,9 @@ export function useSimulator(): UseSimulatorResult {
    * staying live after you have cleared everything.
    */
   const clear = useCallback(() => {
+    // Clearing wipes the session, not the people: the regulars are who the
+    // streamer knows, and Clear is a "start this stream over" button.
+    if (engineRef.current) localRosterStore.save(engineRef.current.exportRoster());
     stopTicking();
     providerRef.current?.stop();
     providerRef.current = null;
