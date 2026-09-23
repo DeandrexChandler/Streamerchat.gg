@@ -1016,7 +1016,7 @@ describe("viewer identity", () => {
     for (const ids of byName.values()) expect(ids.size).toBe(1);
   });
 
-  it("caps consecutive messages from one viewer at five", async () => {
+  it("caps consecutive messages from one viewer at three", async () => {
     const { messages } = await drive(120_000, {
       settings: { messagesPerSecond: 4 },
       script: [[1000, "LET'S GO WE WON"], [30_000, "INSANE"], [60_000, "NO WAY"]],
@@ -1026,7 +1026,23 @@ describe("viewer identity", () => {
     for (const m of messages) {
       run = m.username === previous ? run + 1 : 1;
       previous = m.username;
-      expect(run).toBeLessThanOrEqual(5);
+      expect(run).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it("lets nobody post more than three lines in ten seconds, in a row or not", async () => {
+    // A B A B A gets past the consecutive cap and is still two people holding
+    // the room. Hype moments are where the cooldown is waived, so test there.
+    const { messages } = await drive(120_000, {
+      settings: { messagesPerSecond: 4 },
+      script: [[1000, "LET'S GO WE WON"], [30_000, "INSANE"], [60_000, "NO WAY"]],
+    });
+    expect(messages.length).toBeGreaterThan(200);
+    const times = new Map<string, number[]>();
+    for (const m of messages) {
+      const mine = [...(times.get(m.viewerId) ?? []), m.at].filter((t) => m.at - t < 10_000);
+      times.set(m.viewerId, mine);
+      expect(mine.length).toBeLessThanOrEqual(3);
     }
   });
 

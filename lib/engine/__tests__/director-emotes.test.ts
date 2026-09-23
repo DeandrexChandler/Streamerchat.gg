@@ -251,3 +251,32 @@ describe("emote-only mode", () => {
     }
   });
 });
+
+describe("returning voices", () => {
+  it("never hands the next line of a topic to the person who just spoke", () => {
+    // Lines late in a topic build on each other. The same name on two of
+    // them in a row reads as someone answering themselves.
+    let checked = 0;
+    for (let seed = 0; seed < 200; seed += 1) {
+      const population = new Population(createRng(seed + 1000), 20);
+      const [justSpoke, earlier] = population.all();
+      population.markSpoke(earlier.id, 0);
+      population.markSpoke(justSpoke.id, 9_900);
+      const result = direct(seed, {
+        intent: "story",
+        stage: "referencing",
+        population,
+        now: 10_000,
+        settings: { ...DEFAULT_SETTINGS, messagesPerSecond: 0.2 },
+        topic: topic("story", {
+          participants: new Map([[justSpoke.id, 3], [earlier.id, 2]]),
+        }),
+        reaction: reaction("yeah that tracks", "story"),
+      });
+      if (!result) continue;
+      checked += 1;
+      expect(result.viewerId).not.toBe(justSpoke.id);
+    }
+    expect(checked).toBeGreaterThan(150);
+  });
+});

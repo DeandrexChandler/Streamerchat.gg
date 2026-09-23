@@ -409,7 +409,18 @@ function pickTopicSpeaker(options: DirectOneOptions): Viewer | undefined {
     return population.pickSpeaker(now, barred, pick);
   }
 
-  const repeatable = participants.filter((id) => !barred.has(id));
+  /**
+   * A returning voice still sits out their cooldown.
+   *
+   * Picked straight from the participants, this skipped the rest rule that
+   * every other pick obeys, so in a topic two or three people had joined the
+   * one who just spoke was the likeliest next voice — and a developing topic
+   * is exactly where lines build on each other, which read as one person
+   * answering themselves.
+   */
+  const repeatable = participants.filter(
+    (id) => !barred.has(id) && population.isRested(id, now),
+  );
   const wantsRepeat =
     repeatable.length > 0 &&
     rng.chance(stage === "reacting" ? 0.1 : stage === "developing" ? 0.35 : 0.5);

@@ -229,6 +229,12 @@ export class Population {
     });
   }
 
+  /** Whether this viewer has sat out their cooldown since last speaking. */
+  isRested(viewerId: string, now: number): boolean {
+    const viewer = this.get(viewerId);
+    return viewer !== undefined && now - viewer.lastSpokeAt >= this.cooldownMs;
+  }
+
   markSpoke(viewerId: string, at: number): void {
     const viewer = this.get(viewerId);
     if (viewer) viewer.lastSpokeAt = at;

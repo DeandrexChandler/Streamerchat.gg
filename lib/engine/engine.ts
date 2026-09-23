@@ -22,6 +22,8 @@ import { Population } from "./population";
 import { createFilter, type Filter } from "./profanity";
 import {
   MAX_CONSECUTIVE,
+  MAX_POSTS_IN_WINDOW,
+  POST_WINDOW_MS,
   rosterSizeFor,
   speakingCooldownFor,
   turnoverIntervalFor,
@@ -340,6 +342,8 @@ export class SimulationEngine {
   /** Who spoke last, and how many times in a row. */
   private lastSpeakerId: string | null = null;
   private consecutive = 0;
+  /** When each viewer's recent lines were scheduled, for the rolling cap. */
+  private postTimes = new Map<string, number[]>();
   /**
    * Who has spoken in each greeting or farewell batch.
    *
@@ -433,6 +437,7 @@ export class SimulationEngine {
     this.recentShapes = [];
     this.lastSpeakerId = null;
     this.consecutive = 0;
+    this.postTimes.clear();
     this.lastTurnoverAt = now;
     this.event = undefined;
     this.eventAt = 0;
@@ -1084,6 +1089,13 @@ export class SimulationEngine {
     if (this.lastSpeakerId && this.consecutive >= MAX_CONSECUTIVE) {
       barred.add(this.lastSpeakerId);
     }
+    // Nor, taking turns with one other person, a rolling window of it. After
+    // the window they are free again; this is a pause, not a mute.
+    for (const [id, times] of this.postTimes) {
+      while (times.length > 0 && at - times[0] >= POST_WINDOW_MS) times.shift();
+      if (times.length === 0) this.postTimes.delete(id);
+      else if (times.length >= MAX_POSTS_IN_WINDOW) barred.add(id);
+    }
 
     // The cooldown is waived while a hype moment is fresh.
     const burst =
@@ -1150,6 +1162,7 @@ export class SimulationEngine {
         this.waveSpeakers.set(reaction.batchId, wave);
       }
       this.consecutive = result.viewerId === this.lastSpeakerId ? this.consecutive + 1 : 1;
+      this.postTimes.set(result.viewerId, [...(this.postTimes.get(result.viewerId) ?? []), at]);
       this.lastSpeakerId = result.viewerId;
       if (topic) this.topics.recordParticipation(topic, result.viewerId);
       this.recentShapes.push(this.isEmoteOnly(result.message.text));
