@@ -137,10 +137,25 @@ function opening(request: CandidateRequest): string {
     case "idle":
       return `You are the live chat of a small Twitch stream. ${who}`;
     default:
-      return request.continuation
+      return drifting(request)
+        ? `You are the live chat of a small Twitch stream. ${who} The streamer is busy playing and chat is just hanging out.`
+        : request.continuation
         ? `You are the live chat of a small Twitch stream. ${who} They are still talking to the streamer about what the streamer said.`
         : `You are the live chat of a small Twitch stream. The streamer just said something to chat. ${who} They are answering it.`;
   }
+}
+
+/**
+ * How long chat stays on the streamer's last line before moving on.
+ *
+ * Idle does not start for minutes, and "stay about THAT line" for all of
+ * them is one sentence chewed to nothing. After this, continuations are the
+ * room being a room: the game, each other, small talk, the odd callback.
+ */
+export const DRIFT_AFTER_S = 60;
+
+function drifting(request: CandidateRequest): boolean {
+  return request.phase === "active" && request.continuation && request.silenceSeconds >= DRIFT_AFTER_S;
 }
 
 /** The part of the prompt that changes with the moment. */
@@ -174,6 +189,16 @@ function situation(request: CandidateRequest): string[] {
   }
 
   // Active.
+  if (drifting(request)) {
+    return [
+      ...earlier,
+      ...(earlier.length > 0 ? [""] : []),
+      `The streamer last said "${utterance}", about ${describeSilence(silenceSeconds)} ago, and has been busy playing since. That is normal on a stream, and nobody mentions that they have gone quiet.`,
+      "",
+      "Chat is just being chat: reacting to the game and what is on screen, talking to each other, small talk, jokes, backseating, the odd callback to what they said. For this batch lines can be about the stream in general and to each other.",
+    ];
+  }
+
   if (continuation) {
     return [
       ...earlier,

@@ -596,7 +596,7 @@ describe("idle", () => {
   });
 
   it("escalates through the stages as silence continues", async () => {
-    const { requests } = await drive(lastWord + 620_000, {
+    const { requests } = await drive(lastWord + 1_220_000, {
       script: [[lastWord, "okay building now"]],
     });
     const stages = [...new Set(requests.filter((r) => r.phase === "idle").map((r) => r.idleStage))];
@@ -606,10 +606,10 @@ describe("idle", () => {
   it("replaces the old stage's lines when the new stage's batch lands", async () => {
     // With an instant provider the stage-2 batch lands on the boundary tick
     // and takes the queue over; nothing from stage 1 is spoken after it.
-    const { messages, requests } = await drive(lastWord + 150_000 + 30_000, {
+    const { messages, requests } = await drive(lastWord + 480_000 + 30_000, {
       script: [[lastWord, "okay building now"]],
     });
-    const boundary = lastWord + 150_000;
+    const boundary = lastWord + 480_000;
     expect(requests.some((r) => r.phase === "idle" && r.idleStage === 2)).toBe(true);
     const after = messages.filter((m) => m.at > boundary + 1_000);
     expect(after.length).toBeGreaterThan(10);
@@ -620,19 +620,36 @@ describe("idle", () => {
     // change: the queue was dropped first and refilled second.
     let dry = 0;
     let ticks = 0;
-    await drive(lastWord + 150_000 + 40_000, {
+    await drive(lastWord + 480_000 + 40_000, {
       latencyMs: 12_000,
       script: [[lastWord, "okay building now"]],
       onTick: ({ engine }, now) => {
         // Around the idle threshold and the stage-2 boundary.
-        const nearIdle = now > lastWord + 55_000 && now < lastWord + 80_000;
-        const nearStage2 = now > lastWord + 145_000 && now < lastWord + 170_000;
+        const nearIdle = now > lastWord + IDLE_AFTER_MS - 5_000 && now < lastWord + IDLE_AFTER_MS + 20_000;
+        const nearStage2 = now > lastWord + 475_000 && now < lastWord + 500_000;
         if (!nearIdle && !nearStage2) return;
         ticks += 1;
         if (engine.pendingReactions === 0) dry += 1;
       },
     });
     expect(dry / ticks).toBeLessThan(0.05);
+  });
+
+  it("holds off while the game is doing things on screen", async () => {
+    // Playing without narrating is still streaming. Idle is for when the
+    // screen has gone quiet too.
+    const screenUntil = lastWord + IDLE_AFTER_MS + 120_000;
+    let idleEarly = 0;
+    const { engine } = await drive(screenUntil + IDLE_AFTER_MS + 10_000, {
+      script: [[lastWord, "okay building now"]],
+      onTick: ({ engine }, now) => {
+        if (now < screenUntil && now % 30_000 === 0) engine.screenEvent(now);
+        if (now < screenUntil + IDLE_AFTER_MS - 30_000 && engine.currentPhase === "idle") idleEarly += 1;
+      },
+    });
+    expect(idleEarly).toBe(0);
+    // And once the screen goes quiet as well, idle arrives on schedule.
+    expect(engine.currentPhase).toBe("idle");
   });
 
   it("ends the instant the streamer speaks", async () => {

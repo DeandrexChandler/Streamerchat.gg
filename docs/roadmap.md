@@ -9,7 +9,7 @@ is manually believable.
 - [x] Gemini-only provider
 - [x] Startup AI intro
 - [x] Active AI responses and continuations
-- [x] AI idle responses after 60 seconds, escalating
+- [x] AI idle responses after 5 minutes, escalating
 - [x] Continuous scheduler flow with low-water refill
 - [x] Stable viewer identities, roster of at most ten
 - [x] Stable Twitch-like colours

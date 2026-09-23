@@ -82,18 +82,14 @@ better, unless the press itself triggers the batch.
 
 ---
 
-## 5. Idle mode arrives far too early
+## 5. Idle mode arrives far too early — done
 
-**Seen:** chat gives up and goes idle before there is time to play or
-think.
-
-**Now:** `IDLE_AFTER_MS = 60_000` in `lib/engine/generation.ts`, with
-stages at 60s, 150s, 300s and 600s.
-
-**Shape of the fix:** raise the first threshold and probably stretch the
-later stages with it. Interacts with item 2: once screen events can pull a
-batch forward reliably, silence during gameplay matters much less, because
-the game is doing the talking.
+- Idle stages now at 5 / 8 / 12 / 20 minutes (were 1 / 2.5 / 5 / 10).
+- After a minute on the streamer's last line, continuations drift to normal
+  stream chatter — the game, each other, small talk — and never mention the
+  quiet (`DRIFT_AFTER_S` in `lib/ai/prompt.ts`).
+- With capture on, a screen event resets the idle clock. Idle only comes
+  when the streamer and the screen are both quiet.
 
 ---
 

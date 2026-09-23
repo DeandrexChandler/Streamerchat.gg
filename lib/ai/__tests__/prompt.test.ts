@@ -118,6 +118,16 @@ describe("buildPrompt", () => {
       expect(prompt).toContain("25 seconds");
     });
 
+    it("lets chat move on from the last line after a minute, without noticing the quiet", () => {
+      // Idle is minutes away. Staying on one sentence for all of them is how
+      // a room chews a line to nothing.
+      const prompt = buildPrompt(request({ continuation: true, silenceSeconds: 90 }));
+      expect(prompt).not.toMatch(/stay about that line/i);
+      expect(prompt).toMatch(/talking to each other/i);
+      expect(prompt).toMatch(/nobody mentions that they have gone quiet/i);
+      expect(prompt).toContain("look at this roof I just built");
+    });
+
     it("escalates idle framing with the stage", () => {
       const one = buildPrompt(request({ phase: "idle", idleStage: 1, silenceSeconds: 70 }));
       const four = buildPrompt(request({ phase: "idle", idleStage: 4, silenceSeconds: 700 }));

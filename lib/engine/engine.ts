@@ -480,6 +480,15 @@ export class SimulationEngine {
     this.pendingScreenEvent = true;
   }
 
+  /**
+   * How long nothing has happened: no word from the streamer, and nothing
+   * on screen when capture is on. A streamer playing without narrating is
+   * still there; idle is for when the game has gone quiet too.
+   */
+  private quietFor(now: number): number {
+    return now - Math.max(this.lastSpeechAt, this.lastScreenTriggerAt);
+  }
+
   /** Clears queued messages. Used on stop and clear. */
   flush(): void {
     this.dropBatch();
@@ -615,7 +624,7 @@ export class SimulationEngine {
     if (this.paused) return null;
 
     const silenceMs = now - this.lastSpeechAt;
-    const stage = idleStageFor(silenceMs);
+    const stage = idleStageFor(this.quietFor(now));
 
     /**
      * Into idle, or deeper into it.
