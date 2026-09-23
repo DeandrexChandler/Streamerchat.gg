@@ -84,7 +84,6 @@ export interface ControlPanelProps {
   status: SimulatorStatus;
   stats: EngineStats;
   settings: SimulationSettings;
-  micLabel: string;
   /** Emotes currently loaded. Zero disables the emote-only mode. */
   emoteCount: number;
   /** True while the streamer's screen is being captured for chat. */
@@ -103,7 +102,6 @@ export function ControlPanel({
   status,
   stats,
   settings,
-  micLabel,
   emoteCount,
   watching,
   onWatchingChange,
@@ -115,9 +113,7 @@ export function ControlPanel({
 }: ControlPanelProps) {
   return (
     <aside className="flex h-full w-56 flex-col gap-4 overflow-y-auto rounded-lg border border-gray-300 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-      {/* Top-aligned: the device name line below the meter comes and goes
-          with the mic, and centring would move the button every toggle. */}
-      <div className="flex items-start gap-2.5">
+      <div className="flex items-center gap-2.5">
         <MuteButton
           muted={muted}
           live={status === "running"}
@@ -129,7 +125,6 @@ export function ControlPanel({
             subscribe={subscribeLevel}
             active={status === "running" && !muted}
             muted={muted}
-            label={muted ? undefined : micLabel || undefined}
           />
         </div>
       </div>
