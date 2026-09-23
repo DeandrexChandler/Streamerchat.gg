@@ -54,7 +54,9 @@ environment. The model was chosen by measurement (see `lib/ai/gemini.ts`).
 | Idle | 5 min without input or screen event | next input or screen event | reactions to the silence, escalating through four stages |
 
 At the two slowest tiers (≤ 0.5/sec) the room is a conversation: the model
-is given the three or four regulars by name with a short memory each —
+is given the three or four regulars by name, each with their own typing
+habits — length, caps, punctuation, whether they ask or tell, what they
+bring up — and a short memory each —
 topics, their last lines, what the streamer said to them — and writes every
 line as one of them. Saying a regular's name reaches that person, however
 speech recognition spaced it. The memory is saved in the browser, so the

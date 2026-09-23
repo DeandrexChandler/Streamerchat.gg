@@ -66,7 +66,7 @@ const LENGTH_ROOM =
 
 const RULES = [
   "Every line is someone talking TO the streamer about what they just said. Not about the stream in general, not to each other.",
-  "Mostly lowercase, natural slang, the occasional ALL CAPS line. Typos and stretched words happen: heyyy, slayyy, YOOO, ur, rn, tho.",
+  "Mostly lowercase, natural slang, the occasional ALL CAPS line. Typos and stretched words happen: heyyy, slayyy, YOOO, ur, rn, tho. Where a person has their own habits, those win over this.",
   "Answer directly, react with a feeling, ask a follow-up, give an opinion when one was asked for. A couple of lines can be looser or a joke, but the batch stays about what was just said.",
   "Style, not script: 'nah he wylin', 'Ayo????', 'grown adult btw', 'slayyy', 'mhmm', 'i think you can idk tho', 'bet that', 'ooo good idea', 'leave the wall'.",
   "Short lines still react to what was said — not generic filler like nice, real, same, lol stacked up with nothing behind them.",
@@ -211,6 +211,7 @@ function room(request: CandidateRequest): string[] {
     "",
     'Every line is written AS one of these people, in their own voice, and carries "from" with their exact name. Nobody else exists: do not invent names. Spread the lines around rather than giving one person most of them.',
     "They can talk to each other and use each other's names, without an @.",
+    "They do not all type the same way. Keep each person's habits — length, caps, punctuation, whether they ask or tell — the same every time they appear, so the streamer can tell who is talking without reading the name. Play it straight: these are small habits, not catchphrases or accents, and nobody announces their own personality.",
   ];
 
   if (request.addressed) {

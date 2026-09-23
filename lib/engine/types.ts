@@ -108,6 +108,8 @@ export interface Viewer {
   intents: Map<Intent, number>;
   /** Messages this session. */
   spoken: number;
+  /** How this person types. Fixed for as long as they exist. */
+  voice: Voice;
   /**
    * What this person is known for, shown to the model at the slow tiers.
    *
@@ -116,6 +118,27 @@ export interface Viewer {
    * entry costs input tokens on every call.
    */
   memory: ViewerMemory;
+}
+
+/**
+ * How one person types, as numbers the prompt turns into a phrase.
+ *
+ * Sampled once per viewer from measured ranges (see `lib/data/voices.ts`)
+ * and saved with them, so a regular sounds the same next stream.
+ */
+export interface Voice {
+  /** Typical line length in words. */
+  words: number;
+  /** 0..1 — how often they shout. */
+  caps: number;
+  /** 0..1 — how often they end a line with punctuation. */
+  punctuation: number;
+  /** 0..1 — how often they ask rather than state. */
+  questions: number;
+  /** 0..1 — how often they stretch a word. */
+  stretch: number;
+  /** Two things they bring up when there is nothing else to say. */
+  interests: string[];
 }
 
 export interface ViewerMemory {

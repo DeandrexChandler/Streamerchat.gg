@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
  */
 const SECTIONS = [
   { href: "/settings/chat", label: "Chat", hint: "Behaviour and filtering" },
+  { href: "/settings/regulars", label: "Regulars", hint: "Who chat is, what they remember" },
   { href: "/settings/emotes", label: "Emotes", hint: "Import 7TV packs" },
   { href: "/settings/appearance", label: "Appearance", hint: "How chat looks on stream" },
   { href: "/settings/obs", label: "OBS", hint: "Browser source setup" },

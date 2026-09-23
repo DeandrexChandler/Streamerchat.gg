@@ -21,6 +21,8 @@ import { writeFileSync } from "node:fs";
 const channel = (process.argv[2] ?? "caseoh_").toLowerCase().replace(/^#/, "");
 const seconds = Number(process.argv[3] ?? 600);
 const keepRaw = process.argv.includes("keep");
+/** Per-chatter traits instead of the room-wide distribution. */
+const voices = process.argv.includes("voices");
 
 const IRC = "wss://irc-ws.chat.twitch.tv:443";
 
@@ -154,11 +156,109 @@ function report(): void {
   console.log("\nCompare against the engine's current targets:");
   console.log("  emote-only 15%   1-3 words 27%   4+ words 58%   (normal talk)");
 
+  if (voices) reportVoices();
+
   if (keepRaw) {
     const file = `chat-${channel}-${Date.now()}.jsonl`;
     writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n"));
     console.log(`\nraw lines → ${file}`);
   }
+}
+
+/**
+ * How individual chatters differ from each other.
+ *
+ * The room-wide numbers above say what chat looks like; they say nothing
+ * about whether two people in it sound different. These are the traits a
+ * simulated regular needs to vary along, measured on the people who
+ * actually carry a real chat.
+ */
+function reportVoices(): void {
+  const byUser = new Map<string, Line[]>();
+  for (const line of lines) {
+    const mine = byUser.get(line.user) ?? [];
+    mine.push(line);
+    byUser.set(line.user, mine);
+  }
+
+  const MIN_LINES = 5;
+  const profiles = [...byUser.entries()]
+    .filter(([, mine]) => mine.length >= MIN_LINES)
+    .map(([user, mine]) => {
+      const share = (n: number) => n / mine.length;
+      const words = mine.map((l) => l.text.trim().split(/\s+/).filter(Boolean).length);
+      const sorted = [...words].sort((a, b) => a - b);
+      const emoteOnly = mine.filter((l) => {
+        const wordy = l.text.trim().split(/\s+/).filter((w) => !looksLikeEmote(w));
+        return l.emoteChars >= l.text.trim().length - 2 || wordy.length === 0;
+      }).length;
+      const letters = (t: string) => t.replace(/[^A-Za-z]/g, "");
+      return {
+        user,
+        lines: mine.length,
+        medianWords: sorted[Math.floor(sorted.length / 2)],
+        emoteOnly: share(emoteOnly),
+        // Shouting, as a habit rather than a moment.
+        caps: share(mine.filter((l) => {
+          const alpha = letters(l.text);
+          return alpha.length >= 3 && alpha === alpha.toUpperCase();
+        }).length),
+        punctuated: share(mine.filter((l) => /[.!?]$/.test(l.text.trim())).length),
+        questions: share(mine.filter((l) => l.text.includes("?")).length),
+        // "yesss", "loool" — stretching letters for tone.
+        stretched: share(mine.filter((l) => /([a-zA-Z])\1{2,}/.test(l.text)).length),
+        mentions: share(mine.filter((l) => l.text.includes("@")).length),
+        // The same short line more than once: a catchphrase.
+        catchphrase: (() => {
+          const counts = new Map<string, number>();
+          for (const l of mine) {
+            const key = l.text.trim().toLowerCase();
+            if (key.split(/\s+/).length > 4) continue;
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+          }
+          const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+          return best && best[1] > 1 ? best[1] / mine.length : 0;
+        })(),
+      };
+    })
+    .sort((a, b) => b.lines - a.lines);
+
+  if (profiles.length === 0) {
+    console.log(`\nNot enough per-chatter data (nobody posted ${MIN_LINES}+ lines).`);
+    return;
+  }
+
+  console.log(`\n=== per-chatter traits (${profiles.length} people with ${MIN_LINES}+ lines) ===`);
+  console.log("user               n  medWords  emoteOnly  caps  punct  quest  stretch  @  catch");
+  for (const p of profiles.slice(0, 20)) {
+    const pc = (n: number) => `${Math.round(100 * n)}%`.padStart(5);
+    console.log(
+      `${p.user.slice(0, 16).padEnd(16)} ${String(p.lines).padStart(3)}  ${String(p.medianWords).padStart(8)}  ` +
+        `${pc(p.emoteOnly)}  ${pc(p.caps)}  ${pc(p.punctuated)}  ${pc(p.questions)}  ${pc(p.stretched)}  ${pc(p.mentions)}  ${pc(p.catchphrase)}`,
+    );
+  }
+
+  const stat = (pick: (p: (typeof profiles)[number]) => number) => {
+    const values = profiles.map(pick).sort((a, b) => a - b);
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    return {
+      mean,
+      p10: values[Math.floor(values.length * 0.1)],
+      p90: values[Math.floor(values.length * 0.9)],
+    };
+  };
+  const show = (label: string, s: { mean: number; p10: number; p90: number }, unit = "%") => {
+    const f = (n: number) => (unit === "%" ? `${(100 * n).toFixed(0)}%` : n.toFixed(1));
+    console.log(`  ${label.padEnd(12)} mean ${f(s.mean).padStart(5)}   p10 ${f(s.p10).padStart(5)}   p90 ${f(s.p90).padStart(5)}`);
+  };
+  console.log("\nspread across chatters — how much room there is to vary a voice:");
+  show("medWords", stat((p) => p.medianWords), "n");
+  show("emoteOnly", stat((p) => p.emoteOnly));
+  show("caps", stat((p) => p.caps));
+  show("punctuated", stat((p) => p.punctuated));
+  show("questions", stat((p) => p.questions));
+  show("stretched", stat((p) => p.stretched));
+  show("catchphrase", stat((p) => p.catchphrase));
 }
 
 const socket = new WebSocket(IRC);

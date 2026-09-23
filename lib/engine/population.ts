@@ -1,4 +1,5 @@
 import { PERSONALITY_LIST, PERSONALITIES } from "../data/personalities";
+import { buildVoice } from "../data/voices";
 import { USERNAME_COLORS, generateUsername } from "../data/usernames";
 import type { Rng } from "./rng";
 import type { SavedViewer } from "../config/roster-store";
@@ -101,6 +102,7 @@ export class Population {
     this.takenNames.add(name.toLowerCase());
     for (const word of words) this.usedWords.add(word);
 
+    const verbosity = this.rng.float(...personality.verbosity);
     const viewer: Viewer = {
       id: `v${this.nextId++}`,
       name,
@@ -108,12 +110,13 @@ export class Population {
       color: this.rng.pick(USERNAME_COLORS),
       personality: personality.id,
       activity: this.rng.float(...personality.activity),
-      verbosity: this.rng.float(...personality.verbosity),
+      verbosity,
       emoteAffinity: this.rng.float(...personality.emoteAffinity),
       lastSpokeAt: 0,
       said: new Map(),
       intents: new Map(),
       spoken: 0,
+      voice: buildVoice(this.rng, personality.id, verbosity),
       memory: { topics: [], lines: [], addressed: [] },
     };
 
@@ -328,6 +331,10 @@ export class Population {
       activity: viewer.activity,
       verbosity: viewer.verbosity,
       emoteAffinity: viewer.emoteAffinity,
+      voice: {
+        ...viewer.voice,
+        interests: [...viewer.voice.interests],
+      },
       memory: {
         topics: [...viewer.memory.topics],
         lines: [...viewer.memory.lines],
@@ -366,6 +373,9 @@ export class Population {
         said: new Map(),
         intents: new Map(),
         spoken: 0,
+        // A save from before voices existed gets one now, so an old roster
+        // gains personalities rather than being thrown away.
+        voice: entry.voice ?? buildVoice(this.rng, entry.personality as PersonalityId, entry.verbosity),
         memory: {
           topics: [...entry.memory.topics],
           lines: [...entry.memory.lines],
