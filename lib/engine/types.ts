@@ -108,6 +108,23 @@ export interface Viewer {
   intents: Map<Intent, number>;
   /** Messages this session. */
   spoken: number;
+  /**
+   * What this person is known for, shown to the model at the slow tiers.
+   *
+   * Deliberately tiny. It exists so a regular sounds like the same person
+   * across a session, not so the model can recite a transcript — and every
+   * entry costs input tokens on every call.
+   */
+  memory: ViewerMemory;
+}
+
+export interface ViewerMemory {
+  /** Subjects they have joined in on, oldest first. */
+  topics: string[];
+  /** The last few things they actually said. */
+  lines: string[];
+  /** Things the streamer said straight to them, most recent last. */
+  addressed: string[];
 }
 
 // ----------------------------------------------------------------- messages

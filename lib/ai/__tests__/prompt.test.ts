@@ -189,3 +189,40 @@ describe("buildPrompt", () => {
     });
   });
 });
+
+/**
+ * The room, at the slow tiers.
+ *
+ * The model cannot write as hazelirl, or let anyone answer to that name, if
+ * it has never seen the roster.
+ */
+describe("the room", () => {
+  const roster = [
+    { name: "hazelirl", persona: "chatty regular", notes: 'into: roof, rain; has said: "does it leak"' },
+    { name: "milo894", persona: "lurker" },
+  ];
+
+  it("names everyone, with what they are known for", () => {
+    const prompt = buildPrompt(request({ roster }));
+    expect(prompt).toContain("hazelirl (chatty regular)");
+    expect(prompt).toContain("does it leak");
+    expect(prompt).toContain("milo894 (lurker)");
+    expect(prompt).toMatch(/"from"/);
+    expect(prompt).toMatch(/do not invent names/i);
+  });
+
+  it("says who the streamer is talking to", () => {
+    const prompt = buildPrompt(request({ roster, addressed: "hazelirl" }));
+    expect(prompt).toMatch(/talking TO hazelirl/);
+    expect(prompt).toMatch(/nobody wonders who was meant/i);
+  });
+
+  it("asks for sentences in a small room and short reactions in a crowd", () => {
+    const room = buildPrompt(request({ roster }));
+    const crowd = buildPrompt(request());
+    expect(room).toMatch(/MOST lines are real four-to-twelve word thoughts/);
+    expect(room).toMatch(/never stack short agreements/i);
+    expect(crowd).toMatch(/HALF your lines are one to three words/);
+    expect(crowd).not.toMatch(/"from"/);
+  });
+});

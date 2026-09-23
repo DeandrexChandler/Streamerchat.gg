@@ -62,6 +62,35 @@ export interface HandlerDeps {
 /** Breathing room before the one retry. */
 const RETRY_PAUSE_MS = 750;
 
+/**
+ * Tokens spent since the server started, and what they cost.
+ *
+ * Here rather than in the engine because this is the only place that spends
+ * money, and the browser must never be told about it. Prices are per million
+ * tokens, from the env, because a rate baked into the source goes stale the
+ * week it changes; with none set the log still reports tokens.
+ */
+const spend = { input: 0, output: 0, calls: 0 };
+
+function recordSpend(usage: { input: number; output: number } | undefined): string {
+  if (!usage) return "";
+  spend.input += usage.input;
+  spend.output += usage.output;
+  spend.calls += 1;
+
+  const inPrice = Number(process.env.AI_PRICE_PER_M_INPUT ?? "");
+  const outPrice = Number(process.env.AI_PRICE_PER_M_OUTPUT ?? "");
+  const priced = Number.isFinite(inPrice) && Number.isFinite(outPrice) && inPrice + outPrice > 0;
+  const cost = priced
+    ? ` | $${((spend.input * inPrice + spend.output * outPrice) / 1_000_000).toFixed(4)} so far`
+    : "";
+
+  return (
+    ` | tokens ${usage.input}in/${usage.output}out` +
+    ` (${spend.calls} calls: ${spend.input}in/${spend.output}out)${cost}`
+  );
+}
+
 const unavailable = (): BatchResponse => ({ reactions: [], status: "unavailable" });
 
 /**
@@ -142,6 +171,7 @@ export function createCandidatesHandler(deps: HandlerDeps) {
       const validated = validateReactions(generated.reactions, candidateRequest.recent, {
         emotes: candidateRequest.emotes,
         directive: candidateRequest.classification.intent === "directive",
+        roster: candidateRequest.roster?.map((entry) => entry.name),
       });
 
       if (generated.status === "ok" && validated.reactions.length > 0) {
@@ -157,7 +187,8 @@ export function createCandidatesHandler(deps: HandlerDeps) {
         );
         log.log(
           `[ai]   ${describeShape(shapeOf(validated.reactions, candidateRequest))}` +
-            `${candidateRequest.frame ? ` | saw ${generated.event ?? "?"}` : ""}`,
+            `${candidateRequest.frame ? ` | saw ${generated.event ?? "?"}` : ""}` +
+            recordSpend(generated.usage),
         );
         return NextResponse.json(
           {

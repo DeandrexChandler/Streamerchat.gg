@@ -155,6 +155,14 @@ export interface ValidationOptions {
    * engine's spam into a wall.
    */
   directive?: boolean;
+  /**
+   * Names the model was given, when it was given a room.
+   *
+   * A line attributed to somebody who is not in the room is not a reason to
+   * drop the line — the words are fine — but the name goes, and the engine
+   * picks a speaker as it always has.
+   */
+  roster?: readonly string[];
 }
 
 /** Bare-token share a directive batch may carry: the engine supplies the spam. */
@@ -201,6 +209,7 @@ export function validateReactions(
   const seen = new Set(window.map((line) => line.trim().toLowerCase()));
   const rejected = { empty: 0, tooLong: 0, hostile: 0, duplicate: 0, emoteSurplus: 0 };
   const emoteNames = new Set(options.emotes ?? []);
+  const roster = new Set((options.roster ?? []).map((name) => name.toLowerCase()));
   const out: Reaction[] = [];
   /** Survived every rule except the recent-chat check. */
   const echoes: Reaction[] = [];
@@ -230,13 +239,13 @@ export function validateReactions(
       rejected.duplicate += 1;
       // Held aside rather than discarded, in case nothing else survives.
       if (!echoes.some((e) => e.text.toLowerCase() === key)) {
-        echoes.push({ ...reaction, text });
+        echoes.push({ ...reaction, text, from: named(reaction.from, roster) });
       }
       continue;
     }
     seen.add(key);
 
-    out.push({ ...reaction, text });
+    out.push({ ...reaction, text, from: named(reaction.from, roster) });
   }
 
   /**
@@ -277,3 +286,15 @@ export function validateReactions(
 
   return { reactions: out, rejected, echoed: false };
 }
+
+/**
+ * The name on a line, when the room actually contains it.
+ *
+ * An invented name is dropped rather than the line: the words are still
+ * chat, and without a name the engine picks a speaker as it always has.
+ */
+function named(from: string | undefined, roster: ReadonlySet<string>): string | undefined {
+  if (!from || roster.size === 0) return undefined;
+  return roster.has(from.trim().toLowerCase()) ? from.trim() : undefined;
+}
+

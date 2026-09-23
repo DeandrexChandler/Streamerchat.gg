@@ -53,6 +53,14 @@ environment. The model was chosen by measurement (see `lib/ai/gemini.ts`).
 | Active | accepted mic or typed input, or a screen event | next input, or 5 min with no input and no screen event | reactions to what was said; continuations when the batch drains, drifting to general chatter after 60s |
 | Idle | 5 min without input or screen event | next input or screen event | reactions to the silence, escalating through four stages |
 
+At the two slowest tiers (≤ 0.5/sec) the room is a conversation: the model
+is given the three or four regulars by name with a short memory each —
+topics, their last lines, what the streamer said to them — and writes every
+line as one of them. Saying a regular's name reaches that person, however
+speech recognition spaced it. The memory is saved in the browser, so the
+same people come back to the next stream knowing the last one. Above that
+tier the model never sees a name.
+
 Idle is always on. Its stages by silence: 5–8 min *the streamer is
 focused*; 8–12 min *the streamer may be busy*; 12–20 min *is the streamer
 still there?*; 20+ min *chat is entertaining itself*. Each stage is a

@@ -1,7 +1,8 @@
 import { PERSONALITY_LIST, PERSONALITIES } from "../data/personalities";
 import { USERNAME_COLORS, generateUsername } from "../data/usernames";
 import type { Rng } from "./rng";
-import type { Intent, Viewer } from "./types";
+import type { SavedViewer } from "../config/roster-store";
+import type { Intent, PersonalityId, Viewer, ViewerMemory } from "./types";
 
 /**
  * The virtual audience.
@@ -113,6 +114,7 @@ export class Population {
       said: new Map(),
       intents: new Map(),
       spoken: 0,
+      memory: { topics: [], lines: [], addressed: [] },
     };
 
     return viewer;
@@ -264,15 +266,42 @@ export class Population {
   }
 
   /** Records a message against its viewer. */
-  remember(viewerId: string, normalised: readonly string[], intent: Intent, at: number): void {
+  remember(
+    viewerId: string,
+    normalised: readonly string[],
+    intent: Intent,
+    at: number,
+    note?: { line?: string; topics?: readonly string[] },
+  ): void {
     const viewer = this.get(viewerId);
     if (!viewer) return;
     for (const text of normalised) viewer.said.set(text, at);
     viewer.intents.set(intent, at);
     viewer.spoken += 1;
+    if (note) rememberNote(viewer.memory, note);
   }
 
-  /** A new session: everyone forgets what they said. Identities stay. */
+  /** The regular with this name, ignoring case. Strangers are not searched. */
+  byName(name: string): Viewer | undefined {
+    const wanted = name.trim().toLowerCase();
+    for (const viewer of this.viewers.values()) {
+      if (viewer.name.toLowerCase() === wanted) return viewer;
+    }
+    return undefined;
+  }
+
+  /** Something the streamer said straight to this person. */
+  rememberAddressed(viewerId: string, utterance: string): void {
+    const viewer = this.get(viewerId);
+    if (!viewer) return;
+    push(viewer.memory.addressed, utterance.slice(0, 120), MEMORY_ADDRESSED);
+  }
+
+  /**
+   * A new session: everyone forgets what they said. Identities stay, and so
+   * does the short memory — a regular who remembers last stream is the whole
+   * point of regulars.
+   */
   forget(): void {
     this.strangers.clear();
     for (const viewer of this.viewers.values()) {
@@ -283,8 +312,106 @@ export class Population {
     }
   }
 
+  /**
+   * The regulars, in a shape that survives a page reload.
+   *
+   * Only what makes them *them*: identity, voice and the short memory. What
+   * they said this session is deliberately left behind.
+   */
+  export(): SavedViewer[] {
+    return this.all().map((viewer) => ({
+      id: viewer.id,
+      name: viewer.name,
+      nameWords: [...viewer.nameWords],
+      color: viewer.color,
+      personality: viewer.personality,
+      activity: viewer.activity,
+      verbosity: viewer.verbosity,
+      emoteAffinity: viewer.emoteAffinity,
+      memory: {
+        topics: [...viewer.memory.topics],
+        lines: [...viewer.memory.lines],
+        addressed: [...viewer.memory.addressed],
+      },
+      seenAt: viewer.lastSpokeAt,
+    }));
+  }
+
+  /**
+   * Brings saved regulars back, newest first, up to the room's size.
+   *
+   * A smaller tier than last time keeps the people who spoke most recently;
+   * a larger one fills the rest with new names, as it always did.
+   */
+  restore(saved: readonly SavedViewer[], size: number): void {
+    const wanted = [...saved]
+      .sort((a, b) => b.seenAt - a.seenAt)
+      .slice(0, size)
+      .filter((entry) => PERSONALITIES[entry.personality as PersonalityId] !== undefined);
+    if (wanted.length === 0) return;
+
+    this.viewers.clear();
+
+    for (const entry of wanted) {
+      const viewer: Viewer = {
+        id: entry.id,
+        name: entry.name,
+        nameWords: [...entry.nameWords],
+        color: entry.color,
+        personality: entry.personality as PersonalityId,
+        activity: entry.activity,
+        verbosity: entry.verbosity,
+        emoteAffinity: entry.emoteAffinity,
+        lastSpokeAt: 0,
+        said: new Map(),
+        intents: new Map(),
+        spoken: 0,
+        memory: {
+          topics: [...entry.memory.topics],
+          lines: [...entry.memory.lines],
+          addressed: [...entry.memory.addressed],
+        },
+      };
+      this.viewers.set(viewer.id, viewer);
+      this.takenNames.add(viewer.name.toLowerCase());
+      for (const word of viewer.nameWords) this.usedWords.add(word);
+    }
+
+    while (this.size < size) this.add();
+  }
+
   /** Tag multipliers for this viewer's archetype. */
   tagBias(viewer: Viewer): Readonly<Partial<Record<string, number>>> {
     return PERSONALITIES[viewer.personality].tagBias;
   }
 }
+
+// ------------------------------------------------------------------ memory
+
+/**
+ * How much of a person the model is shown.
+ *
+ * Small on purpose: this rides in every prompt at the slow tiers, so each
+ * extra line is input tokens on every call for the rest of the session.
+ */
+const MEMORY_TOPICS = 6;
+const MEMORY_LINES = 3;
+const MEMORY_ADDRESSED = 2;
+
+function push(list: string[], value: string, limit: number): void {
+  const trimmed = value.trim();
+  if (!trimmed) return;
+  const existing = list.indexOf(trimmed);
+  if (existing !== -1) list.splice(existing, 1);
+  list.push(trimmed);
+  while (list.length > limit) list.shift();
+}
+
+function rememberNote(
+  memory: ViewerMemory,
+  note: { line?: string; topics?: readonly string[] },
+): void {
+  if (note.line) push(memory.lines, note.line.slice(0, 80), MEMORY_LINES);
+  for (const topic of note.topics ?? []) push(memory.topics, topic.slice(0, 24), MEMORY_TOPICS);
+}
+

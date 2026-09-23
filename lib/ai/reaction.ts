@@ -46,6 +46,15 @@ export const ReactionSchema = z.object({
    * name is not in the pack. The model never picks an image.
    */
   emote: z.string().max(60).optional(),
+  /**
+   * The viewer this line belongs to, by name.
+   *
+   * Only at the slow tiers, where the model was given the room. The engine
+   * checks the name against the roster and ignores anything invented; who
+   * speaks is still enforced deterministically, including the repetition and
+   * back-to-back rules.
+   */
+  from: z.string().max(40).optional(),
 });
 
 export type Reaction = z.infer<typeof ReactionSchema>;

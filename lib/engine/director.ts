@@ -177,6 +177,14 @@ export interface DirectOneOptions {
   recentSpeakers: ReadonlyArray<readonly [string, string]>;
   /** Viewers who may not speak this message. */
   excludeSpeakers?: ReadonlySet<string>;
+  /**
+   * The viewer the model wrote this line as.
+   *
+   * Honoured when they are allowed to speak, and refused otherwise — the
+   * line waits for them rather than being put in someone else's mouth,
+   * because the whole point of the name is that it is theirs.
+   */
+  speaker?: Viewer;
   /** A hype moment: the speaking cooldown is waived. */
   burst?: boolean;
   /** What the screen is doing, when capture is on. Drives composition. */
@@ -371,6 +379,12 @@ export const ONE_SHOT_INTENTS: ReadonlySet<Intent> = new Set<Intent>(["greeting"
 function pickTopicSpeaker(options: DirectOneOptions): Viewer | undefined {
   const { topic, stage, population, now, rng, excludeSpeakers, burst } = options;
   const pick = { burst };
+
+  // The model wrote this line as a specific person. Either they may speak or
+  // the line waits; handing their words to someone else defeats the point.
+  if (options.speaker) {
+    return excludeSpeakers?.has(options.speaker.id) ? undefined : options.speaker;
+  }
 
   /**
    * Viewers barred from this message.

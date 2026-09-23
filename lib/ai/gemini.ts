@@ -151,6 +151,12 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
             content?: { parts?: Array<{ text?: string }> };
             finishReason?: string;
           }>;
+          usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+        };
+
+        const usage = {
+          input: body.usageMetadata?.promptTokenCount ?? 0,
+          output: body.usageMetadata?.candidatesTokenCount ?? 0,
         };
 
         const text = body.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
@@ -168,7 +174,7 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
           console.warn(`[ai] ${model} output could not be parsed: ${text.slice(0, 200)}`);
           return { reactions, status: "bad-response", detail: text.slice(0, 200) };
         }
-        return { reactions, status: "ok", event };
+        return { reactions, status: "ok", event, usage };
       } catch (error) {
         // Timeout, DNS, connection reset. Logged with the reason, because a
         // silent empty batch looks identical to a refusal.
