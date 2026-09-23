@@ -8,21 +8,13 @@ lives — so picking one up later does not mean re-deriving it.
 
 ---
 
-## 1. No way to mute the mic while chat keeps going
+## 1. No way to mute the mic while chat keeps going — done
 
-**Seen:** no control to stop the mic without stopping chat.
-
-**Now:** the only stop is Pause, which halts the whole simulation —
-`pause()` in `lib/react/use-simulator.ts` tears down `MicSession`, stops the
-recogniser, drops the queue and freezes release. There is no mute anywhere
-in the codebase.
-
-**Shape of the fix:** a mute that stops transcription reaching
-`handleTranscript` while the engine keeps ticking. Open question worth
-deciding first: does mute release the microphone entirely (browser
-recording indicator goes off, matches the existing privacy stance from
-`pause()`) or keep the level meter alive? Releasing it is the honest
-version and costs a permission-free restart on unmute.
+A mic button beside the mic meter in the control panel: its ring moves with your voice while
+live, and it turns red with a struck-through mic when muted. It releases the microphone the same
+way Pause does (recording indicator off) while chat, typed input, idle and
+screen events carry on. Stays muted across Pause, Play and Clear until
+switched back; unmuting reopens the mic only while chat is running.
 
 ---
 

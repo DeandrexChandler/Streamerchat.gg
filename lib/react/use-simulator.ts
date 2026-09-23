@@ -122,6 +122,10 @@ export interface UseSimulatorResult {
    * to the game rather than only to speech.
    */
   setWatching: (on: boolean) => Promise<void>;
+
+  /** True while the mic is off by choice. Chat keeps running on typed input. */
+  muted: boolean;
+  setMuted: (on: boolean) => Promise<void>;
 }
 
 export function useSimulator(): UseSimulatorResult {
@@ -148,6 +152,7 @@ export function useSimulator(): UseSimulatorResult {
   const [emotes, setEmotes] = useState<Emote[]>(() => []);
   const [overlaySubscribers, setOverlaySubscribers] = useState(0);
   const [watching, setWatching] = useState(false);
+  const [muted, setMutedState] = useState(false);
 
   const engineRef = useRef<SimulationEngine | null>(null);
   const micRef = useRef<MicSession | null>(null);
@@ -156,6 +161,8 @@ export function useSimulator(): UseSimulatorResult {
   const settingsRef = useRef<SimulationSettings>(DEFAULT_SETTINGS);
   const emotesRef = useRef<Emote[]>([]);
   const pausedRef = useRef(false);
+  /** Read inside callbacks that must not re-create on every toggle. */
+  const mutedRef = useRef(false);
   const overlayRef = useRef<OverlayTransport | null>(null);
   /**
    * The generation request on the wire, if any.
@@ -363,6 +370,12 @@ export function useSimulator(): UseSimulatorResult {
       micRef.current = null;
       return;
     }
+    // Muted while the permission prompt was up: let go of what just opened.
+    if (mutedRef.current) {
+      mic.stop();
+      if (micRef.current === mic) micRef.current = null;
+      return;
+    }
     setMicLabel(mic.label);
 
     if (!providerRef.current) {
@@ -378,6 +391,9 @@ export function useSimulator(): UseSimulatorResult {
       providerRef.current = provider;
 
       provider.events.on("final", ({ text }) => {
+        // The recogniser can flush one last result after stop(). Muted
+        // means nothing spoken reaches chat, including that.
+        if (mutedRef.current) return;
         setInterim("");
         // Loudness at the moment of speech sharpens the classifier: the same
         // words shouted and muttered should not produce the same reaction.
@@ -448,6 +464,32 @@ export function useSimulator(): UseSimulatorResult {
     setWatching(true);
   }, []);
 
+  /**
+   * Mutes the mic without pausing chat.
+   *
+   * Releases the capture the same way pause() does, so the browser's
+   * recording indicator goes off when the UI says muted. Typed input, idle
+   * and screen events carry on. Unmuting asks for the mic again, and only
+   * while chat is running: a paused or cleared session opens it on resume
+   * or Play, unless still muted.
+   */
+  const setMuted = useCallback(
+    async (on: boolean) => {
+      mutedRef.current = on;
+      setMutedState(on);
+      if (on) {
+        providerRef.current?.stop();
+        micRef.current?.stop();
+        micRef.current = null;
+        setInterim("");
+        setMicLabel("");
+        return;
+      }
+      if (status === "running" && !micRef.current) await listen();
+    },
+    [status, listen],
+  );
+
   const start = useCallback(async () => {
     if (status === "running" || status === "starting") return;
 
@@ -469,7 +511,7 @@ export function useSimulator(): UseSimulatorResult {
     startTicking();
     setStatus("running");
 
-    await listen();
+    if (!mutedRef.current) await listen();
   }, [status, ensureEngine, startTicking, listen]);
 
   const stop = useCallback(() => {
@@ -515,7 +557,7 @@ export function useSimulator(): UseSimulatorResult {
     engineRef.current?.resume(Date.now());
     setStatus("running");
 
-    await listen();
+    if (!mutedRef.current) await listen();
   }, [status, listen]);
 
   /**
@@ -641,5 +683,7 @@ export function useSimulator(): UseSimulatorResult {
     say,
     watching,
     setWatching: setWatchingScreen,
+    muted,
+    setMuted,
   };
 }

@@ -19,9 +19,11 @@ export interface MicMeterProps {
   subscribe: (handler: (level: number) => void) => () => void;
   active: boolean;
   label?: string;
+  /** Off by choice, not broken: said in the heading rather than a new line. */
+  muted?: boolean;
 }
 
-export function MicMeter({ subscribe, active, label }: MicMeterProps) {
+export function MicMeter({ subscribe, active, label, muted = false }: MicMeterProps) {
   const fillRef = useRef<HTMLDivElement>(null);
   const peakRef = useRef<HTMLSpanElement>(null);
   const lastPainted = useRef(-1);
@@ -55,9 +57,11 @@ export function MicMeter({ subscribe, active, label }: MicMeterProps) {
 
   return (
     <div className="space-y-1.5">
-      <div className="flex items-baseline justify-between text-xs">
-        <span className="text-gray-500 dark:text-gray-400">Microphone</span>
-        <span ref={peakRef} className="tabular-nums text-gray-400 dark:text-gray-500">
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="truncate whitespace-nowrap text-gray-500 dark:text-gray-400">
+          Microphone{muted && <span className="text-red-500 dark:text-red-400"> (Muted)</span>}
+        </span>
+        <span ref={peakRef} className="shrink-0 tabular-nums text-gray-400 dark:text-gray-500">
           0%
         </span>
       </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { Trash2 } from "lucide-react";
+import { MuteButton } from "./MuteButton";
 import { MicMeter } from "@/app/components/MicMeter";
 import type { SimulationSettings } from "@/lib/config/settings";
 import type { EngineStats } from "@/lib/engine/engine";
@@ -89,6 +90,9 @@ export interface ControlPanelProps {
   /** True while the streamer's screen is being captured for chat. */
   watching: boolean;
   onWatchingChange: (on: boolean) => void;
+  /** Mic off by choice; chat keeps going on typed input. */
+  muted: boolean;
+  onMutedChange: (on: boolean) => void;
   subscribeLevel: (handler: (level: number) => void) => () => void;
   /** Wipes the log and resets the session back to Play. */
   onClear: () => void;
@@ -103,17 +107,32 @@ export function ControlPanel({
   emoteCount,
   watching,
   onWatchingChange,
+  muted,
+  onMutedChange,
   subscribeLevel,
   onClear,
   onChange,
 }: ControlPanelProps) {
   return (
     <aside className="flex h-full w-56 flex-col gap-4 overflow-y-auto rounded-lg border border-gray-300 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-      <MicMeter
-        subscribe={subscribeLevel}
-        active={status === "running"}
-        label={micLabel || undefined}
-      />
+      {/* Top-aligned: the device name line below the meter comes and goes
+          with the mic, and centring would move the button every toggle. */}
+      <div className="flex items-start gap-2.5">
+        <MuteButton
+          muted={muted}
+          live={status === "running"}
+          onChange={onMutedChange}
+          subscribe={subscribeLevel}
+        />
+        <div className="min-w-0 flex-1">
+          <MicMeter
+            subscribe={subscribeLevel}
+            active={status === "running" && !muted}
+            muted={muted}
+            label={muted ? undefined : micLabel || undefined}
+          />
+        </div>
+      </div>
 
       <div className="space-y-4 border-t border-gray-200 pt-4 dark:border-gray-700">
         <StepSlider

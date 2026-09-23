@@ -93,6 +93,8 @@ function Simulator() {
         emoteCount={simulator.emotes.length}
         watching={simulator.watching}
         onWatchingChange={(on) => void simulator.setWatching(on)}
+        muted={simulator.muted}
+        onMutedChange={(on) => void simulator.setMuted(on)}
         subscribeLevel={simulator.subscribeLevel}
         onClear={simulator.clear}
         onChange={simulator.updateSettings}
@@ -183,7 +185,7 @@ function Simulator() {
                   submitTyped();
                 }
               }}
-              placeholder="Say something, or type it here..."
+              placeholder={simulator.muted ? "Mic muted — type to chat..." : "Say something, or type it here..."}
               aria-label="Send a message as the streamer"
               className="min-w-0 flex-1 rounded bg-[#464649] px-3 py-2 text-sm text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:outline-none"
             />
@@ -265,7 +267,7 @@ function Simulator() {
         <TranscriptPanel
           heard={simulator.heard}
           interim={simulator.interim}
-          listening={live}
+          listening={live && !simulator.muted}
         />
       </div>
     </div>
