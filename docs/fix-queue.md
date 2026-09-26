@@ -121,26 +121,32 @@ stacked "valid" / "fair enough".
 
 ---
 
-## 10. The lowest speed is locked at one pace
+## 10. The lowest speed is locked at one pace — done
 
-**Seen:** at 0.2/sec, saying something that should light chat up ("I'm
-sad", "spam W", "Hello?") gets the same slow trickle. It feels robotic.
+Saying something chat would pile onto now lifts the rate for eight seconds
+and decays back: a directive, excitement, a question to chat, a greeting,
+or anything with a sentiment ("im sad" classifies as mundane, which is why
+intent alone was not enough). The lift is inverse to the tier —
+`burstFactorFor` in `lib/engine/roster.ts`, about 3.75x at 0.2/sec and 1.2x
+at CHAOS — with one burst per twenty seconds so a talkative minute is not
+one long burst.
 
-**Now:** a burst exists but is small. The rate is the setting ×
-`(RATE_FLOOR 1 + RATE_GAIN 1.2 × topic activity capped at 1.9)`
-(`effectiveRate` in `lib/engine/engine.ts`), which tops out near 0.66/sec
-at the lowest tier. The first lines also wait on the provider round trip.
+Measured at 0.2/sec: about 6 lines in the first five seconds against 1.5
+for an ordinary line, back to the tier by twenty seconds. A talkative
+minute of hot lines lands around 38 messages rather than 49 uncapped.
 
-**Shape of the fix:** a short, sharp burst on directive, emotional and
-question intents at the low tiers: several lines in the first few seconds,
-then back to baseline. Maybe let the first reply skip the normal gap
-entirely.
+Also: the first line of a reply now goes out the moment the batch lands
+rather than on the next slot, which at this tier was up to five more
+seconds on top of the round trip (measured mean 0.3s, was 2.4s).
+
+Calls per minute are unchanged — the burst makes the batches bigger, not
+more frequent.
 
 ---
 
 ## 11. Hot word "screen" forces a screenshot (general setting, all speeds)
 
-**Seen / wanted:** saying a hot word like "screen" should send a screenshot
+**Seen / wanted:** saying/ typing a hot word like "screen" should send a screenshot
 to chat right away, for an immediate reaction to what the streamer is
 looking at.
 
