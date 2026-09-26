@@ -5,6 +5,7 @@ import type {
   GenerationPhase,
   IdleStage,
   RosterEntry,
+  ScreenReason,
 } from "../ai/provider";
 import type { QueuedReaction, Reaction } from "../ai/reaction";
 import { MAX_EMOTES_IN_PROMPT } from "../ai/prompt";
@@ -156,6 +157,17 @@ const EMOTE_BLOCK_WINDOW_MS = 60_000;
 const SCREEN_TRIGGER_COOLDOWN_MS = 8_000;
 
 /**
+ * The word that points chat at the screen, and how often it may be used.
+ *
+ * Bare "screen" only: "screenshot" and "screens" are ordinary words, and a
+ * hot word that fires on half of them would spend the key. Each use is one
+ * extra call carrying an image, so twenty seconds caps a spammed word at
+ * three extra calls a minute.
+ */
+const SCREEN_WORD = /\bscreen\b/i;
+const SCREEN_WORD_COOLDOWN_MS = 20_000;
+
+/**
  * Lines in a screen-triggered batch: a few seconds of chat, no more.
  *
  * Latency grows with output. Measured with a frame attached: 8 lines came
@@ -201,8 +213,22 @@ const RECENT_LINES = 20;
 /** Streamer inputs kept for the prompt. */
 const HISTORY_LINES = 8;
 
+/**
+ * What the hot word did, for the transcript panel.
+ *
+ * "off" is capture not running, "cooldown" is too soon since the last one,
+ * and `readyInMs` is how long until the word works again — the streamer
+ * cannot see a cooldown they were never told about.
+ */
+export interface ScreenRequest {
+  state: "fired" | "cooldown" | "off";
+  readyInMs?: number;
+}
+
 export interface TranscriptOutcome {
   classification: Classification;
+  /** Set when the utterance contained the screen hot word. */
+  screen?: ScreenRequest;
   /** False when the attention gate deliberately let it pass without reply. */
   reacted: boolean;
   /** Messages the director queued for it. */
@@ -356,8 +382,13 @@ export class SimulationEngine {
   private event: GameEvent | undefined;
   private eventAt = 0;
   /** A screen change waiting to be turned into a request. */
-  private pendingScreenEvent = false;
+  /** A look at the screen is due, and why it was asked for. */
+  private pendingScreenEvent: ScreenReason | null = null;
   private lastScreenTriggerAt = Number.NEGATIVE_INFINITY;
+  /** When the streamer last said the word, for its own slower cooldown. */
+  private lastScreenWordAt = Number.NEGATIVE_INFINITY;
+  /** Whether the streamer has screen capture turned on. Set by the caller. */
+  private capturing = false;
   /** Batches served this phase. Startup uses it to greet only once. */
   private phaseBatches = 0;
   /** Paused: nothing is planned and nothing is released. */
@@ -479,11 +510,12 @@ export class SimulationEngine {
     this.addressed = undefined;
     this.burstUntil = 0;
     this.lastBurstAt = Number.NEGATIVE_INFINITY;
+    this.lastScreenWordAt = Number.NEGATIVE_INFINITY;
     this.postTimes.clear();
     this.lastTurnoverAt = now;
     this.event = undefined;
     this.eventAt = 0;
-    this.pendingScreenEvent = false;
+    this.pendingScreenEvent = null;
     this.population.forget();
     this.topics.reset();
     this.dropBatch();
@@ -519,7 +551,44 @@ export class SimulationEngine {
   screenEvent(now: number): void {
     if (now - this.lastScreenTriggerAt < SCREEN_TRIGGER_COOLDOWN_MS) return;
     this.lastScreenTriggerAt = now;
-    this.pendingScreenEvent = true;
+    this.pendingScreenEvent = "changed";
+  }
+
+  /**
+   * Whether the streamer's screen is being captured.
+   *
+   * The engine cannot see the browser, and the hot word needs to know: told
+   * to look at a screen nobody is sharing, the honest answer is to say so
+   * rather than to ask the model about an image that will not exist.
+   */
+  setCapturing(on: boolean): void {
+    this.capturing = on;
+  }
+
+  /**
+   * "screen", said or typed.
+   *
+   * Its own cooldown, slower than the motion trigger: a screen that moves
+   * is the game, and the engine decides how often that is worth a call, but
+   * the word is the streamer deciding, and each one costs a call with an
+   * image attached. Twenty seconds keeps a spammed word to three extra
+   * calls a minute.
+   */
+  private hotWord(text: string, now: number): ScreenRequest | undefined {
+    if (!SCREEN_WORD.test(text)) return undefined;
+    if (!this.capturing) return { state: "off" };
+
+    const since = now - this.lastScreenWordAt;
+    if (since < SCREEN_WORD_COOLDOWN_MS) {
+      return { state: "cooldown", readyInMs: Math.ceil(SCREEN_WORD_COOLDOWN_MS - since) };
+    }
+
+    this.lastScreenWordAt = now;
+    // Also counts as a trigger, so the motion watcher does not fire a second
+    // batch at the same moment for the same picture.
+    this.lastScreenTriggerAt = now;
+    this.pendingScreenEvent = "asked";
+    return { state: "fired", readyInMs: SCREEN_WORD_COOLDOWN_MS };
   }
 
   /**
@@ -599,6 +668,15 @@ export class SimulationEngine {
     // Chat is allowed to simply not care. Reacting to every single utterance
     // is what makes generated chat feel relentless — real chat ignores most
     // background talk and answers what's aimed at it.
+    /**
+     * The hot word is handled before the attention gate.
+     *
+     * "screen" is an instruction, not conversation: a bland-sounding line
+     * that happens to contain it should still point chat at the picture,
+     * and the streamer should still be told what happened either way.
+     */
+    const screen = this.hotWord(text, now);
+
     if (
       !force &&
       !shouldReact(
@@ -613,7 +691,7 @@ export class SimulationEngine {
     ) {
       this.ignoredCount++;
       this.previousWasIgnored = true;
-      return { classification, reacted: false, queued: 0 };
+      return { classification, reacted: false, queued: 0, ...(screen ? { screen } : {}) };
     }
 
     this.previousWasIgnored = false;
@@ -662,7 +740,12 @@ export class SimulationEngine {
     }
 
     const topic = this.topics.observe(classification, text, now);
-    return { classification, reacted: topic !== null, queued: this.scheduler.pending };
+    return {
+      classification,
+      reacted: topic !== null,
+      queued: this.scheduler.pending,
+      ...(screen ? { screen } : {}),
+    };
   }
 
   // ------------------------------------------------------------ generation
@@ -684,7 +767,7 @@ export class SimulationEngine {
 
     // Arrival goes first: hellos and the chatter right after them. A screen
     // batch superseding the greeting wave would wipe the hellos off the queue.
-    if (this.phase === "startup" && this.phaseBatches < 2) this.pendingScreenEvent = false;
+    if (this.phase === "startup" && this.phaseBatches < 2) this.pendingScreenEvent = null;
 
     const silenceMs = now - this.lastSpeechAt;
     const stage = idleStageFor(this.quietFor(now));
@@ -715,7 +798,7 @@ export class SimulationEngine {
      * to speech, an arrival wave or another screen batch is not routine and
      * is waited for.
      */
-    if (this.inFlight && this.pendingScreenEvent && !this.inFlight.wave && !this.inFlight.screen) {
+    if (this.inFlight && this.pendingScreenEvent !== null && !this.inFlight.wave && !this.inFlight.screen) {
       this.inFlight = null;
     }
     if (this.inFlight) return null;
@@ -730,8 +813,9 @@ export class SimulationEngine {
      * it is — they are playing, just not narrating.
      */
     const screenEvent = this.pendingScreenEvent;
+    const screenReason = screenEvent ?? "changed";
     if (screenEvent) {
-      this.pendingScreenEvent = false;
+      this.pendingScreenEvent = null;
       if (this.lastClassification !== null) {
         this.phase = "active";
         this.phaseBatches = 0;
@@ -801,7 +885,7 @@ export class SimulationEngine {
         history: this.history.slice(0, -1),
         classification: this.lastClassification ?? STARTUP_CLASSIFICATION,
         continuation: false,
-        screen: true,
+        screen: screenReason,
         silenceSeconds,
       };
     }

@@ -165,7 +165,9 @@ function opening(request: CandidateRequest): string {
       return `You are the live chat of a small Twitch stream. ${who}`;
     default:
       return reactingToScreen(request)
-        ? `You are the live chat of a small Twitch stream. Something just happened on the streamer's screen. ${who} They are reacting to it, right now.`
+        ? request.screen === "asked"
+          ? `You are the live chat of a small Twitch stream. The streamer just told chat to look at their screen. ${who} They are looking, right now.`
+          : `You are the live chat of a small Twitch stream. Something just happened on the streamer's screen. ${who} They are reacting to it, right now.`
         : drifting(request)
         ? `You are the live chat of a small Twitch stream. ${who} The streamer is busy playing and chat is just hanging out.`
         : request.continuation
@@ -185,7 +187,7 @@ export const DRIFT_AFTER_S = 60;
 
 /** Something just happened on screen, and there is a frame to show it. */
 function reactingToScreen(request: CandidateRequest): boolean {
-  return request.screen === true && request.frame !== undefined;
+  return request.screen !== undefined && request.frame !== undefined;
 }
 
 function drifting(request: CandidateRequest): boolean {
@@ -256,6 +258,14 @@ function situation(request: CandidateRequest): string[] {
 
   // Active.
   if (reactingToScreen(request)) {
+    if (request.screen === "asked") {
+      return [
+        ...earlier,
+        ...(earlier.length > 0 ? [""] : []),
+        ...(utterance ? [`The streamer just said: "${utterance}"`, ""] : []),
+        "They are pointing chat at their screen. Say what you SEE in the image — the thing they wanted you to look at — and react to it. Do not ask what you are meant to be looking at, and do not talk about the screen in general.",
+      ];
+    }
     return [
       ...earlier,
       ...(earlier.length > 0 ? [""] : []),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Keyboard, Mic } from "lucide-react";
 import type { HeardUtterance } from "@/lib/react/use-simulator";
 
@@ -24,12 +24,39 @@ export interface TranscriptPanelProps {
   listening: boolean;
 }
 
+/** The word that points chat at the screen. Matched the way the engine does. */
+const SCREEN_WORD = /\b(screen)\b/i;
+
 export function TranscriptPanel({
   heard,
   interim,
   listening,
 }: TranscriptPanelProps) {
   const endRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * A once-a-second clock, only while something is counting down.
+   *
+   * The hot word costs a call with a screenshot attached, so it is rate
+   * limited — and a limit the streamer cannot see is indistinguishable from
+   * the feature being broken. One re-render a second is nothing; this is a
+   * text panel, not the chat itself. The clock is state rather than
+   * Date.now() in render, which would be impure and drift between renders.
+   */
+  const [now, setNow] = useState(0);
+  // Runs while any cooldown is still ahead of the clock, and stops itself
+  // once they have all passed — a panel ticking forever after one use is
+  // a background render loop nobody asked for.
+  const waiting = heard.some((entry) => {
+    const ready = readyAt(entry);
+    return ready !== null && (now === 0 || ready > now);
+  });
+
+  useEffect(() => {
+    if (!waiting) return;
+    const id = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(id);
+  }, [waiting]);
 
   useLayoutEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -73,8 +100,10 @@ export function TranscriptPanel({
                   : "text-gray-500 italic dark:text-gray-500"
               }`}
             >
-              {entry.text}
+              {withHotWord(entry)}
             </p>
+
+            <ScreenNote entry={entry} now={now} />
 
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <Badge
@@ -112,6 +141,80 @@ export function TranscriptPanel({
         Ignored when messages appear too bland. Repeated and Typed messages are never ignored. 
       </footer>
     </aside>
+  );
+}
+
+/**
+ * The hot word, coloured by what it actually did.
+ *
+ * Blue is "chat is looking at this now". Anything else is grey: the word
+ * was heard and did nothing, which the streamer needs to see at a glance
+ * rather than infer from chat not reacting.
+ */
+function withHotWord(entry: HeardUtterance) {
+  const screen = entry.outcome.screen;
+  if (!screen) return entry.text;
+
+  const parts = entry.text.split(SCREEN_WORD);
+  return parts.map((part, index) =>
+    SCREEN_WORD.test(part) && part.toLowerCase() === "screen" ? (
+      <strong
+        key={index}
+        className={
+          screen.state === "fired"
+            ? "font-semibold text-blue-600 dark:text-blue-400"
+            : "font-semibold text-gray-500 dark:text-gray-400"
+        }
+      >
+        {part}
+      </strong>
+    ) : (
+      <span key={index}>{part}</span>
+    ),
+  );
+}
+
+/** When the hot word may be used again, or null if it is not waiting. */
+function readyAt(entry: HeardUtterance): number | null {
+  const screen = entry.outcome.screen;
+  if (!screen?.readyInMs) return null;
+  return entry.at + screen.readyInMs;
+}
+
+/** The small line under an utterance that contained the hot word. */
+function ScreenNote({ entry, now }: { entry: HeardUtterance; now: number }) {
+  const screen = entry.outcome.screen;
+  if (!screen) return null;
+
+  if (screen.state === "off") {
+    return (
+      <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+        screen capture is off — turn on Watch my screen
+      </p>
+    );
+  }
+
+  const ready = readyAt(entry);
+  // Before the clock's first tick, show the full cooldown rather than zero.
+  const left =
+    ready === null
+      ? 0
+      : now === 0
+        ? Math.ceil((screen.readyInMs ?? 0) / 1000)
+        : Math.max(0, Math.ceil((ready - now) / 1000));
+
+  if (screen.state === "fired") {
+    return (
+      <p className="mt-0.5 text-[10px] text-blue-600/80 dark:text-blue-400/80">
+        chat is looking{left > 0 ? ` — ready again in ${left}s` : " — ready again"}
+      </p>
+    );
+  }
+
+  return (
+    <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+      {left > 0 ? `too soon — ready in ${left}s` : "ready now"}
+    </p>
   );
 }
 

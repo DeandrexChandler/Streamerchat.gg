@@ -129,11 +129,20 @@ describe("buildPrompt", () => {
     });
 
     it("leads a screen batch with the image, not the last thing said", () => {
-      const prompt = buildPrompt(request({ screen: true, frame: "abc", silenceSeconds: 40 }));
+      const prompt = buildPrompt(request({ screen: "changed", frame: "abc", silenceSeconds: 40 }));
       expect(prompt).toMatch(/something just changed on screen/i);
       expect(prompt).not.toMatch(/stay about that line/i);
       // Without a frame there is nothing to react to; it reads as a normal reply.
-      expect(buildPrompt(request({ screen: true }))).not.toMatch(/changed on screen/i);
+      expect(buildPrompt(request({ screen: "changed" }))).not.toMatch(/changed on screen/i);
+    });
+
+    it("tells the model the streamer pointed at the screen, not that it moved", () => {
+      const asked = buildPrompt(
+        request({ screen: "asked", frame: "abc", utterance: "chat look at my screen" }),
+      );
+      expect(asked).toMatch(/pointing chat at their screen/i);
+      expect(asked).toMatch(/say what you SEE/i);
+      expect(asked).not.toMatch(/something just changed on screen/i);
     });
 
     it("escalates idle framing with the stage", () => {
