@@ -169,3 +169,25 @@ prompt is worth its input tokens at each tier.
 
 Recorded in `docs/roadmap.md` (Phase 3). Listed here so it's not lost.
 
+---
+
+## 14. Chat still felt botted after names and memory — done
+
+**Seen:** with names and memory in, the room still read as one voice.
+
+**Cause:** every regular was described to the model by archetype label alone
+— "chatty regular", "lurker" — so two of the same archetype were identical,
+and the house style rules told the whole room to type the same way.
+
+**Now:** each regular carries typing habits sampled once from ranges
+measured off real chats. `npm run sample -- <channel> <secs> voices` reports
+per-chatter traits; silky and ironmouse on 2026-09-23 gave median words
+2.6 vs 6.0, emote-only 35% vs 42%, caps 29% vs 2%, punctuation 3% both,
+stretched words 11% vs 0%. The ranges in `lib/data/voices.ts` sit between
+the two, and the spread *within* a room is the point. The prompt asks for
+those habits to stay consistent per person and says explicitly that they
+are small habits, not accents.
+
+Customisation is still to come: `/settings/regulars` is read-only, with a
+"forget my regulars" reset.
+

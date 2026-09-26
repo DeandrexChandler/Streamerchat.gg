@@ -80,6 +80,11 @@ Consequences that must stay true:
   and what the streamer said to them, per person, saved to browser storage
   (`lib/config/roster-store.ts`) and shown to the model at the slow tiers.
   Kept deliberately small: it rides in every prompt.
+- **Every regular types differently.** Line length, caps, punctuation,
+  questions, stretched words and two things they bring up — sampled once per
+  person from ranges measured off real chats (`lib/data/voices.ts`, from
+  `npm run sample -- <channel> <secs> voices`) and saved with them. Subtle by
+  design: habits, not costumes. `/settings/regulars` shows the room read-only.
 - **What is on screen decides the character of chat**, when the streamer has
   turned capture on. A frame rides along with batches the engine already
   makes, the model names what it sees from a closed list, and

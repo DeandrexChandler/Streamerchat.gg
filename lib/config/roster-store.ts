@@ -23,6 +23,16 @@ const SavedViewerSchema = z.object({
   activity: z.number().min(0).max(1),
   verbosity: z.number().min(0).max(1),
   emoteAffinity: z.number().min(0).max(1),
+  voice: z
+    .object({
+      words: z.number().min(1).max(20),
+      caps: z.number().min(0).max(1),
+      punctuation: z.number().min(0).max(1),
+      questions: z.number().min(0).max(1),
+      stretch: z.number().min(0).max(1),
+      interests: z.array(z.string().max(60)).max(2),
+    })
+    .optional(),
   memory: z.object({
     topics: z.array(z.string().max(24)).max(6),
     lines: z.array(z.string().max(80)).max(3),

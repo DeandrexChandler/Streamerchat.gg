@@ -21,6 +21,7 @@ import {
 } from "./generation";
 import type { SavedViewer } from "../config/roster-store";
 import { PERSONALITIES } from "../data/personalities";
+import { describeVoice } from "../data/voices";
 import { Population } from "./population";
 import { createFilter, type Filter } from "./profanity";
 import {
@@ -936,7 +937,7 @@ export class SimulationEngine {
     return this.population.all().map((viewer) => {
       const { topics, lines, addressed } = viewer.memory;
       const notes = [
-        topics.length > 0 ? `into: ${topics.join(", ")}` : "",
+        topics.length > 0 ? `been on about: ${topics.join(", ")}` : "",
         lines.length > 0 ? `has said: ${lines.map((line) => `"${line}"`).join(", ")}` : "",
         addressed.length > 0
           ? `streamer said to them: ${addressed.map((line) => `"${line}"`).join(", ")}`
@@ -944,7 +945,9 @@ export class SimulationEngine {
       ].filter(Boolean);
       return {
         name: viewer.name,
-        persona: PERSONALITIES[viewer.personality].label.toLowerCase(),
+        // The archetype says what kind of viewer they are; the voice says
+        // how they type, which is what tells two chatty regulars apart.
+        persona: `${PERSONALITIES[viewer.personality].label.toLowerCase()}; ${describeVoice(viewer.voice)}`,
         ...(notes.length > 0 ? { notes: notes.join("; ") } : {}),
       };
     });

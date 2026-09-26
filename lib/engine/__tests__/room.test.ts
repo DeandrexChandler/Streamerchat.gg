@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SimulationEngine } from "../engine";
 import { FIXTURE_EMOTES } from "../../data/__fixtures__/emotes";
+import { CandidateRequestSchema } from "../../ai/schema";
 import type { ChatMessage } from "../types";
 
 /**
@@ -155,7 +156,8 @@ describe("the room at slow tiers", () => {
     expect(messages.filter((message) => message.username === hog)).toHaveLength(4);
     const otherAt = messages.findIndex((message) => message.username === other);
     expect(otherAt).toBeGreaterThanOrEqual(0);
-    expect(otherAt).toBeLessThan(3);
+    // The run cap forces someone else in by the fourth line at the latest.
+    expect(otherAt).toBeLessThanOrEqual(3);
     let run = 0;
     let previous = "";
     for (const message of messages) {
@@ -163,5 +165,75 @@ describe("the room at slow tiers", () => {
       previous = message.username;
       expect(run).toBeLessThanOrEqual(3);
     }
+  });
+});
+
+/**
+ * Voices.
+ *
+ * Names and memory gave the regulars a history; without this they all still
+ * type identically, which is most of what "botted" meant.
+ */
+describe("voices", () => {
+  it("gives the people in one room different habits", () => {
+    // Not every seed produces three distinct descriptions — two quiet
+    // regulars can legitimately land in the same place — so this asks that
+    // rooms are usually mixed, not that they always are.
+    let mixed = 0;
+    for (let seed = 0; seed < 40; seed += 1) {
+      const engine = new SimulationEngine({
+        seed,
+        now: 0,
+        emotes: FIXTURE_EMOTES,
+        settings: { messagesPerSecond: 0.2 },
+      });
+      engine.beginSession(0);
+      engine.handleTranscript("hey", 0, undefined, true);
+      const roster = engine.nextGeneration(0)!.roster!;
+      // Every person says how they type, not just which archetype they are.
+      for (const entry of roster) {
+        expect(entry.persona).toMatch(
+          /posts a word or two|short lines|writes proper sentences|writes whole paragraphs/,
+        );
+        expect(entry.persona).toMatch(/brings up /);
+      }
+      const personas = new Set(roster.map((e) => e.persona));
+      if (personas.size > 1) mixed += 1;
+    }
+    expect(mixed).toBeGreaterThan(36);
+  });
+
+  it("keeps a person's habits the same next session", () => {
+    const engine = engineAt(0.2);
+    engine.handleTranscript("hey", 0, undefined, true);
+    const before = engine.nextGeneration(0)!.roster!;
+
+    const tomorrow = new SimulationEngine({
+      seed: 5,
+      now: 0,
+      emotes: FIXTURE_EMOTES,
+      settings: { messagesPerSecond: 0.2 },
+      roster: engine.exportRoster(),
+    });
+    tomorrow.beginSession(0);
+    tomorrow.handleTranscript("hey", 0, undefined, true);
+    const after = tomorrow.nextGeneration(0)!.roster!;
+
+    expect(after.map((e) => `${e.name}: ${e.persona}`)).toEqual(
+      before.map((e) => `${e.name}: ${e.persona}`),
+    );
+  });
+
+  it("builds a request the server will accept", () => {
+    // The engine and the route validate separately, and a persona that
+    // outgrew its field made every slow-tier batch fail with the room
+    // attached — invisible in engine tests, fatal live.
+    const engine = engineAt(0.2);
+    engine.handleTranscript("okay chat what should i build tonight", 0, undefined, true);
+    say(engine, [{ text: "the roof honestly", from: engine.exportRoster()[0].name }]);
+    engine.handleTranscript("fair enough", 30_000, undefined, true);
+
+    const request = engine.nextGeneration(30_000);
+    expect(CandidateRequestSchema.safeParse(request).success).toBe(true);
   });
 });

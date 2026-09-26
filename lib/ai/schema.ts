@@ -83,7 +83,9 @@ export const CandidateRequestSchema = z
       .array(
         z.object({
           name: z.string().max(40),
-          persona: z.string().max(40),
+          // Archetype plus typing habits plus what they bring up: the whole
+          // voice, which is a sentence, not a label.
+          persona: z.string().max(200),
           notes: z.string().max(400).optional(),
         }),
       )
