@@ -25,6 +25,9 @@ import { describeVoice } from "../data/voices";
 import { Population } from "./population";
 import { createFilter, type Filter } from "./profanity";
 import {
+  BURST_COOLDOWN_MS,
+  BURST_MS,
+  burstFactorFor,
   isConversational,
   MAX_CONSECUTIVE,
   MAX_POSTS_IN_WINDOW,
@@ -364,6 +367,9 @@ export class SimulationEngine {
 
   /** The regular the streamer named in their last utterance, if any. */
   private addressed: string | undefined;
+  /** While the room is piling onto something. */
+  private burstUntil = 0;
+  private lastBurstAt = Number.NEGATIVE_INFINITY;
 
   /** Who spoke last, and how many times in a row. */
   private lastSpeakerId: string | null = null;
@@ -429,7 +435,11 @@ export class SimulationEngine {
    * legitimate high-momentum stretches are never clipped.
    */
   private effectiveRateLimit(): number {
-    return Math.ceil(this.settings.messagesPerSecond * 60 * 1.6);
+    // Headroom for momentum, a screen event and a burst — this is a safety
+    // valve against a defect flooding the renderer, not a second rate knob,
+    // and clipping a legitimate burst would make the tier feel broken.
+    const ceiling = 1.6 * burstFactorFor(this.settings.messagesPerSecond);
+    return Math.ceil(this.settings.messagesPerSecond * 60 * ceiling);
   }
 
   updateSettings(patch: Partial<SimulationSettings>): void {
@@ -467,6 +477,8 @@ export class SimulationEngine {
     this.lastSpeakerId = null;
     this.consecutive = 0;
     this.addressed = undefined;
+    this.burstUntil = 0;
+    this.lastBurstAt = Number.NEGATIVE_INFINITY;
     this.postTimes.clear();
     this.lastTurnoverAt = now;
     this.event = undefined;
@@ -639,6 +651,8 @@ export class SimulationEngine {
      * hazelirl — so the match ignores spacing and punctuation entirely, and
      * falls back to a distinctive word of the name on its own.
      */
+    this.maybeBurst(classification, now);
+
     this.addressed = isConversational(this.settings.messagesPerSecond)
       ? this.matchName(text)
       : undefined;
@@ -1052,7 +1066,16 @@ export class SimulationEngine {
     }
     queued.sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
 
+    /**
+     * The first line of a reply goes out now, not on the next slot.
+     *
+     * At 0.2/sec a slot is five seconds, so a reply that had already cost a
+     * provider round trip sat in the queue for another five before anyone
+     * said it. Only for a batch that answers something new: a routine
+     * refill joining the queue must not jump the pacing.
+     */
     if (pending.supersedes) {
+      this.nextEmitAt = Math.min(this.nextEmitAt, now);
       this.reactions = queued;
       this.waveSpeakers.clear();
     } else {
@@ -1171,7 +1194,44 @@ export class SimulationEngine {
      */
     const fresh = now - this.eventAt < EVENT_LIFETIME_MS;
     const event = fresh ? profileFor(this.event).rate : 1;
-    return this.settings.messagesPerSecond * (RATE_FLOOR + RATE_GAIN * activity) * event;
+    return (
+      this.settings.messagesPerSecond *
+      (RATE_FLOOR + RATE_GAIN * activity) *
+      event *
+      this.burstFactor(now)
+    );
+  }
+
+  /**
+   * The burst, decaying linearly back to normal.
+   *
+   * Linear rather than a step: chat that stops dead the instant the window
+   * closes is as mechanical as chat that never sped up.
+   */
+  private burstFactor(now: number): number {
+    const left = this.burstUntil - now;
+    if (left <= 0) return 1;
+    const peak = burstFactorFor(this.settings.messagesPerSecond);
+    return 1 + (peak - 1) * (left / BURST_MS);
+  }
+
+  /**
+   * Something worth piling onto was just said.
+   *
+   * Intent covers "spam W", "LETS GO" and a question to chat; sentiment
+   * covers the rest, because "im sad" classifies as mundane and is exactly
+   * the moment a room should react. Rate-limited, or a talkative minute is
+   * one continuous burst and the tier stops meaning anything.
+   */
+  private maybeBurst(classification: Classification, now: number): void {
+    const worth =
+      BURST_INTENTS.has(classification.intent) ||
+      classification.intent === "question_to_chat" ||
+      classification.intent === "greeting" ||
+      classification.sentiment !== "neutral";
+    if (!worth || now - this.lastBurstAt < BURST_COOLDOWN_MS) return;
+    this.lastBurstAt = now;
+    this.burstUntil = now + BURST_MS;
   }
 
   /**

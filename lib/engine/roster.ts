@@ -54,6 +54,31 @@ export function isConversational(messagesPerSecond: number): boolean {
   return messagesPerSecond <= CONVERSATIONAL_MAX_RATE;
 }
 
+/**
+ * The short lift after the streamer says something chat would pile onto.
+ *
+ * At the slowest tier the room runs at one line every five seconds, which
+ * is right for background chatter and wrong for "spam W" or "im sad": the
+ * reaction arrives at the same trickle as everything else and the room
+ * reads as a metronome. This lifts the rate for a few seconds and decays
+ * back, so the tier still means what it says over a minute.
+ */
+export const BURST_MS = 8_000;
+
+/** One burst per this long, so a talkative stretch is not one long burst. */
+export const BURST_COOLDOWN_MS = 20_000;
+
+/**
+ * How hard the burst lifts, by tier.
+ *
+ * Inverse to the rate: a slow room has the most headroom and the most need
+ * — five times 0.2/sec is one a second, which is a small room going off —
+ * while CHAOS is already a wall and needs almost nothing.
+ */
+export function burstFactorFor(messagesPerSecond: number): number {
+  return Math.max(1.2, Math.min(4, 1 + 0.55 / Math.max(0.2, messagesPerSecond)));
+}
+
 /** Persistent names: the people the streamer comes to recognise. */
 export function rosterSizeFor(messagesPerSecond: number): number {
   return tierFor(messagesPerSecond)[1];

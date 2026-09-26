@@ -69,6 +69,12 @@ Consequences that must stay true:
 - **One provider, one model, fixed.** Gemini `gemini-3.5-flash-lite` via
   `GOOGLE_API_KEY`. No selection anywhere. If Gemini is down or the key is
   out of credit, the answer is to add credit — never another provider.
+- **A hot line lifts the pace, briefly.** A directive, excitement, a
+  question to chat or anything with a sentiment gives the room eight seconds
+  at a higher rate, decaying back, at most once every twenty seconds
+  (`burstFactorFor`, `BURST_MS`, `BURST_COOLDOWN_MS` in
+  `lib/engine/roster.ts`). Strongest at the slow tiers, where the baseline
+  is one line every five seconds.
 - **Idle is always on**, after five minutes with nothing said and nothing
   happening on screen, escalating through four stages (5 / 8 / 12 / 20 min).
   Before that, chat moves off the last line after a minute and just hangs out.
