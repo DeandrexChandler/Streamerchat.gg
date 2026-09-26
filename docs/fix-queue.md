@@ -209,3 +209,45 @@ are small habits, not accents.
 Customisation is still to come: `/settings/regulars` is read-only, with a
 "forget my regulars" reset.
 
+---
+
+## 15. Remove the "messages kept on screen" setting
+
+**Owner's note:** cut it.
+
+**Now:** it lives on the **OBS** settings page, not Appearance —
+`app/(shell)/settings/obs/page.tsx` around line 199, "Messages kept on
+screen", 5 to 300. Appearance is still an empty placeholder, so this is
+almost certainly the control meant; confirm before cutting. It writes
+`maxMessages` for the overlay. The simulator has its own buffer,
+`messageBufferSize` in `lib/config/settings.ts` (50–500, default 150),
+scaled by chat speed in `lib/react/use-simulator.ts` and capped by
+`MAX_RENDERED`.
+
+**Shape of the fix:** delete the field and let the overlay use the default,
+or derive it from chat speed the way the simulator already does. Check
+whether `maxMessages` is read anywhere else in the overlay before removing
+the stored value.
+
+---
+
+## 16. Customise the regulars
+
+**Owner's note:** let the streamer change who chat is.
+
+**Now:** `/settings/regulars` is read-only — name, archetype, voice, what
+they remember, and a "forget my regulars" reset. Everything is generated:
+names in `lib/data/usernames.ts`, archetypes in `lib/data/personalities.ts`,
+typing habits in `lib/data/voices.ts`, all saved through
+`lib/config/roster-store.ts`. Already recorded loosely as "custom viewers"
+in `docs/roadmap.md` (Phase 3) and mentioned at the end of item 14; this is
+the concrete version.
+
+**Shape of the fix:** make the saved roster editable — rename a regular,
+pick their archetype, adjust or write their typing habits, clear one
+person's memory, delete or add someone. The storage is already a plain
+versioned list, so the work is the editor and deciding what happens on the
+next session: an edited regular must not be replaced when the tier changes
+the roster size. Worth deciding whether a hand-written character overrides
+the measured trait ranges entirely or only seeds them.
+
