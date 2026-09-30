@@ -95,7 +95,10 @@ Consequences that must stay true:
   questions, stretched words and two things they bring up — sampled once per
   person from ranges measured off real chats (`lib/data/voices.ts`, from
   `npm run sample -- <channel> <secs> voices`) and saved with them. Subtle by
-  design: habits, not costumes. `/settings/regulars` shows the room read-only.
+  design: habits, not costumes. `/settings/regulars` is where the streamer
+  edits them: name, archetype, habits, and a free-text character in their
+  own words that outranks everything measured. Anyone edited is pinned —
+  never rotated out, and a running session cannot overwrite them.
 - **What is on screen decides the character of chat**, when the streamer has
   turned capture on. A frame rides along with batches the engine already
   makes, the model names what it sees from a closed list, and

@@ -103,10 +103,12 @@ export type ScreenReason = "changed" | "asked";
 /** One regular, as the model is told about them. */
 export interface RosterEntry {
   name: string;
-  /** Their archetype in a couple of words: "hype viewer", "lurker". */
+  /** Their archetype and typing habits: "hype viewer; short lines, ...". */
   persona: string;
   /** What they have been on about this stream. Empty on their first line. */
   notes?: string;
+  /** Written by the streamer, in their own words. Outranks the rest. */
+  character?: string;
 }
 
 /**

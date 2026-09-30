@@ -207,8 +207,11 @@ function room(request: CandidateRequest): string[] {
   const lines = [
     "The people in chat right now. These are regulars — they have been here before, they remember this stream, and they know each other:",
     ...roster.map((entry) => {
+      // The streamer's own words first: they know their chat, and a
+      // hand-written character is worth more than anything measured.
+      const character = entry.character ? ` ${entry.character}.` : "";
       const notes = entry.notes ? ` — ${entry.notes}` : "";
-      return `  ${entry.name} (${entry.persona})${notes}`;
+      return `  ${entry.name} (${entry.persona})${character}${notes}`;
     }),
     "",
     'Every line is written AS one of these people, in their own voice, and carries "from" with their exact name. Nobody else exists: do not invent names. Spread the lines around rather than giving one person most of them.',
