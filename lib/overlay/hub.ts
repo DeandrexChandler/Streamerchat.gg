@@ -43,6 +43,14 @@ export const DEFAULT_HUB_LIMITS: OverlayHubLimits = {
 
 export class OverlayHub {
   private sessions = new Map<string, Set<OverlayListener>>();
+  /**
+   * The last emote pack published per key.
+   *
+   * OBS attaches whenever the streamer switches scenes, long after the pack
+   * was sent. Without retaining it, a source that connects mid-session
+   * renders emote names as text until the streamer happens to change packs.
+   */
+  private packs = new Map<string, OverlayFrame>();
 
   constructor(private readonly limits: OverlayHubLimits = DEFAULT_HUB_LIMITS) {}
 
@@ -67,6 +75,16 @@ export class OverlayHub {
     listeners.add(listener);
     this.sessions.set(key, listeners);
 
+    // Hand the newcomer whatever the pack was, before any chat arrives.
+    const pack = this.packs.get(key);
+    if (pack) {
+      try {
+        listener(pack);
+      } catch {
+        // A stream that dies on its first frame is handled by publish().
+      }
+    }
+
     let released = false;
     return () => {
       // Unsubscribe has to be idempotent: an aborted request can fire the
@@ -77,12 +95,18 @@ export class OverlayHub {
       const current = this.sessions.get(key);
       if (!current) return;
       current.delete(listener);
-      if (current.size === 0) this.sessions.delete(key);
+      if (current.size === 0) {
+        this.sessions.delete(key);
+        // Nothing is watching; the next publisher sends its pack again.
+        this.packs.delete(key);
+      }
     };
   }
 
   /** Fans a frame out. Returns how many subscribers it reached. */
   publish(key: string, frame: OverlayFrame): number {
+    if (frame.event === "emotes") this.packs.set(key, frame);
+
     const listeners = this.sessions.get(key);
     if (!listeners || listeners.size === 0) return 0;
 

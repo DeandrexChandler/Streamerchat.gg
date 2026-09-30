@@ -20,7 +20,12 @@ function message(id: string): ChatMessage {
 
 /** A fetch stub whose reported subscriber count can be changed per test. */
 function stubFetch(subscribers = 1) {
-  const calls: Array<{ key: string; messages: ChatMessage[]; clear: boolean }> = [];
+  const calls: Array<{
+    key: string;
+    messages: ChatMessage[];
+    clear: boolean;
+    emotes?: Array<{ name: string; url: string }>;
+  }> = [];
   const impl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
     calls.push(JSON.parse(String(init?.body)));
     return {
@@ -243,5 +248,91 @@ describe("OverlayTransport", () => {
     expect(sent).toHaveLength(MAX_MESSAGES_PER_PUBLISH);
     // Newest kept: if only some can go out, those are the ones worth showing.
     expect(sent.at(-1)!.id).toBe(`m${MAX_MESSAGES_PER_PUBLISH * 3 - 1}`);
+  });
+
+  /**
+   * The browser source runs in OBS, which has never seen the streamer's
+   * imported packs. Without the pack on the wire every emote reaches the
+   * stream as its own name in plain text.
+   */
+  describe("emotes", () => {
+    const pack = [
+      { id: "1", name: "KEKW", url: "https://cdn.test/kekw.webp", mood: "funny" as const },
+      { id: "2", name: "Pog", url: "https://cdn.test/pog.webp", mood: "hype" as const },
+    ];
+
+    it("sends the pack with the first publish that reaches a source", async () => {
+      const fetchStub = stubFetch(1);
+      const transport = new OverlayTransport({ key: KEY, fetchImpl: fetchStub.impl });
+      transport.setEmotes(pack);
+      transport.push([message("a")]);
+      transport.flush(0);
+      await settle();
+
+      expect(fetchStub.calls[0].emotes).toEqual([
+        { name: "KEKW", url: "https://cdn.test/kekw.webp" },
+        { name: "Pog", url: "https://cdn.test/pog.webp" },
+      ]);
+    });
+
+    it("does not re-send an unchanged pack on every publish", async () => {
+      const fetchStub = stubFetch(1);
+      const transport = new OverlayTransport({ key: KEY, fetchImpl: fetchStub.impl });
+      transport.setEmotes(pack);
+      transport.push([message("a")]);
+      transport.flush(0);
+      await settle();
+
+      transport.setEmotes(pack);
+      transport.push([message("b")]);
+      transport.flush(1_000);
+      await settle();
+
+      expect(fetchStub.calls[1].emotes).toBeUndefined();
+    });
+
+    it("sends the pack again when it changes", async () => {
+      const fetchStub = stubFetch(1);
+      const transport = new OverlayTransport({ key: KEY, fetchImpl: fetchStub.impl });
+      transport.setEmotes(pack);
+      transport.push([message("a")]);
+      transport.flush(0);
+      await settle();
+
+      transport.setEmotes([...pack, { id: "3", name: "Sadge", url: "https://cdn.test/sadge.webp", mood: "sad" as const }]);
+      transport.push([message("b")]);
+      transport.flush(1_000);
+      await settle();
+
+      expect(fetchStub.calls[1].emotes).toHaveLength(3);
+    });
+
+    it("sends it again when a new source attaches", async () => {
+      // A scene switch in OBS is a fresh connection that has been given
+      // nothing, and a publisher mid-session has already sent its pack.
+      const calls: Array<{ emotes?: unknown[] }> = [];
+      let subscribers = 1;
+      const impl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        calls.push(JSON.parse(String(init?.body)));
+        return { ok: true, json: async () => ({ subscribers }) } as Response;
+      });
+      const transport = new OverlayTransport({ key: KEY, fetchImpl: impl as unknown as typeof fetch });
+
+      transport.setEmotes(pack);
+      transport.push([message("a")]);
+      transport.flush(0);
+      await settle();
+      expect(calls[0].emotes).toBeDefined();
+
+      subscribers = 2;
+      transport.push([message("b")]);
+      transport.flush(1_000);
+      await settle();
+
+      transport.push([message("c")]);
+      transport.flush(2_000);
+      await settle();
+      expect(calls[2].emotes).toBeDefined();
+    });
   });
 });
