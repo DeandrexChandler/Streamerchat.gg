@@ -1046,6 +1046,7 @@ export class SimulationEngine {
         // The archetype says what kind of viewer they are; the voice says
         // how they type, which is what tells two chatty regulars apart.
         persona: `${PERSONALITIES[viewer.personality].label.toLowerCase()}; ${describeVoice(viewer.voice)}`,
+        ...(viewer.note ? { character: viewer.note } : {}),
         ...(notes.length > 0 ? { notes: notes.join("; ") } : {}),
       };
     });

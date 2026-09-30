@@ -237,3 +237,94 @@ describe("voices", () => {
     expect(CandidateRequestSchema.safeParse(request).success).toBe(true);
   });
 });
+
+/**
+ * People the streamer wrote themselves.
+ *
+ * Everything else about a regular is generated from measured ranges. A
+ * hand-written character is the one thing measurement cannot produce, so it
+ * reaches the model as-is — and the person carrying it is not churn fodder.
+ */
+describe("edited regulars", () => {
+  const written = {
+    id: "edited-1",
+    name: "hazelirl",
+    nameWords: ["hazel", "irl"],
+    color: "#FF7F50",
+    personality: "chatty",
+    activity: 0.8,
+    verbosity: 0.4,
+    emoteAffinity: 0.3,
+    voice: {
+      words: 6,
+      caps: 0,
+      punctuation: 0.2,
+      questions: 0.2,
+      stretch: 0,
+      interests: ["their cat", "the gym"],
+    },
+    note: "streams at 3am, always hungry, hates the roof build",
+    pinned: true,
+    memory: { topics: [], lines: [], addressed: [] },
+    seenAt: 0,
+  };
+
+  it("passes the streamer's own words to the model", () => {
+    const engine = new SimulationEngine({
+      seed: 4,
+      now: 0,
+      emotes: FIXTURE_EMOTES,
+      settings: { messagesPerSecond: 0.2 },
+      roster: [written],
+    });
+    engine.beginSession(0);
+    engine.handleTranscript("what do you reckon", 0, undefined, true);
+
+    const entry = engine.nextGeneration(0)?.roster?.find((r) => r.name === "hazelirl");
+    expect(entry?.character).toBe(written.note);
+  });
+
+  it("keeps them when the room is smaller than the roster", () => {
+    // Three seats, four people saved, and the written one is not the most
+    // recently active — being dropped is exactly the failure the pin exists
+    // to prevent.
+    const others = [1, 2, 3].map((n) => ({
+      ...written,
+      id: `gen-${n}`,
+      name: `regular${n}`,
+      nameWords: [`regular${n}`],
+      note: undefined,
+      pinned: false,
+      seenAt: 10_000 + n,
+    }));
+
+    const engine = new SimulationEngine({
+      seed: 4,
+      now: 0,
+      emotes: FIXTURE_EMOTES,
+      settings: { messagesPerSecond: 0.2 },
+      roster: [...others, written],
+    });
+    engine.beginSession(0);
+
+    const names = engine.exportRoster().map((viewer) => viewer.name);
+    expect(names).toContain("hazelirl");
+    expect(names).toHaveLength(3);
+  });
+
+  it("does not rotate them out at a tier that churns the room", () => {
+    const engine = new SimulationEngine({
+      seed: 4,
+      now: 0,
+      emotes: FIXTURE_EMOTES,
+      settings: { messagesPerSecond: 4 },
+      roster: [written],
+    });
+    engine.beginSession(0);
+    engine.handleTranscript("hey chat", 0, undefined, true);
+
+    // Well past several turnover intervals at this tier.
+    for (let now = 0; now <= 600_000; now += 1_000) engine.tick(now);
+    expect(engine.exportRoster().map((v) => v.name)).toContain("hazelirl");
+  });
+});

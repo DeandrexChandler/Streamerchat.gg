@@ -235,3 +235,23 @@ describe("the room", () => {
     expect(crowd).not.toMatch(/"from"/);
   });
 });
+
+describe("a regular the streamer wrote", () => {
+  it("puts their words in the room, ahead of what the engine remembers", () => {
+    const prompt = buildPrompt(
+      request({
+        roster: [
+          {
+            name: "hazelirl",
+            persona: "chatty regular; writes proper sentences",
+            character: "streams at 3am, always hungry",
+            notes: "been on about: roof",
+          },
+        ],
+      }),
+    );
+    const line = prompt.split("\n").find((l) => l.includes("hazelirl"))!;
+    expect(line).toContain("streams at 3am, always hungry");
+    expect(line.indexOf("streams at 3am")).toBeLessThan(line.indexOf("been on about"));
+  });
+});

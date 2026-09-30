@@ -87,6 +87,7 @@ export const CandidateRequestSchema = z
           // voice, which is a sentence, not a label.
           persona: z.string().max(200),
           notes: z.string().max(400).optional(),
+          character: z.string().max(200).optional(),
         }),
       )
       .max(12)

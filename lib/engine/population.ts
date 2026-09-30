@@ -117,6 +117,7 @@ export class Population {
       intents: new Map(),
       spoken: 0,
       voice: buildVoice(this.rng, personality.id, verbosity),
+      pinned: false,
       memory: { topics: [], lines: [], addressed: [] },
     };
 
@@ -125,7 +126,8 @@ export class Population {
 
   /** Removes a random viewer, if any remain. Used for churn. */
   remove(): Viewer | undefined {
-    const all = this.all();
+    // A regular the streamer wrote is not churn fodder.
+    const all = this.all().filter((viewer) => !viewer.pinned);
     if (all.length === 0) return undefined;
     const victim = this.rng.pick(all);
     this.viewers.delete(victim.id);
@@ -335,6 +337,8 @@ export class Population {
         ...viewer.voice,
         interests: [...viewer.voice.interests],
       },
+      ...(viewer.note ? { note: viewer.note } : {}),
+      ...(viewer.pinned ? { pinned: true } : {}),
       memory: {
         topics: [...viewer.memory.topics],
         lines: [...viewer.memory.lines],
@@ -351,8 +355,10 @@ export class Population {
    * a larger one fills the rest with new names, as it always did.
    */
   restore(saved: readonly SavedViewer[], size: number): void {
+    // Hand-edited people first, then whoever spoke most recently: a tier
+    // with room for three must not drop the one the streamer wrote.
     const wanted = [...saved]
-      .sort((a, b) => b.seenAt - a.seenAt)
+      .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false) || b.seenAt - a.seenAt)
       .slice(0, size)
       .filter((entry) => PERSONALITIES[entry.personality as PersonalityId] !== undefined);
     if (wanted.length === 0) return;
@@ -381,6 +387,8 @@ export class Population {
           lines: [...entry.memory.lines],
           addressed: [...entry.memory.addressed],
         },
+        ...(entry.note ? { note: entry.note } : {}),
+        ...(entry.pinned ? { pinned: true } : {}),
       };
       this.viewers.set(viewer.id, viewer);
       this.takenNames.add(viewer.name.toLowerCase());

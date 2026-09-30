@@ -33,6 +33,10 @@ const SavedViewerSchema = z.object({
       interests: z.array(z.string().max(60)).max(2),
     })
     .optional(),
+  /** Written by the streamer. Sent to the model as their character. */
+  note: z.string().max(200).optional(),
+  /** Edited by hand: kept exactly as-is, and never rotated out. */
+  pinned: z.boolean().optional(),
   memory: z.object({
     topics: z.array(z.string().max(24)).max(6),
     lines: z.array(z.string().max(80)).max(3),
@@ -62,12 +66,47 @@ export const localRosterStore = {
     }
   },
 
+  /**
+   * Writes the roster back, keeping hand-edited people as they were edited.
+   *
+   * A running session writes its roster every twenty seconds. Without this
+   * merge, editing someone in another tab mid-session would be silently
+   * undone by the next write — the session would put back the name, voice
+   * and character it started with. Memory and last-spoken always come from
+   * the session, which is the half it actually owns.
+   */
   save(roster: readonly SavedViewer[]): void {
+    if (typeof window === "undefined") return;
+    const edited = new Map(
+      this.load()
+        .filter((viewer) => viewer.pinned)
+        .map((viewer) => [viewer.id, viewer]),
+    );
+
+    const merged = roster.slice(0, 12).map((viewer) => {
+      const pinned = edited.get(viewer.id);
+      if (!pinned) return viewer;
+      return {
+        ...pinned,
+        memory: viewer.memory,
+        seenAt: viewer.seenAt,
+      };
+    });
+
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify(merged));
+    } catch {
+      // Quota or private mode. Regulars fall back to being session-only.
+    }
+  },
+
+  /** Writes exactly what it is given. Used by the editor itself. */
+  replace(roster: readonly SavedViewer[]): void {
     if (typeof window === "undefined") return;
     try {
       window.localStorage.setItem(KEY, JSON.stringify(roster.slice(0, 12)));
     } catch {
-      // Quota or private mode. Regulars fall back to being session-only.
+      // Nothing to do; the edit lives only in this page.
     }
   },
 

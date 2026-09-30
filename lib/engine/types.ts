@@ -111,6 +111,21 @@ export interface Viewer {
   /** How this person types. Fixed for as long as they exist. */
   voice: Voice;
   /**
+   * A character the streamer wrote by hand, passed to the model as-is.
+   *
+   * The measured trait ranges cannot invent "streams at 3am, always
+   * hungry, hates the roof build" — that is the one thing only the person
+   * running the stream knows about their own chat.
+   */
+  note?: string;
+  /**
+   * Edited by hand, so the engine leaves them alone.
+   *
+   * Pinned regulars are never rotated out when the roster resizes, and
+   * their identity survives a session writing its memory back.
+   */
+  pinned?: boolean;
+  /**
    * What this person is known for, shown to the model at the slow tiers.
    *
    * Deliberately tiny. It exists so a regular sounds like the same person
