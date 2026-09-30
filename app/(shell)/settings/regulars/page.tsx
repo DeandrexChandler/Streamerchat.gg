@@ -217,7 +217,13 @@ function Regular({
           className={`ml-auto ${viewer.pinned ? "text-purple-600 dark:text-purple-400" : "text-muted-foreground"}`}
           onClick={() => onChange({ pinned: !viewer.pinned })}
         >
-          {viewer.pinned ? <Pin className="size-4" /> : <PinOff className="size-4" />}
+          {/* Filled when kept: the state should read at a glance, not need
+              the outline-versus-crossed-out distinction to be noticed. */}
+          {viewer.pinned ? (
+            <Pin className="size-4 fill-current" />
+          ) : (
+            <PinOff className="size-4" />
+          )}
         </Button>
         <Button
           variant="ghost"
