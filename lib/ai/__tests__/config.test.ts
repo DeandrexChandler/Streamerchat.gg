@@ -65,3 +65,14 @@ describe("AI configuration", () => {
     expect(limiter.refusal(61_000)).toBeNull();
   });
 });
+
+describe("call caps", () => {
+  it("allows the loudest legitimate minute", () => {
+    // About five calls a minute normally, plus up to seven from screen
+    // capture at a fast tier and three from the hot word. The old ceiling
+    // of ten cut that off, and a refused call is silent to the streamer.
+    const config = loadAiConfig();
+    expect(config.maxCallsPerMinute).toBeGreaterThanOrEqual(15);
+    expect(config.maxCallsPerHour).toBeGreaterThanOrEqual(config.maxCallsPerMinute * 45);
+  });
+});

@@ -51,8 +51,18 @@ export function loadAiConfig(): AiConfig {
   return {
     apiKey: process.env[KEY_ENV] ?? "",
     model: MODEL,
-    maxCallsPerMinute: num("AI_MAX_CALLS_PER_MINUTE", 10),
-    maxCallsPerHour: num("AI_MAX_CALLS_PER_HOUR", 500),
+    /**
+     * Headroom for the loudest legitimate minute, not a second rate knob.
+     *
+     * Normal chat is about five calls a minute. A fast tier with screen
+     * capture on adds up to seven more, and the "screen" hot word three,
+     * which crossed the old ceiling of ten — and a refused call is silent
+     * by design, so the streamer saw chat stop for no visible reason. The
+     * hourly figure is the same sum sustained, with room for a long
+     * session. A runaway loop still stops.
+     */
+    maxCallsPerMinute: num("AI_MAX_CALLS_PER_MINUTE", 20),
+    maxCallsPerHour: num("AI_MAX_CALLS_PER_HOUR", 900),
     maxOutputTokens: num("AI_MAX_OUTPUT_TOKENS", 4_000),
     maxBatchSize: num("AI_MAX_BATCH_SIZE", 70),
   };
