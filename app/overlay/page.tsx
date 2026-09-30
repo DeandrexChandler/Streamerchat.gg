@@ -29,13 +29,20 @@ import type { ChatMessage, Emote } from "@/lib/engine/types";
 // no pack, so emote names render as plain text.
 const OVERLAY_EMOTES: readonly Emote[] = [];
 
+/** Lines the browser source keeps before the oldest scroll away. */
+const OVERLAY_MAX_MESSAGES = 50;
+
 function OverlayContent() {
   const params = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const key = params.get("key") ?? "";
   const fontSize = clampNumber(params.get("fontSize"), 14, 10, 48);
-  const maxMessages = clampNumber(params.get("max"), 50, 5, 300);
+  // Fixed, not a setting: the browser source is a strip of chat that scrolls,
+  // and how many lines it holds is a function of how tall the source is, not
+  // something worth a number field. This is only here so the DOM cannot grow
+  // without bound over a long stream.
+  const maxMessages = OVERLAY_MAX_MESSAGES;
   const showTimestamps = params.get("timestamps") === "true";
   const background = params.get("bg") ?? "transparent";
 
