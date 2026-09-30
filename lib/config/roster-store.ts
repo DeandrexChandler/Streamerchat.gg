@@ -35,8 +35,19 @@ const SavedViewerSchema = z.object({
     .optional(),
   /** Written by the streamer. Sent to the model as their character. */
   note: z.string().max(200).optional(),
-  /** Edited by hand: kept exactly as-is, and never rotated out. */
+  /** Kept in the room: never rotated out. The streamer's choice. */
   pinned: z.boolean().optional(),
+  /** Created by the streamer rather than generated. A label, nothing more. */
+  mine: z.boolean().optional(),
+  /**
+   * Touched by hand at all.
+   *
+   * What protects an edit from a running session, which writes its own
+   * copy of the room back every twenty seconds. Kept separate from
+   * `pinned` because pinning is now a choice anyone can make about anyone,
+   * including a generated regular nobody has edited.
+   */
+  edited: z.boolean().optional(),
   memory: z.object({
     topics: z.array(z.string().max(24)).max(6),
     lines: z.array(z.string().max(80)).max(3),
@@ -79,7 +90,9 @@ export const localRosterStore = {
     if (typeof window === "undefined") return;
     const edited = new Map(
       this.load()
-        .filter((viewer) => viewer.pinned)
+        // `pinned` alone counts for rosters saved before the two were
+        // separated, where pinning was the only mark an edit left.
+        .filter((viewer) => viewer.edited || viewer.pinned)
         .map((viewer) => [viewer.id, viewer]),
     );
 

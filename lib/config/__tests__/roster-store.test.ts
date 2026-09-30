@@ -50,7 +50,7 @@ describe("the roster store", () => {
      * worked at all.
      */
     localRosterStore.replace([
-      viewer({ name: "hazel_edited", note: "streams at 3am", pinned: true }),
+      viewer({ name: "hazel_edited", note: "streams at 3am", edited: true }),
     ]);
 
     localRosterStore.save([
@@ -94,5 +94,27 @@ describe("the roster store", () => {
     const first = makeRegular([], 7);
     const second = makeRegular([first], 7);
     expect(second.name).not.toBe(first.name);
+  });
+
+  it("protects a roster saved before pinning and editing were separate", () => {
+    // Older saves only ever set `pinned`, which then meant "edited".
+    localRosterStore.replace([viewer({ name: "from_an_old_build", pinned: true })]);
+    localRosterStore.save([viewer({ name: "engine_copy" })]);
+    expect(localRosterStore.load()[0].name).toBe("from_an_old_build");
+  });
+
+  it("still takes memory from the session for someone who is only pinned", () => {
+    // Pinning says "keep them", not "freeze them". Their identity is held
+    // (pinning is itself a change a session must not undo), but what they
+    // have been talking about is the session's to write.
+    localRosterStore.replace([viewer({ name: "kept", pinned: true, edited: false })]);
+    localRosterStore.save([viewer({ name: "kept", pinned: true, memory: { topics: ["roof"], lines: [], addressed: [] } })]);
+    expect(localRosterStore.load()[0].memory.topics).toEqual(["roof"]);
+  });
+
+  it("marks a regular the streamer added as theirs, and keeps them", () => {
+    const made = makeRegular([], 3);
+    expect(made.mine).toBe(true);
+    expect(made.pinned).toBe(true);
   });
 });

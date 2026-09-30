@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Pin, PinOff, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,6 +17,7 @@ import { useStoredSettings } from "@/lib/react/use-stored-settings";
 import { makeRegular } from "@/lib/config/make-regular";
 import { PERSONALITIES } from "@/lib/data/personalities";
 import { describeVoice } from "@/lib/data/voices";
+import { USERNAME_COLORS } from "@/lib/data/usernames";
 import { isConversational, rosterSizeFor } from "@/lib/engine/roster";
 import type { Voice } from "@/lib/engine/types";
 
@@ -62,10 +63,19 @@ export default function RegularsSettingsPage() {
     localRosterStore.replace(next);
   };
 
+  /**
+   * Any change marks the person as touched, which is what stops a running
+   * session writing its own copy back over the edit. Pinning is a separate
+   * choice the streamer makes, not something an edit decides for them —
+   * though editing someone you then lose to churn would be daft, so a
+   * first edit pins as well.
+   */
   const update = (id: string, patch: Partial<SavedViewer>) => {
     write(
       people.map((viewer) =>
-        viewer.id === id ? { ...viewer, ...patch, pinned: true } : viewer,
+        viewer.id === id
+          ? { ...viewer, ...patch, edited: true, pinned: patch.pinned ?? viewer.pinned ?? true }
+          : viewer,
       ),
     );
   };
@@ -83,8 +93,8 @@ export default function RegularsSettingsPage() {
             {conversational
               ? "At your current chat speed these people are written by name, in their own voice, and they remember your stream between sessions."
               : "At your current chat speed chat is a crowd, so names are not sent to the AI. These people still fill the room; drop to 0.5 or 0.2 messages a second to talk to them by name."}{" "}
-            Anyone you edit is kept exactly as you leave them. Changes apply
-            the next time you press Play.
+            Pinned people stay in the room; anyone else can be replaced as
+            the room changes. Changes apply the next time you press Play.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -97,7 +107,7 @@ export default function RegularsSettingsPage() {
             <>
               {people.length > inRoom && (
                 <p className="text-xs text-muted-foreground">
-                  Your speed has room for {inRoom}. Edited people are kept
+                  Your speed has room for {inRoom}. Pinned people are kept
                   first, then whoever spoke most recently.
                 </p>
               )}
@@ -185,20 +195,64 @@ function Regular({
             </option>
           ))}
         </select>
-        {viewer.pinned && (
+        {viewer.mine && (
           <Badge variant="secondary" className="shrink-0">
-            Yours
+            Made by you
           </Badge>
         )}
         <Button
           variant="ghost"
           size="sm"
+          aria-label={
+            viewer.pinned
+              ? `Let ${viewer.name} be replaced`
+              : `Keep ${viewer.name} in the room`
+          }
+          title={
+            viewer.pinned
+              ? "Kept in the room. Click to let them be replaced."
+              : "Can be replaced as the room changes. Click to keep them."
+          }
+          aria-pressed={viewer.pinned ?? false}
+          className={`ml-auto ${viewer.pinned ? "text-purple-600 dark:text-purple-400" : "text-muted-foreground"}`}
+          onClick={() => onChange({ pinned: !viewer.pinned })}
+        >
+          {/* Filled when kept: the state should read at a glance, not need
+              the outline-versus-crossed-out distinction to be noticed. */}
+          {viewer.pinned ? (
+            <Pin className="size-4 fill-current" />
+          ) : (
+            <PinOff className="size-4" />
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
           aria-label={`Delete ${viewer.name}`}
-          className="ml-auto text-muted-foreground"
+          className="text-muted-foreground"
           onClick={onDelete}
         >
           <Trash2 className="size-4" />
         </Button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="mr-1 text-[11px] text-muted-foreground">Colour</span>
+        {USERNAME_COLORS.map((colour) => (
+          <button
+            key={colour}
+            type="button"
+            aria-label={`Colour ${colour}`}
+            aria-pressed={viewer.color.toLowerCase() === colour.toLowerCase()}
+            onClick={() => onChange({ color: colour })}
+            style={{ backgroundColor: colour }}
+            className={`size-4 rounded-full transition-transform hover:scale-110 ${
+              viewer.color.toLowerCase() === colour.toLowerCase()
+                ? "ring-2 ring-foreground ring-offset-1 ring-offset-background"
+                : ""
+            }`}
+          />
+        ))}
       </div>
 
       <div>

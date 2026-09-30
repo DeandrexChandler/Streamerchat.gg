@@ -36,6 +36,8 @@ export function makeRegular(
     voice: buildVoice(rng, personality.id as PersonalityId, verbosity),
     memory: { topics: [], lines: [], addressed: [] },
     pinned: true,
+    mine: true,
+    edited: true,
     seenAt: 0,
   };
 }
