@@ -119,12 +119,14 @@ export interface Viewer {
    */
   note?: string;
   /**
-   * Edited by hand, so the engine leaves them alone.
+   * Kept in the room: never rotated out when the roster churns or resizes.
    *
-   * Pinned regulars are never rotated out when the roster resizes, and
-   * their identity survives a session writing its memory back.
+   * The streamer's choice, and available for anyone — a generated regular
+   * who turned out well is worth keeping without editing a thing.
    */
   pinned?: boolean;
+  /** Created by the streamer rather than generated. Only a label. */
+  mine?: boolean;
   /**
    * What this person is known for, shown to the model at the slow tiers.
    *

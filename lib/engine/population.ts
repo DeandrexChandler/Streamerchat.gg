@@ -339,6 +339,7 @@ export class Population {
       },
       ...(viewer.note ? { note: viewer.note } : {}),
       ...(viewer.pinned ? { pinned: true } : {}),
+      ...(viewer.mine ? { mine: true } : {}),
       memory: {
         topics: [...viewer.memory.topics],
         lines: [...viewer.memory.lines],
@@ -389,6 +390,7 @@ export class Population {
         },
         ...(entry.note ? { note: entry.note } : {}),
         ...(entry.pinned ? { pinned: true } : {}),
+        ...(entry.mine ? { mine: true } : {}),
       };
       this.viewers.set(viewer.id, viewer);
       this.takenNames.add(viewer.name.toLowerCase());
