@@ -183,9 +183,13 @@ prompt is worth its input tokens at each tier.
 
 ---
 
-## 13. Screen-share privacy warning
+## 13. Screen-share privacy warning — done
 
-Recorded in `docs/roadmap.md` (Phase 3). Listed here so it's not lost.
+While capture is on, the control panel says it plainly: screenshots go to
+Google, share the game window rather than the whole screen, keep messages
+and email out of it. Only while it is actually happening — a hover hint on
+a toggle is not a warning anyone reads. The toggle's own hint now names
+Google too.
 
 ---
 
