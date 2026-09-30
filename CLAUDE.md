@@ -69,6 +69,11 @@ Consequences that must stay true:
 - **One provider, one model, fixed.** Gemini `gemini-3.5-flash-lite` via
   `GOOGLE_API_KEY`. No selection anywhere. If Gemini is down or the key is
   out of credit, the answer is to add credit — never another provider.
+- **"screen" points chat at the picture.** Said or typed, the bare word
+  sends a frame with a small batch and tells the model the streamer is
+  pointing at it. Twenty second cooldown, because each use is a call with
+  an image; the transcript panel shows the word blue when it fired and grey
+  with the remaining seconds when it did not.
 - **A hot line lifts the pace, briefly.** A directive, excitement, a
   question to chat or anything with a sentiment gives the room eight seconds
   at a higher rate, decaying back, at most once every twenty seconds

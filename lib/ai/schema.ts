@@ -73,7 +73,7 @@ export const CandidateRequestSchema = z
      * body limit: the client downscales to 384px, which lands around 20KB.
      */
     frame: z.string().max(300_000).optional(),
-    screen: z.boolean().optional(),
+    screen: z.enum(["changed", "asked"]).optional(),
     /**
      * The room, at the slow tiers. Capped: twelve regulars is the largest
      * roster the engine builds, and a short profile each is all the model
@@ -96,6 +96,6 @@ export const CandidateRequestSchema = z
   .refine(
     // A screen batch may come before the streamer has said anything: the
     // game is what is being reacted to.
-    (request) => request.phase !== "active" || request.screen === true || request.utterance.trim().length > 0,
+    (request) => request.phase !== "active" || request.screen !== undefined || request.utterance.trim().length > 0,
     { message: "an active batch needs something the streamer said", path: ["utterance"] },
   );

@@ -144,21 +144,33 @@ more frequent.
 
 ---
 
-## 11. Hot word "screen" forces a screenshot (general setting, all speeds)
+## 11. Hot word "screen" forces a screenshot — done
 
-**Seen / wanted:** saying/ typing a hot word like "screen" should send a screenshot
-to chat right away, for an immediate reaction to what the streamer is
-looking at.
+Saying or typing the bare word "screen" sends a frame and pulls a small
+batch to the front, the same path a big on-screen change uses, with its own
+prompt: the model is told the streamer is pointing at the screen rather
+than that something moved.
 
-**Now:** a screenshot goes out only with batches, and a screen batch fires
-only when the picture changes a lot (`SCREEN_EVENT_THRESHOLD` in
-`lib/react/use-simulator.ts`, `screenEvent` in the engine). Nothing in
-speech triggers it.
+Decided with the owner:
+- **Bare "screen" only.** "screenshot" and "screens" are ordinary words.
+- **Twenty second cooldown** (`SCREEN_WORD_COOLDOWN_MS`). Each use is one
+  extra call carrying an image; twenty seconds caps a spammed word at three
+  extra calls a minute. It also counts as a motion trigger, so the watcher
+  cannot spend a second call on the same picture.
+- **During the cooldown the word is ignored**, not queued: chat reacting to
+  a screen that has moved on is worse than not reacting.
+- **Capture off says so** rather than asking about an image that will not
+  exist. Turning capture on needs a click; browsers will not let speech
+  start a screen share.
 
-**Shape of the fix:** the classifier spots the hot word and the engine
-treats it as a screen event with the streamer's words attached, skipping
-the cooldown. Needs capture on. If capture is off, it could ask to turn it
-on. The hot word list should probably be a setting.
+The transcript panel is where the cooldown lives, since a limit nobody can
+see is indistinguishable from the feature being broken: the word is blue
+when it fired ("chat is looking — ready again in 16s"), grey when it did
+not ("too soon — ready in 16s", or "screen capture is off"). The clock
+ticks once a second and stops itself when nothing is counting down.
+
+It also fires on a line the attention gate would otherwise ignore: "screen"
+is an instruction, not chatter.
 
 ---
 

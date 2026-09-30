@@ -112,7 +112,7 @@ describe("screen events", () => {
     }
     engine.screenEvent(20_000);
     const request = engine.nextGeneration(20_000);
-    expect(request?.screen).toBe(true);
+    expect(request?.screen).toBe("changed");
   });
 
   it("asks for a small batch that goes to the front of the queue", () => {
@@ -125,7 +125,7 @@ describe("screen events", () => {
 
     engine.screenEvent(1_000);
     const request = engine.nextGeneration(1_000);
-    expect(request?.screen).toBe(true);
+    expect(request?.screen).toBe("changed");
     expect(request!.count).toBeLessThanOrEqual(12);
 
     engine.supplyReactions(
@@ -149,7 +149,7 @@ describe("screen events", () => {
 
     engine.screenEvent(2_000);
     const screen = engine.nextGeneration(2_000);
-    expect(screen?.screen).toBe(true);
+    expect(screen?.screen).toBe("changed");
     expect(engine.generationTicket).not.toBe(staleTicket);
 
     // The abandoned refill landing late changes nothing.
@@ -248,5 +248,88 @@ describe("event composition", () => {
       expect(profile.emoteShare).toBeLessThanOrEqual(0.5);
       expect(profile.rate).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * "screen", said or typed.
+ *
+ * The streamer pointing chat at the picture, rather than the picture
+ * moving on its own. Each one costs a call carrying an image, so the
+ * cooldown and what the streamer is told about it are part of the feature,
+ * not decoration.
+ */
+describe("the screen hot word", () => {
+  const ready = (rate = 1) => {
+    const engine = started(rate);
+    engine.setCapturing(true);
+    return engine;
+  };
+
+  it("points chat at the screen when the streamer says it", () => {
+    const engine = ready();
+    const outcome = engine.handleTranscript("chat look at my screen", 1_000, undefined, true);
+    expect(outcome?.screen?.state).toBe("fired");
+    expect(engine.nextGeneration(1_000)?.screen).toBe("asked");
+  });
+
+  it("works the same typed", () => {
+    const engine = ready();
+    const outcome = engine.handleTranscript("screen", 1_000, undefined, true);
+    expect(outcome?.screen?.state).toBe("fired");
+  });
+
+  it("fires even when the attention gate would ignore the line", () => {
+    // "screen" is an instruction, not chatter: a line that reads as bland
+    // still points chat at the picture.
+    const engine = ready();
+    let fired = 0;
+    for (let i = 0; i < 6; i += 1) {
+      const at = i * 30_000;
+      const outcome = engine.handleTranscript("look at the screen", at);
+      if (outcome?.screen?.state === "fired") fired += 1;
+    }
+    expect(fired).toBe(6);
+  });
+
+  it("refuses a second one inside the cooldown, and says how long is left", () => {
+    const engine = ready();
+    engine.handleTranscript("screen", 0, undefined, true);
+    const again = engine.handleTranscript("screen again", 5_000, undefined, true);
+    expect(again?.screen?.state).toBe("cooldown");
+    expect(again?.screen?.readyInMs).toBe(15_000);
+  });
+
+  it("works again once the cooldown has passed", () => {
+    const engine = ready();
+    engine.handleTranscript("screen", 0, undefined, true);
+    expect(engine.handleTranscript("screen", 20_000, undefined, true)?.screen?.state).toBe("fired");
+  });
+
+  it("says so when capture is off instead of asking about an image that will not exist", () => {
+    const engine = started();
+    const outcome = engine.handleTranscript("look at my screen", 1_000, undefined, true);
+    expect(outcome?.screen?.state).toBe("off");
+    // And no screen batch: there is no frame to send.
+    expect(engine.nextGeneration(1_000)?.screen).toBeUndefined();
+  });
+
+  it("leaves ordinary words alone", () => {
+    const engine = ready();
+    for (const line of ["i took a screenshot", "my screens are too bright", "scream"]) {
+      expect(engine.handleTranscript(line, 0, undefined, true)?.screen).toBeUndefined();
+    }
+  });
+
+  it("does not let the motion watcher fire a second batch for the same moment", () => {
+    // The word already spent a call on this picture; a frame that also
+    // moved must not spend another one two seconds later.
+    const engine = ready();
+    engine.handleTranscript("screen", 1_000, undefined, true);
+    engine.nextGeneration(1_000);
+    engine.supplyReactions([{ text: "oh that is grim" }], 2_000, engine.generationTicket!);
+
+    engine.screenEvent(3_000);
+    expect(engine.nextGeneration(3_000)?.screen).toBeUndefined();
   });
 });

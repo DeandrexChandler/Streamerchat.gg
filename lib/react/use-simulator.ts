@@ -211,6 +211,7 @@ export function useSimulator(): UseSimulatorResult {
 
   const ensureEngine = useCallback((): SimulationEngine => {
     if (!engineRef.current) {
+      // Capture may already be running when the engine is (re)built.
       engineRef.current = new SimulationEngine({
         settings: settingsRef.current,
         emotes: emotesRef.current,
@@ -218,6 +219,7 @@ export function useSimulator(): UseSimulatorResult {
         roster: localRosterStore.load(),
       });
     }
+    engineRef.current.setCapturing(screenRef.current?.active ?? false);
     return engineRef.current;
   }, []);
 
@@ -456,6 +458,7 @@ export function useSimulator(): UseSimulatorResult {
     if (!on) {
       screenRef.current?.stop();
       screenRef.current = null;
+      engineRef.current?.setCapturing(false);
       setWatching(false);
       return;
     }
@@ -466,6 +469,7 @@ export function useSimulator(): UseSimulatorResult {
     // off too, or the UI claims to be watching a screen that is gone.
     const ok = await capture.start(() => {
       screenRef.current = null;
+      engineRef.current?.setCapturing(false);
       setWatching(false);
     });
     if (!ok) {
@@ -473,6 +477,7 @@ export function useSimulator(): UseSimulatorResult {
       return;
     }
     screenRef.current = capture;
+    engineRef.current?.setCapturing(true);
     setWatching(true);
   }, []);
 

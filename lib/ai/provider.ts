@@ -77,10 +77,14 @@ export interface CandidateRequest {
    */
   frame?: string;
   /**
-   * Pulled forward because the screen just changed. The prompt leads with
-   * the image instead of the last thing said. Only meaningful with a frame.
+   * Pulled forward to look at the screen, and why.
+   *
+   * "changed" is the picture moving on its own; "asked" is the streamer
+   * saying the word. The prompt leads with the image either way, but being
+   * told to look is a different moment from noticing something. Only
+   * meaningful with a frame.
    */
-  screen?: boolean;
+  screen?: ScreenReason;
   /**
    * Who is in the room, at the slow tiers only.
    *
@@ -93,6 +97,8 @@ export interface CandidateRequest {
   /** The regular the streamer just addressed by name, if any. */
   addressed?: string;
 }
+
+export type ScreenReason = "changed" | "asked";
 
 /** One regular, as the model is told about them. */
 export interface RosterEntry {
