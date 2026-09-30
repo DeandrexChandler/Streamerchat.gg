@@ -35,11 +35,8 @@ UI and dashboard redesign. Better settings information architecture. OBS
 validation and polish. Custom viewers (up to ten, same shape as generated
 ones). Saved session settings.
 
-Screen-share privacy warning: when "Watch my screen" is turned on, say
-plainly that frames of the shared window go to Google, and to avoid sharing
-anything sensitive (passwords, DMs, email, banking, personal info). Suggest
-sharing the game window rather than the whole screen. Today the only notice
-is the toggle's hover hint.
+(Done early, out of phase: the screen-share privacy warning now sits in the
+control panel while capture is on.)
 
 ## Phase 4 — Hosted product
 

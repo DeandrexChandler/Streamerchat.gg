@@ -1,6 +1,6 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { AlertTriangle, Trash2 } from "lucide-react";
 import { MuteButton } from "./MuteButton";
 import { MicMeter } from "@/app/components/MicMeter";
 import type { SimulationSettings } from "@/lib/config/settings";
@@ -143,9 +143,27 @@ export function ControlPanel({
         <Toggle
           label="Watch my screen"
           checked={watching}
-          hint="Chat reacts to the game, not just what you say. Sends a small screenshot with each batch to the AI. Off by default."
+          hint="Chat reacts to the game, not just what you say. Screenshots of the window you pick are sent to Google's AI. Off by default."
           onChange={onWatchingChange}
         />
+        {watching && (
+          /**
+           * Said plainly, and only while it is actually happening.
+           *
+           * Pictures of the shared window leave the machine and go to
+           * Google. That is worth one sentence on screen rather than a
+           * hover hint nobody reads, and the useful half of the advice is
+           * which window to share, not a warning to be careful.
+           */
+          <p className="flex gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-snug text-amber-800 dark:text-amber-200">
+            <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden />
+            <span>
+              Screenshots go to Google. Share the game window, not your whole
+              screen, and keep messages, email and anything with your details
+              out of it.
+            </span>
+          </p>
+        )}
         <Toggle
           label="Emote only"
           checked={settings.emoteOnlyMode}
