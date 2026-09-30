@@ -40,14 +40,13 @@ import { loadOverlayKey } from "@/lib/config/overlay-key";
  * this overlay, or push text onto the stream.
  */
 
-const DEFAULTS = { fontSize: 16, maxMessages: 50, timestamps: false };
+const DEFAULTS = { fontSize: 16, timestamps: false };
 
 /** Polling cadence for the "is a source attached" indicator. */
 const STATUS_POLL_MS = 3_000;
 
 export default function ObsPage() {
   const [fontSize, setFontSize] = useState(DEFAULTS.fontSize);
-  const [maxMessages, setMaxMessages] = useState(DEFAULTS.maxMessages);
   const [timestamps, setTimestamps] = useState(DEFAULTS.timestamps);
   const [copied, setCopied] = useState(false);
   const [overlayKey, setOverlayKey] = useState("");
@@ -64,11 +63,10 @@ export default function ObsPage() {
     const params = new URLSearchParams({
       key: overlayKey,
       fontSize: String(fontSize),
-      max: String(maxMessages),
       timestamps: String(timestamps),
     });
     return `${origin}/overlay?${params}`;
-  }, [overlayKey, fontSize, maxMessages, timestamps]);
+  }, [overlayKey, fontSize, timestamps]);
 
   // Answers the only question that actually matters on this page: did OBS
   // connect? Polling beats pushing here — the page is open for a minute while
@@ -192,26 +190,6 @@ export default function ObsPage() {
               />
             </Field>
 
-            <Separator />
-
-            <Field
-              id="max-messages"
-              label="Messages kept on screen"
-              hint="Older messages scroll away once this many are showing."
-            >
-              <Input
-                id="max-messages"
-                type="number"
-                min={5}
-                max={300}
-                value={maxMessages}
-                onChange={(e) =>
-                  setMaxMessages(
-                    clamp(Number(e.target.value), 5, 300, DEFAULTS.maxMessages),
-                  )
-                }
-              />
-            </Field>
 
             <Separator />
 

@@ -211,23 +211,14 @@ Customisation is still to come: `/settings/regulars` is read-only, with a
 
 ---
 
-## 15. Remove the "messages kept on screen" setting
+## 15. Remove the "messages kept on screen" setting — done
 
-**Owner's note:** cut it.
-
-**Now:** it lives on the **OBS** settings page, not Appearance —
-`app/(shell)/settings/obs/page.tsx` around line 199, "Messages kept on
-screen", 5 to 300. Appearance is still an empty placeholder, so this is
-almost certainly the control meant; confirm before cutting. It writes
-`maxMessages` for the overlay. The simulator has its own buffer,
-`messageBufferSize` in `lib/config/settings.ts` (50–500, default 150),
-scaled by chat speed in `lib/react/use-simulator.ts` and capped by
-`MAX_RENDERED`.
-
-**Shape of the fix:** delete the field and let the overlay use the default,
-or derive it from chat speed the way the simulator already does. Check
-whether `maxMessages` is read anywhere else in the overlay before removing
-the stored value.
+Gone from the OBS settings page (it was there, not under Appearance, which
+is still an empty placeholder) and out of the browser-source URL. The
+overlay keeps a fixed 50 lines, which exists only so the DOM cannot grow
+over a long stream — how much chat is visible is a function of how tall the
+OBS source is. A `max=` left in a URL already pasted into OBS is ignored
+rather than breaking.
 
 ---
 
