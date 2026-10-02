@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { AlertTriangle } from "lucide-react";
+
 import type { SimulationSettings } from "@/lib/config/settings";
 import { useStoredSettings } from "@/lib/react/use-stored-settings";
 import {
@@ -27,6 +30,8 @@ export default function ChatSettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 pb-10">
+      <KeyStatus />
+
       <Card>
         <CardHeader>
           <CardTitle>Your stream</CardTitle>
@@ -194,3 +199,61 @@ function toList(raw: string): string[] {
     .map((word) => word.trim())
     .filter(Boolean);
 }
+
+/**
+ * Whether chat can actually reach the AI.
+ *
+ * Setup only. Mid-stream a failed batch is silent on purpose — the streamer
+ * is live and cannot act on it — but on the first run "nothing has been
+ * said yet" and "this was never going to work" look identical, and one of
+ * them is fixable in thirty seconds. Checked when this page opens, never on
+ * the simulator.
+ */
+function KeyStatus() {
+  const [state, setState] = useState<"checking" | "ok" | "missing" | "rejected" | "unreachable">(
+    "checking",
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/ai-status", { cache: "no-store" });
+        const body = (await response.json()) as { state?: string };
+        if (!cancelled) setState((body.state as typeof state) ?? "unreachable");
+      } catch {
+        if (!cancelled) setState("unreachable");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (state === "checking" || state === "ok") {
+    return (
+      <p className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span
+          className={`size-1.5 rounded-full ${state === "ok" ? "bg-emerald-500" : "bg-gray-400"}`}
+          aria-hidden
+        />
+        {state === "ok" ? "Chat can reach the AI." : "Checking the AI connection…"}
+      </p>
+    );
+  }
+
+  const message =
+    state === "missing"
+      ? "No API key found. Chat will run but nobody will say anything — put GOOGLE_API_KEY in .env.local and restart."
+      : state === "rejected"
+        ? "The API key was rejected. Check the key and that it has access, then restart."
+        : "Could not reach the AI just now. If chat is quiet, this is why; it may be temporary.";
+
+  return (
+    <p className="flex items-start gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+      <span>{message}</span>
+    </p>
+  );
+}
+
