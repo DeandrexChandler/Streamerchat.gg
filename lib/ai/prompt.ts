@@ -1,5 +1,6 @@
 import type { CandidateRequest, IdleStage } from "./provider";
 import { GAME_EVENTS } from "./moment";
+import { EMOTE_TAGS } from "../engine/types";
 
 /**
  * Builds the generation prompt.
@@ -147,6 +148,7 @@ export function buildPrompt(request: CandidateRequest): string {
     '    "emotion": one of hype | funny | sad | confused | love | chill,',
     '    "kind": one of answer | reaction | question | opinion | joke | callback | emote,',
     '    "emote": optional — one name from the emotes list to attach to this line, only if its feeling fits,',
+    `    "emoteIntent": optional — what the line wants from an emote, one of ${EMOTE_TAGS.join(" | ")}. Say this whenever an emote would fit, even when you also name one: it is what lets a pack without that exact emote still answer with the right kind.`,
     '    "eagerness": number 0-1, where 1 is a reflexive one-word reply and 0 is someone who took a while to type }',
     "No other text.",
   );

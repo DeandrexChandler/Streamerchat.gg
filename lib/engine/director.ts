@@ -9,12 +9,21 @@ import type { Rng } from "./rng";
 import type { MomentumBand, Topic, TopicStage } from "./topics";
 import type {
   Emote,
+  EmoteTag,
   Intent,
   MessageKind,
   MessageSource,
   PendingMessage,
   Viewer,
 } from "./types";
+
+/** What else is known about the moment, for emote choice. */
+interface EmoteContext {
+  /** The token chat was told to post, when this is a directive. */
+  directive?: string;
+  /** What the screen is doing, when capture is on. */
+  event?: GameEvent;
+}
 
 /**
  * The director turns one generated line into one chat message.
@@ -109,12 +118,15 @@ function emoteReply(
   moment: EmoteMoment,
   reaction: QueuedReaction,
   rng: Rng,
+  context: EmoteContext = {},
 ): string | null {
   const emote = pickSemanticEmote({
     emotes,
     intent: moment,
     emotion: reaction.emotion,
     preferred: reaction.emote,
+    emoteIntent: reaction.emoteIntent as EmoteTag | undefined,
+    ...context,
     rng,
   });
   if (!emote) return null;
@@ -128,7 +140,14 @@ function emoteReply(
   // A second, independently chosen emote. When the pack only owns one emote
   // for this moment it comes back the same, and a bare single is the better
   // line than the same token twice.
-  const second = pickSemanticEmote({ emotes, intent: moment, emotion: reaction.emotion, rng });
+  const second = pickSemanticEmote({
+    emotes,
+    intent: moment,
+    emotion: reaction.emotion,
+    emoteIntent: reaction.emoteIntent as EmoteTag | undefined,
+    ...context,
+    rng,
+  });
   return second && second.name !== emote.name
     ? `${emote.name} ${second.name}`
     : emote.name;
@@ -150,10 +169,11 @@ function complyWithDirective(
   emotes: readonly Emote[],
   reaction: QueuedReaction,
   rng: Rng,
+  context: EmoteContext = {},
 ): string | null {
   if (!target) {
     // "let me hear it" — no token to post, so the room just gets loud.
-    return emoteReply(emotes, "directive", reaction, rng);
+    return emoteReply(emotes, "directive", reaction, rng, context);
   }
 
   // Repeat count tracks how emote-happy the viewer is, so the same
@@ -213,6 +233,17 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
 
   const intent: Intent = reaction.intent ?? topic?.intent ?? "mundane";
   const moment: EmoteMoment = phase === "idle" ? "idle" : intent;
+  /**
+   * What else the moment is, for emote choice.
+   *
+   * The token chat was told to post and what is on screen both say more
+   * about which emote fits than the intent alone: "spam W" wants agreement
+   * and victory emotes, a death wants grief or a laugh.
+   */
+  const context: EmoteContext = {
+    ...(topic?.directiveTarget ? { directive: topic.directiveTarget } : {}),
+    ...(options.event ? { event: options.event } : {}),
+  };
 
   let text: string | null = null;
   let source: MessageSource = "ai";
@@ -231,6 +262,8 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
       intent: moment,
       emotion: reaction.emotion,
       preferred: reaction.emote,
+      emoteIntent: reaction.emoteIntent as EmoteTag | undefined,
+      ...context,
       rng,
     });
     if (!emote) return null;
@@ -251,7 +284,14 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
     topic?.intent === "directive" &&
     rng.chance(stage === "reacting" ? 0.6 : stage === "developing" ? 0.45 : 0.1)
   ) {
-    const complied = complyWithDirective(topic.directiveTarget, speaker, emotes, reaction, rng);
+    const complied = complyWithDirective(
+      topic.directiveTarget,
+      speaker,
+      emotes,
+      reaction,
+      rng,
+      context,
+    );
     if (complied) {
       text = complied;
       source = "directive";
@@ -297,8 +337,8 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
     // Same rule as the trailer below: only when the model said how the line
     // feels, so the emote chosen has something to match.
     const only =
-      forward > 0 && (reaction.emotion || reaction.emote) && rng.chance(forward)
-        ? emoteReply(emotes, moment, reaction, rng)
+      forward > 0 && (reaction.emotion || reaction.emote || reaction.emoteIntent) && rng.chance(forward)
+        ? emoteReply(emotes, moment, reaction, rng, context)
         : null;
 
     if (only) {
@@ -306,7 +346,8 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
       source = "emote";
     } else if (
       !isEmoteOnly(text, emotes) &&
-      (reaction.emote || (reaction.emotion && rng.chance(EMOTE_TRAILER)))
+      (reaction.emote ||
+        ((reaction.emotion || reaction.emoteIntent) && rng.chance(EMOTE_TRAILER)))
     ) {
       /**
        * Emotes chosen from the reaction's own emotion, not at random.
@@ -321,6 +362,8 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
         intent: moment,
         emotion: reaction.emotion,
         preferred: reaction.emote,
+        emoteIntent: reaction.emoteIntent as EmoteTag | undefined,
+        ...context,
         rng,
       });
       if (emote && !text.includes(emote.name)) text = `${text} ${emote.name}`;

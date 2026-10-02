@@ -91,6 +91,14 @@ Consequences that must stay true:
   and what the streamer said to them, per person, saved to browser storage
   (`lib/config/roster-store.ts`) and shown to the model at the slow tiers.
   Kept deliberately small: it rides in every prompt.
+- **An emote is posted because it fits, never because it exists.** One
+  vocabulary (`EMOTE_TAGS`) is shared by the streamer's hand tags, the
+  automatic reading of a name (`lib/emotes/meaning.ts`) and the model's
+  `emoteIntent`. Selection is layered: hand tags, the emote the model named,
+  what chat was told to post and what is on screen, the model's stated
+  feeling, the intent, mood, then nothing. An emote nobody tagged and whose
+  name means nothing is never posted — text with no emote is the better
+  answer. See `lib/emotes/semantic.ts`.
 - **Every regular types differently.** Line length, caps, punctuation,
   questions, stretched words and two things they bring up — sampled once per
   person from ranges measured off real chats (`lib/data/voices.ts`, from
