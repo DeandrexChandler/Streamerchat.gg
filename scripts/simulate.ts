@@ -50,8 +50,19 @@ const SCRIPT: Array<[number, string, number]> = [
 // Pick the first bare-number argument so the flags below can share argv.
 const SEED =
   Number(process.argv.slice(2).find((a) => /^\d+$/.test(a))) || 20260825;
-const DURATION_S = 300;
+/**
+ * Five minutes by default, an hour when asked.
+ *
+ * `SIM_SECONDS=3600 npm run simulate` is the soak: a long session is where
+ * pacing drift, a queue that never recovers and anything that grows without
+ * bound show up, and none of those are visible in five minutes. The script
+ * repeats so the room is not simply left in idle for fifty-five of them.
+ */
+const DURATION_S = Number(process.env.SIM_SECONDS ?? 300);
+const SCRIPT_PERIOD_S = 300;
 const STEP_MS = 250;
+/** Quiet the line-by-line log for long runs; the report is the point. */
+const QUIET = DURATION_S > 900 && process.env.SIM_VERBOSE !== "1";
 
 const CACHE = ".emote-harness-cache.json";
 
@@ -159,19 +170,35 @@ const BOLD = "\x1b[1m";
 console.log(`${BOLD}=== headless simulation (seed ${SEED}) ===${RESET}\n`);
 
 let scriptIndex = 0;
+let cycleStart = 0;
+/** Utterances actually fed in — the script repeats, so its length is not it. */
+let spoken = 0;
 const gaps: number[] = [];
 let lastMessageAt: number | null = null;
 const emitted: string[] = [];
+/** Messages and heap per ten minutes, so drift has somewhere to show. */
+const slices: Array<{ minute: number; messages: number; heapMb: number; mash: number; roster: number; queued: number; pending: number; kept: number }> = [];
+let sliceMessages = 0;
+let sliceIndex = 0;
+const SLICE_MS = 600_000;
 
 for (let now = 0; now <= DURATION_S * 1000; now += STEP_MS) {
+  // The script repeats on a five minute loop, so a long run is a long
+  // session rather than three minutes of talking and an hour of silence.
+  if (scriptIndex >= SCRIPT.length && now >= cycleStart + SCRIPT_PERIOD_S * 1000) {
+    cycleStart += SCRIPT_PERIOD_S * 1000;
+    scriptIndex = 0;
+  }
+
   while (
     scriptIndex < SCRIPT.length &&
-    SCRIPT[scriptIndex][0] * 1000 <= now
+    cycleStart + SCRIPT[scriptIndex][0] * 1000 <= now
   ) {
     const [, text, energy] = SCRIPT[scriptIndex++];
+    spoken += 1;
     const outcome = engine.handleTranscript(text, now, energy);
     const c = outcome?.classification;
-    console.log(
+    if (!QUIET) console.log(
       `\n${DIM}${clock(now)}${RESET} ${BOLD}STREAMER:${RESET} ${text}` +
         `\n${DIM}          -> ${c?.intent} / ${c?.sentiment} ` +
         `| energy ${c?.energy.toFixed(2)} ` +
@@ -188,10 +215,31 @@ for (let now = 0; now <= DURATION_S * 1000; now += STEP_MS) {
     emitted.push(message.text);
     if (lastMessageAt !== null) gaps.push(now - lastMessageAt);
     lastMessageAt = now;
+    sliceMessages += 1;
     const tag = message.kind === "idle" ? `${DIM}(idle)${RESET} ` : "";
-    console.log(
-      `${DIM}${clock(now)}${RESET} ${tag}${message.username}: ${message.text}`,
-    );
+    if (!QUIET) {
+      console.log(
+        `${DIM}${clock(now)}${RESET} ${tag}${message.username}: ${message.text}`,
+      );
+    }
+  }
+
+  if (now >= (sliceIndex + 1) * SLICE_MS) {
+    sliceIndex += 1;
+    const live = engine.exportRoster();
+    slices.push({
+      minute: Math.round(now / 60_000),
+      messages: sliceMessages,
+      heapMb: process.memoryUsage().heapUsed / 1_048_576,
+      mash: live.filter((v) => v.nameWords.length === 0).length,
+      roster: live.length,
+      // Engine-side depth, so heap growth can be attributed: the harness
+      // itself keeps every line ever emitted, the product does not.
+      queued: engine.stats().queued,
+      pending: engine.stats().pending,
+      kept: emitted.length,
+    });
+    sliceMessages = 0;
   }
 }
 
@@ -248,8 +296,41 @@ for (const [label, n] of Object.entries(lengths)) {
     `  ${label.padEnd(13)} ${String(n).padStart(3)}  ${"#".repeat(Math.round(pct / 2))} ${pct.toFixed(0)}%`,
   );
 }
-console.log(`ignored:        ${stats.ignored} of ${SCRIPT.length} utterances skipped by the attention gate`);
+console.log(`ignored:        ${stats.ignored} of ${spoken} utterances skipped by the attention gate`);
 console.log(`still queued:   ${stats.pending}`);
+
+if (slices.length > 1) {
+  /**
+   * The soak report.
+   *
+   * A five minute run says whether the loop is alive. Only a long one says
+   * whether it stays alive: whether the rate drifts, whether the queue
+   * recovers, and whether anything grows that should not.
+   */
+  console.log("\nover time (per ten minutes):");
+  for (const slice of slices) {
+    const perMinute = slice.messages / (SLICE_MS / 60_000);
+    console.log(
+      `  to ${String(slice.minute).padStart(3)}min  ${perMinute.toFixed(1).padStart(6)} msg/min  ` +
+        `heap ${slice.heapMb.toFixed(1).padStart(5)}MB  ` +
+        `gibberish ${slice.mash}/${slice.roster}  ` +
+        `engine queue ${slice.queued}+${slice.pending}  harness holds ${slice.kept}`,
+    );
+  }
+  const first = slices[0];
+  const last = slices[slices.length - 1];
+  const drift = (last.messages - first.messages) / Math.max(1, first.messages);
+  console.log(
+    `  drift ${(100 * drift).toFixed(1)}% from the first ten minutes to the last; ` +
+      `heap ${first.heapMb.toFixed(1)}MB -> ${last.heapMb.toFixed(1)}MB`,
+  );
+  // A name with no vocabulary behind it is a keyboard-mash or numeric
+  // fallback — the shape a long session used to fill the room with.
+  const roster = engine.exportRoster();
+  const mash = roster.filter((v) => v.nameWords.length === 0);
+  console.log(`  roster now: ${roster.map((v) => v.name).join(", ")}`);
+  console.log(`  no-vocabulary names: ${mash.length}/${roster.length}${mash.length ? ` (${mash.map((v) => v.name).join(", ")})` : ""}`);
+}
 }
 
 void main();

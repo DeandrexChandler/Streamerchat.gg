@@ -289,3 +289,35 @@ nine hundred an hour.
 Settings now checks the key when the page is opened. Never on the
 simulator, never mid-stream.
 
+## 20. A long session filled the room with gibberish names — done
+
+**Found by the soak**, not by a person: an hour at CHAOS ended with a
+roster of `wizngq, whmihs, zwgag, wwqqg, supu, qdwai, ndkj, jtna`.
+
+**Cause:** the keyboard-mash style consumes no vocabulary, so it is the one
+style that still passes the "fresh words" pass once the word lists empty —
+and they empty fast, because thousands of strangers an hour each took a
+word or two and never gave them back.
+
+**Now:** each cohort holds at most about 15% mash names
+(`MASH_NAME_SHARE`), churn clears the excess when the room shrinks around
+them, and a stranger scrolling off the ring returns their vocabulary. Their
+*name* stays taken, same as a departed regular — one handle is one person.
+
+Measured after 4,000 strangers: 7/12 regulars gibberish before, 2/12 after,
+and an hour at CHAOS now holds at 1/8.
+
+## Soak test — one hour per tier, mock provider
+
+| tier | rate | drift over the hour | dropped | dry ticks | AI calls |
+|---|---|---|---|---|---|
+| 0.2/sec | 18.5 msg/min | -5.1% | 0 | 0.2% | 3.3/min |
+| 1/sec | 77.2 msg/min | +5.9% | 0 | 0.1% | 3.6/min |
+| 4/sec | 295.5 msg/min | -1.4% | 0 | 0.4% | 6.3/min |
+
+The engine's queue stays between 18 and 69 lines all hour at CHAOS while
+the harness's own log of every line grows to 17,730 — so the heap growth in
+a long run is the harness, not the product. `SIM_SECONDS=3600 npm run
+simulate` runs it; the script repeats on a five minute loop so an hour is a
+session rather than three minutes of talking and fifty-seven of silence.
+
