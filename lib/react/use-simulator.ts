@@ -200,6 +200,7 @@ export function useSimulator(): UseSimulatorResult {
     // comes from localStorage and this is the first point at which it can be
     // read without desyncing server and client markup.
     overlayRef.current = new OverlayTransport({ key: loadOverlayKey() });
+    overlayRef.current.setEmotes(emotesRef.current);
   }, []);
 
   const subscribeLevel = useCallback((handler: (level: number) => void) => {

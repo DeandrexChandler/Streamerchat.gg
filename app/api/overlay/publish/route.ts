@@ -56,9 +56,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   }
 
-  const { key, messages, clear } = parsed.data;
+  const { key, messages, clear, emotes } = parsed.data;
   const hub = overlayHub();
 
+  if (emotes) {
+    hub.publish(key, { event: "emotes", data: JSON.stringify({ emotes }) });
+  }
   if (clear) {
     hub.publish(key, { event: "clear", data: "{}" });
   }

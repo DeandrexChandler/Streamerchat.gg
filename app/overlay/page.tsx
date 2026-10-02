@@ -25,9 +25,15 @@ import type { ChatMessage, Emote } from "@/lib/engine/types";
  * dumping a minute of stale reactions onto the stream.
  */
 
-// Emotes reach the browser source in the appearance spec; until then it has
-// no pack, so emote names render as plain text.
-const OVERLAY_EMOTES: readonly Emote[] = [];
+/**
+ * The pack arrives over the relay.
+ *
+ * OBS is a different browser from the one holding the streamer's imported
+ * packs, so the simulator sends names and URLs down the same stream the
+ * chat comes on. Until one arrives, emote names render as plain text —
+ * which is what every line looked like before this existed.
+ */
+const NO_EMOTES: readonly Emote[] = [];
 
 /** Lines the browser source keeps before the oldest scroll away. */
 const OVERLAY_MAX_MESSAGES = 50;
@@ -35,6 +41,7 @@ const OVERLAY_MAX_MESSAGES = 50;
 function OverlayContent() {
   const params = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [emotes, setEmotes] = useState<readonly Emote[]>(NO_EMOTES);
 
   const key = params.get("key") ?? "";
   const fontSize = clampNumber(params.get("fontSize"), 14, 10, 48);
@@ -70,6 +77,26 @@ function OverlayContent() {
       });
     });
 
+    source.addEventListener("emotes", (event) => {
+      try {
+        const incoming = (JSON.parse((event as MessageEvent<string>).data) as {
+          emotes?: Array<{ name: string; url: string }>;
+        }).emotes;
+        if (!incoming) return;
+        // Only what the renderer needs: it matches on name and draws the URL.
+        setEmotes(
+          incoming.map((emote) => ({
+            id: emote.name,
+            name: emote.name,
+            url: emote.url,
+            mood: "chill" as const,
+          })),
+        );
+      } catch {
+        // A malformed frame leaves the previous pack in place.
+      }
+    });
+
     source.addEventListener("clear", () => setMessages([]));
 
     return () => source.close();
@@ -88,7 +115,7 @@ function OverlayContent() {
       {key ? (
         <ChatList
           messages={messages}
-          emotes={OVERLAY_EMOTES}
+          emotes={emotes}
           showTimestamps={showTimestamps}
           fontSize={fontSize}
         />

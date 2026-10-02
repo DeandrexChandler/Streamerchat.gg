@@ -1,5 +1,5 @@
-import type { ChatMessage } from "@/lib/engine/types";
-import { MAX_MESSAGES_PER_PUBLISH } from "./protocol";
+import type { ChatMessage, Emote } from "@/lib/engine/types";
+import { MAX_MESSAGES_PER_PUBLISH, MAX_OVERLAY_EMOTES, type OverlayEmote } from "./protocol";
 
 /**
  * Client side of the OBS relay: batches released messages and posts them to
@@ -57,6 +57,16 @@ export class OverlayTransport {
 
   /** Browser sources attached as of the last response. */
   private attached = 0;
+  /**
+   * The emote pack, and whether the sources attached now have been given it.
+   *
+   * OBS is a different browser from the one holding the streamer's packs, so
+   * without sending them every emote reaches the stream as plain text. Sent
+   * when the pack changes and whenever a source attaches — the hub retains
+   * the last one, so a scene switch mid-session is covered too.
+   */
+  private emotes: OverlayEmote[] = [];
+  private emotesSent = false;
 
   constructor(private readonly options: OverlayTransportOptions) {
     this.endpoint = options.endpoint ?? "/api/overlay/publish";
@@ -77,6 +87,26 @@ export class OverlayTransport {
     if (this.queue.length > MAX_MESSAGES_PER_PUBLISH) {
       this.queue = this.queue.slice(-MAX_MESSAGES_PER_PUBLISH);
     }
+  }
+
+  /**
+   * The emotes the browser source should be able to render.
+   *
+   * Names and URLs only — the overlay resolves them the same way the
+   * simulator does. Cheap to call on every change: nothing is sent unless
+   * the pack actually differs.
+   */
+  setEmotes(emotes: readonly Emote[]): void {
+    const next = emotes
+      .slice(0, MAX_OVERLAY_EMOTES)
+      .map((emote) => ({ name: emote.name, url: emote.url }));
+    const same =
+      next.length === this.emotes.length &&
+      next.every((emote, i) => emote.name === this.emotes[i].name && emote.url === this.emotes[i].url);
+    if (same) return;
+
+    this.emotes = next;
+    this.emotesSent = false;
   }
 
   /** Wipes the overlay. Sent even when no messages are pending. */
@@ -109,22 +139,31 @@ export class OverlayTransport {
     this.queue = [];
     this.clearPending = false;
 
+    // Pack first, or the first batch of chat renders as names on stream.
+    const emotes = !this.emotesSent && this.emotes.length > 0 ? this.emotes : undefined;
+
     this.inFlight = true;
     this.lastPostAt = now;
 
-    void this.post(messages, clear, now);
+    void this.post(messages, clear, now, emotes);
   }
 
   private async post(
     messages: readonly ChatMessage[],
     clear: boolean,
     now: number,
+    emotes?: readonly OverlayEmote[],
   ): Promise<void> {
     try {
       const response = await this.fetchImpl(this.endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ key: this.options.key, messages, clear }),
+        body: JSON.stringify({
+          key: this.options.key,
+          messages,
+          clear,
+          ...(emotes ? { emotes } : {}),
+        }),
         // The tab can be closed mid-flush; this is fire-and-forget either way.
         cache: "no-store",
       });
@@ -135,7 +174,18 @@ export class OverlayTransport {
       }
 
       const body = (await response.json()) as { subscribers?: number };
+      const before = this.attached;
       this.attached = Math.max(0, Number(body?.subscribers) || 0);
+      if (emotes) this.emotesSent = true;
+      /**
+       * A source that joins an already-watched session gets the pack again.
+       *
+       * The hub retains the last one for exactly this case, so this is
+       * belt and braces — and it is cheap, since a pack is a few KB once
+       * per scene switch. Not on the first attach, where the count rising
+       * from zero is just this publisher learning someone is there.
+       */
+      if (before > 0 && this.attached > before) this.emotesSent = false;
       this.failures = 0;
       this.nextAttemptAt = 0;
     } catch {

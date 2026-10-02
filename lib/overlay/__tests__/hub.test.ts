@@ -117,3 +117,52 @@ describe("OverlayHub", () => {
     expect(hub.canSubscribe(KEY_B)).toBe(true);
   });
 });
+
+describe("the retained emote pack", () => {
+  const frame = (names: string[]) => ({
+    event: "emotes" as const,
+    data: JSON.stringify({ emotes: names.map((name) => ({ name, url: `u/${name}` })) }),
+  });
+
+  it("hands the pack to a source that attaches later", () => {
+    // OBS reconnects on every scene switch, long after the pack was sent.
+    // Without this, chat on stream renders emote names as plain text.
+    const hub = new OverlayHub();
+    const first: OverlayFrame[] = [];
+    const unsubscribe = hub.subscribe("k".repeat(32), (f) => first.push(f))!;
+    hub.publish("k".repeat(32), frame(["KEKW"]));
+
+    const late: OverlayFrame[] = [];
+    hub.subscribe("k".repeat(32), (f) => late.push(f));
+    expect(late).toHaveLength(1);
+    expect(late[0].event).toBe("emotes");
+    unsubscribe();
+  });
+
+  it("keeps only the most recent pack", () => {
+    const hub = new OverlayHub();
+    const key = "m".repeat(32);
+    const keep = hub.subscribe(key, () => {})!;
+    hub.publish(key, frame(["KEKW"]));
+    hub.publish(key, frame(["Pog", "Sadge"]));
+
+    const late: OverlayFrame[] = [];
+    hub.subscribe(key, (f) => late.push(f));
+    expect(JSON.parse(late[0].data).emotes).toHaveLength(2);
+    keep();
+  });
+
+  it("forgets the pack once nobody is watching", () => {
+    // The next publisher sends its own; retaining one for a key with no
+    // sources is just a leak with extra steps.
+    const hub = new OverlayHub();
+    const key = "n".repeat(32);
+    const unsubscribe = hub.subscribe(key, () => {})!;
+    hub.publish(key, frame(["KEKW"]));
+    unsubscribe();
+
+    const late: OverlayFrame[] = [];
+    hub.subscribe(key, (f) => late.push(f));
+    expect(late).toHaveLength(0);
+  });
+});
