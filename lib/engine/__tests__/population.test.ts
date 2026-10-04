@@ -148,53 +148,35 @@ describe("Population username vocabulary", () => {
     expect(new Set(names).size).toBe(250);
   });
 
-  it("keeps keyboard-mash names to a couple, however long the session runs", () => {
+  it("never makes a keyboard-mash name, however long the session runs", () => {
     /**
-     * Measured, not theoretical: an hour at the top tier used to end with a
-     * room of wizngq, whmihs and zwgag. Those names consume no vocabulary,
-     * so as the word lists empty they become the only style that still
-     * passes the "fresh words" test, and the room fills with them.
+     * From a live session: ujmgfwi, vldykh, sidygxm and wjgxh scrolled past at
+     * a busy tier, after an earlier cap meant to limit them. The style is
+     * gone. A name here is built from words, or — once the word lists run
+     * low — a word and a number, both of which read as a person.
      */
-    const population = new Population(createRng(5), 12);
+    const population = new Population(createRng(12), 12);
+    const made = [
+      ...population.all(),
+      ...Array.from({ length: 4_000 }, () => population.stranger()),
+    ];
     for (let i = 0; i < 300; i += 1) population.churn();
+    made.push(...population.all());
 
-    const all = population.all();
-    const mash = all.filter((viewer) => viewer.nameWords.length === 0);
-    expect(mash.length).toBeLessThanOrEqual(2);
-    expect(all).toHaveLength(12);
+    const mash = made.filter((viewer) => viewer.nameWords.length === 0 && !/\d/.test(viewer.name));
+    expect(mash.map((viewer) => viewer.name)).toEqual([]);
   });
 
   it("does not run out of names when thousands of strangers pass through", () => {
-    /**
-     * The measured failure: an hour at the top tier is thousands of
-     * one-message strangers, each of which used to hold its vocabulary
-     * forever. With the word lists empty, keyboard-mash names were the only
-     * style that still qualified, and the room filled with gibberish.
-     */
+    // Thousands of one-off strangers an hour at the top tier each take a word
+    // or two. Given back when they scroll off, the lists stay usable and new
+    // names keep coming from words rather than falling back.
     const population = new Population(createRng(12), 12);
     for (let i = 0; i < 4_000; i += 1) population.stranger();
-    for (let i = 0; i < 60; i += 1) population.churn();
 
-    const regulars = population.all();
-    const mash = regulars.filter((viewer) => viewer.nameWords.length === 0);
-    expect(mash.length).toBeLessThanOrEqual(2);
-
-    // And the names arriving now are still made of words, not letters.
-    const fresh = Array.from({ length: 40 }, () => population.stranger());
-    const gibberish = fresh.filter((viewer) => viewer.nameWords.length === 0);
-    expect(gibberish.length).toBeLessThan(fresh.length / 3);
-  });
-
-  it("clears the excess when the room shrinks around them", () => {
-    // A tier change from twelve regulars to six leaves the same mash names
-    // in a smaller room, which is over budget without anyone adding one.
-    const population = new Population(createRng(9), 12);
-    for (let i = 0; i < 200; i += 1) population.churn();
-    population.driftToward(6);
-    for (let i = 0; i < 40; i += 1) population.churn();
-
-    const mash = population.all().filter((viewer) => viewer.nameWords.length === 0);
-    expect(mash.length).toBeLessThanOrEqual(1);
+    const fresh = Array.from({ length: 60 }, () => population.stranger());
+    const fallback = fresh.filter((viewer) => viewer.nameWords.length === 0);
+    expect(fallback.length).toBeLessThan(fresh.length / 4);
   });
 
   it("returns a departed viewer's vocabulary to the pool", () => {

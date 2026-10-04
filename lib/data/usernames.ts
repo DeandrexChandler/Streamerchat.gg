@@ -58,7 +58,7 @@ interface Candidate {
   words: string[];
 }
 
-type Style = { build: (rng: Rng) => Candidate; weight: number; mash?: boolean };
+type Style = { build: (rng: Rng) => Candidate; weight: number };
 
 const STYLES: Style[] = [
   // A plain lowercase first name. Extremely common and easy to forget.
@@ -130,28 +130,6 @@ const STYLES: Style[] = [
     },
   },
 
-  /**
-   * Keyboard-mash names. Rare, but every chat has a couple.
-   *
-   * These consume no vocabulary, which makes them the pressure valve when
-   * the word lists run dry — and, left alone, the *only* style that still
-   * qualifies once they do. A measured hour at the top tier ended with a
-   * room of wizngq, whmihs and zwgag. The caller caps how many the room may
-   * hold; past that this style is skipped and repeated vocabulary is the
-   * better trade.
-   */
-  {
-    mash: true,
-    weight: 5,
-    build: (r) => {
-      const letters = "abcdefghijklmnopqrstuvwxyz".split("");
-      const len = r.int(4, 7);
-      let name = "";
-      for (let i = 0; i < len; i++) name += r.pick(letters);
-      return { name, words: [] };
-    },
-  },
-
   // The classic gamer tag — deliberately the rarest style.
   {
     weight: 6,
@@ -168,21 +146,24 @@ const STYLES: Style[] = [
 ];
 
 const TOTAL_STYLE_WEIGHT = STYLES.reduce((sum, s) => sum + s.weight, 0);
-const WORDED_STYLES = STYLES.filter((style) => !style.mash);
-const WORDED_STYLE_WEIGHT = WORDED_STYLES.reduce((sum, s) => sum + s.weight, 0);
 
-function pickStyle(rng: Rng, allowMash = true): Style {
-  if (!allowMash) return pickFrom(rng, WORDED_STYLES, WORDED_STYLE_WEIGHT);
-  return pickFrom(rng, STYLES, TOTAL_STYLE_WEIGHT);
-}
-
-function pickFrom(rng: Rng, styles: readonly Style[], total: number): Style {
-  let roll = rng.next() * total;
-  for (const style of styles) {
+/**
+ * There is no keyboard-mash style.
+ *
+ * There used to be — "every chat has a couple" — and it was capped, then
+ * capped per cohort, and a live session still saw ujmgfwi, vldykh and
+ * sidygxm scroll past at a busy tier. Real random handles are rarer than
+ * that and do not read as broken; generated ones do. When the word lists run
+ * low the generator reuses vocabulary, then falls back to a word and a
+ * number, both of which read as names.
+ */
+function pickStyle(rng: Rng): Style {
+  let roll = rng.next() * TOTAL_STYLE_WEIGHT;
+  for (const style of STYLES) {
     roll -= style.weight;
     if (roll < 0) return style;
   }
-  return styles[styles.length - 1];
+  return STYLES[STYLES.length - 1];
 }
 
 export interface NameResult {
@@ -202,19 +183,10 @@ export function generateUsername(
   rng: Rng,
   takenNames: ReadonlySet<string>,
   usedWords: ReadonlySet<string>,
-  /**
-   * Whether a keyboard-mash name is acceptable right now.
-   *
-   * False once the room already holds its share of them. They cost no
-   * vocabulary, so as the word lists empty they are the only style that
-   * still passes pass 1 — which is how an hour at the top tier ended with
-   * a chat of wizngq and zwgag.
-   */
-  allowMash = true,
 ): NameResult {
   // Pass 1: fresh name AND fresh vocabulary.
   for (let attempt = 0; attempt < 24; attempt++) {
-    const candidate = pickStyle(rng, allowMash).build(rng);
+    const candidate = pickStyle(rng).build(rng);
     if (takenNames.has(candidate.name.toLowerCase())) continue;
     if (candidate.words.some((w) => usedWords.has(w))) continue;
     return candidate;
@@ -222,7 +194,7 @@ export function generateUsername(
 
   // Pass 2: vocabulary is running out — accept a repeat word, not a repeat name.
   for (let attempt = 0; attempt < 24; attempt++) {
-    const candidate = pickStyle(rng, allowMash).build(rng);
+    const candidate = pickStyle(rng).build(rng);
     if (!takenNames.has(candidate.name.toLowerCase())) return candidate;
   }
 

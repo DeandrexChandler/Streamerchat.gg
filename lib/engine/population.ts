@@ -20,8 +20,6 @@ const MIN_SPEAKER_CHOICES = 3;
 /** Default sit-out after speaking. The engine sets a tier-aware one. */
 const DEFAULT_COOLDOWN_MS = 6_000;
 
-/** At most this much of the room is keyboard-mash names. */
-const MASH_NAME_SHARE = 0.15;
 
 export interface PickOptions {
   /**
@@ -78,7 +76,7 @@ export class Population {
    * the difference is only that nothing here persists or accumulates.
    */
   stranger(): Viewer {
-    const viewer = this.build("stranger");
+    const viewer = this.build();
     this.strangers.set(viewer.id, viewer);
     if (this.strangers.size > STRANGER_MEMORY) {
       const oldest = this.strangers.keys().next().value;
@@ -89,10 +87,9 @@ export class Population {
        * A stranger who has scrolled off gives everything back.
        *
        * Thousands pass through an hour at the top tier, and holding their
-       * vocabulary forever emptied the word lists — which left keyboard-mash
-       * names, the one style that consumes nothing, as the only thing that
-       * still passed the "fresh words" test. A measured hour ended with a
-       * room of wizngq, whmihs and zwgag.
+       * vocabulary forever emptied the word lists, which pushed every new
+       * name onto the fallbacks — repeated words, then a word and a number —
+       * and a long session's chat ran out of fresh-sounding names.
        *
        * The vocabulary only. The name itself stays taken for the session,
        * the same rule a departed regular follows: one handle is one person,
@@ -107,19 +104,18 @@ export class Population {
 
   /** Adds one regular with a personality sampled by archetype weight. */
   add(): Viewer {
-    const viewer = this.build("regular");
+    const viewer = this.build();
     this.viewers.set(viewer.id, viewer);
     return viewer;
   }
 
   /** Builds a viewer without filing it anywhere. */
-  private build(cohort: "regular" | "stranger" = "regular"): Viewer {
+  private build(): Viewer {
     const personality = this.rng.weighted(PERSONALITY_LIST, (p) => p.weight);
     const { name, words } = generateUsername(
       this.rng,
       this.takenNames,
       this.usedWords,
-      this.acceptsMashName(cohort),
     );
     this.takenNames.add(name.toLowerCase());
     for (const word of words) this.usedWords.add(word);
@@ -146,42 +142,12 @@ export class Population {
     return viewer;
   }
 
-  /**
-   * Share of the room that may be keyboard-mash names.
-   *
-   * Every chat has one or two; a room that is mostly gibberish is what a
-   * long session produced before this, because those names consume no
-   * vocabulary and so were the last style standing once the word lists ran
-   * out. Counted across regulars and the strangers still on screen.
-   */
-  private acceptsMashName(cohort: "regular" | "stranger"): boolean {
-    // Per cohort: regulars are the names the streamer learns, and sharing
-    // one budget with sixty passing strangers left four of twelve regulars
-    // as gibberish in a measured hour at the top tier.
-    const live = [...(cohort === "regular" ? this.viewers : this.strangers).values()];
-    if (live.length === 0) return true;
-    const mash = live.filter((viewer) => viewer.nameWords.length === 0).length;
-    return mash < Math.max(1, Math.round(live.length * MASH_NAME_SHARE));
-  }
-
   /** Removes a random viewer, if any remain. Used for churn. */
   remove(): Viewer | undefined {
     // A regular the streamer wrote is not churn fodder.
     const all = this.all().filter((viewer) => !viewer.pinned);
     if (all.length === 0) return undefined;
-
-    /**
-     * Churn clears the gibberish first when there is too much of it.
-     *
-     * The share is checked when a name is made, but the room shrinks too —
-     * a tier change from twelve regulars to eight leaves the same two
-     * keyboard-mash names in a smaller room. Letting churn pick those first
-     * is how the room heals instead of staying over budget.
-     */
-    const mash = all.filter((viewer) => viewer.nameWords.length === 0);
-    const budget = Math.max(1, Math.round(this.viewers.size * MASH_NAME_SHARE));
-    const pool = mash.length > budget ? mash : all;
-    const victim = this.rng.pick(pool);
+    const victim = this.rng.pick(all);
     this.viewers.delete(victim.id);
 
     // The NAME is deliberately not released. Usernames are globally unique on

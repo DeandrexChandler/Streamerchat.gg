@@ -175,8 +175,21 @@ describe("screen events", () => {
   });
 
   it("runs the room louder for a death than for downtime", () => {
+    // Summed over seeds, for the same reason as any rate comparison: ten
+    // seconds of one seed is a handful of exponential gaps.
     const rateFor = (event: GameEvent) => {
-      const engine = started();
+      let total = 0;
+      for (const seed of [1, 2, 3, 4, 5, 6]) total += rateForSeed(event, seed);
+      return total;
+    };
+    const rateForSeed = (event: GameEvent, seed: number) => {
+      const engine = new SimulationEngine({
+        seed,
+        now: 0,
+        emotes: FIXTURE_EMOTES,
+        settings: { messagesPerSecond: 1 },
+      });
+      engine.beginSession(0);
       engine.handleTranscript("hey", 0, undefined, true);
       engine.nextGeneration(0);
       engine.supplyReactions(
