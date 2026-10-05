@@ -363,3 +363,33 @@ Trade-offs to watch:
 ujmgfwi, vldykh, sidygxm, wjgxh, after the cap from item 20. The style is
 removed outright: names are words, or a word and a number.
 
+## 24. Transcription needs work
+
+**Owner's note:** transcription needs work. Not yet broken down into
+specific symptoms — the next live session should note what goes wrong
+(missed sentences, wrong words, slow to appear, cut off mid-sentence,
+stops entirely).
+
+**Now:** the browser's own speech recognition (`lib/transcription/web-speech.ts`).
+Free and low-latency, but:
+
+- Chrome and Edge only.
+- Chrome ends recognition on its own after silence and periodically
+  regardless; the provider restarts itself with backoff. A gap or a lost
+  phrase around a restart is plausible.
+- Trained on formal speech, so slang, names and gamer words come out
+  wrong. `lib/transcription/slang.ts` repairs a short, deliberately
+  conservative list ("low key" to "lowkey", "n g l" to "ngl"), and the
+  prompt tells the model the text is imperfect. Regular names are matched
+  ignoring spacing ("hazel irl").
+- English only (`en-US`).
+- Whatever it hears passes through the attention gate, which can still
+  decide a sentence is not worth reacting to. Typed input never is.
+
+**Shape of the fix:** first, list what actually goes wrong in a real
+session, since the cause differs per symptom. Options already discussed:
+a hosted speech-to-text service (better accuracy and custom vocabulary,
+costs money per minute, adds a round trip), or keeping the browser
+recogniser and widening the repair list and name matching. Measure cost
+and latency before choosing — this is the input every reaction depends on.
+

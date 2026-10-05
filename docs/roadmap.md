@@ -18,6 +18,7 @@ is manually believable.
 - [x] Basic contextual emote selection
 - [x] Silent provider failure behaviour
 - [x] Automated tests against a scripted provider
+- [ ] Transcription needs work — see `docs/fix-queue.md` item 24
 - [ ] Manual verification with a real key: the chat feels continuously alive,
       contextually responsive, varied, and recognisably like Twitch chat
 
