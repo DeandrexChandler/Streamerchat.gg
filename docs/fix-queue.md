@@ -393,3 +393,32 @@ costs money per minute, adds a round trip), or keeping the browser
 recogniser and widening the repair list and name matching. Measure cost
 and latency before choosing — this is the input every reaction depends on.
 
+---
+
+## 25. Talking without breaks stops chat responding properly
+
+**Seen (owner, live):** speaking normally and continuously, with no real
+pauses, and chat stops responding properly to what is being said.
+
+**Not investigated yet.** Likely causes to check first, each with a
+different fix:
+
+- **No final transcript.** The browser only marks speech as final at a
+  pause (`isFinal` in `lib/transcription/web-speech.ts`). Talking straight
+  through can leave it all as in-progress text that never reaches the
+  engine, so chat has nothing new to answer.
+- **One huge transcript.** When it does finalise, a long run-on can arrive
+  as a single utterance, and the reply is to the whole paragraph rather
+  than to what was just said.
+- **Replies superseding each other.** Every accepted sentence makes the
+  reply already in flight out of date and queues another; fast enough,
+  chat ends up a round trip behind and answering old lines
+  (`supplyReactions` / `freshReply` in `lib/engine/engine.ts`).
+- **The attention gate's fatigue damper.** A lot of recent speech makes the
+  gate more likely to skip a sentence as not worth reacting to
+  (`recentVolume` in `lib/engine/attention.ts`).
+
+**First step:** reproduce it with the transcript panel open — whether lines
+appear late, as one block, or appear and get marked IGNORED tells which of
+these it is. Related to item 24.
+
