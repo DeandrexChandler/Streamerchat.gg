@@ -849,7 +849,12 @@ export class SimulationEngine {
       ...(isConversational(this.settings.messagesPerSecond)
         ? { roster: this.room(), ...(this.addressed ? { addressed: this.addressed } : {}) }
         : {}),
-      emotes: this.emotes.slice(0, MAX_EMOTES_IN_PROMPT).map((emote) => emote.name),
+      // A blocked emote is never offered: the model cannot ask for what the
+      // streamer has said never to post, and it costs nothing to leave out.
+      emotes: this.emotes
+        .filter((emote) => !emote.blocked)
+        .slice(0, MAX_EMOTES_IN_PROMPT)
+        .map((emote) => emote.name),
       recent: [...this.recentLines],
       streamer: this.settings.streamerName || undefined,
       topic: this.settings.streamTopic || undefined,

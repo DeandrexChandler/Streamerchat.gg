@@ -4,6 +4,7 @@ import {
   localEmoteTagStore,
   type EmoteTagMap,
 } from "./emote-tags";
+import { applyEmoteRules, localEmoteRuleStore, type EmoteRuleMap } from "./emote-rules";
 import type { EmotePack } from "../emotes/seventv";
 
 /**
@@ -94,10 +95,12 @@ export const localEmotePackStore: EmotePackStore = {
 export function mergeEmotes(
   packs: readonly EmotePack[],
   tags: EmoteTagMap = localEmoteTagStore.load(),
+  rules: EmoteRuleMap = localEmoteRuleStore.load(),
 ): Emote[] {
   const byName = new Map<string, Emote>();
   for (const pack of packs) {
     for (const emote of pack.emotes) byName.set(emote.name.toLowerCase(), emote);
   }
-  return applyEmoteTags([...byName.values()], tags);
+  // Rules last: "never this" outranks anything the pack or the tags say.
+  return applyEmoteRules(applyEmoteTags([...byName.values()], tags), rules);
 }

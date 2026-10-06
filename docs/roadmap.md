@@ -44,10 +44,12 @@ Choosing the right emote for a line, rather than a random one that exists.
       inside a family and order between families
 - [x] Manual overrides on `/settings/emotes`: search, preview, tag, reset to
       automatic, and a filter for emotes chat can never use
+- [x] Disallowed contexts: block an emote outright, or bar it from moments
+      ("KEKW, never after a death"). Applied before every tier, the model's
+      own pick included (`lib/config/emote-rules.ts`)
 - [ ] Per-emote usage counts, so tagging is informed by what chat reaches for
 
-Still to come in this phase: allowed and disallowed contexts per emote
-(a block list), and per-event priority weighting.
+Still to come in this phase: per-event priority weighting.
 
 ## Phase 3 — Product polish
 

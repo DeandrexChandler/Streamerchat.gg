@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Check, Search, X } from "lucide-react";
+import { Ban, Check, Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +18,7 @@ import {
 } from "@/lib/config/emote-tags";
 import { EMOTE_TAGS, type Emote, type EmoteTag } from "@/lib/engine/types";
 import { meaningsOf } from "@/lib/emotes/meaning";
+import { localEmoteRuleStore, type EmoteRule, type EmoteRuleMap } from "@/lib/config/emote-rules";
 import { cn } from "@/lib/utils";
 
 /** Shown on the chips, because "question" alone reads ambiguously. */
@@ -60,6 +61,19 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [taggedOnly, setTaggedOnly] = useState(false);
   const [unusedOnly, setUnusedOnly] = useState(false);
+  const [rules, setRules] = useState<EmoteRuleMap>(() => localEmoteRuleStore.load());
+
+  /** Writes one emote's rule, dropping it entirely once nothing is set. */
+  const updateRule = useCallback((name: string, next: EmoteRule) => {
+    setRules((current) => {
+      const key = name.toLowerCase();
+      const merged: Record<string, EmoteRule> = { ...current };
+      if (!next.blocked && !(next.notFor && next.notFor.length > 0)) delete merged[key];
+      else merged[key] = next;
+      localEmoteRuleStore.save(merged);
+      return merged;
+    });
+  }, []);
 
   const update = useCallback((name: string, next: readonly EmoteTag[]) => {
     setTags((current) => {
@@ -77,16 +91,24 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
     return emotes.filter((emote) => {
       const key = emote.name.toLowerCase();
       if (taggedOnly && !tags[key]) return false;
-      // Never used: no hand tags and nothing readable in the name.
-      if (unusedOnly && (tags[key] || meaningsOf(emote.name).length > 0)) return false;
+      // Never used: blocked, or no hand tags and nothing readable in the name.
+      if (
+        unusedOnly &&
+        !rules[key]?.blocked &&
+        (tags[key] || meaningsOf(emote.name).length > 0)
+      ) {
+        return false;
+      }
       return needle === "" || key.includes(needle);
     });
-  }, [emotes, query, tags, taggedOnly, unusedOnly]);
+  }, [emotes, query, tags, taggedOnly, unusedOnly, rules]);
 
   const active = selected
     ? emotes.find((emote) => emote.name.toLowerCase() === selected)
     : undefined;
   const activeTags = selected ? (tags[selected] ?? []) : [];
+  const activeRule: EmoteRule = selected ? (rules[selected] ?? {}) : {};
+  const activeNotFor = activeRule.notFor ?? [];
   const taggedCount = Object.keys(tags).length;
   /** What the name alone says, when nobody has tagged this emote by hand. */
   const guessed = active ? meaningsOf(active.name) : [];
@@ -176,12 +198,24 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
             {/* What chat does with it today, so tagging is a correction
                 rather than a guess about what is already understood. */}
             <p className="text-[11px] text-muted-foreground">
-              {activeTags.length > 0
-                ? "Your tags decide when chat posts this."
-                : guessed.length > 0
-                  ? `Read from the name: ${guessed.map((tag) => TAG_LABELS[tag]).join(", ")}.`
-                  : "Nothing is known about this one, so chat never posts it. Tag it to put it in rotation."}
+              {activeRule.blocked
+                ? "Blocked — chat never posts this, whatever its tags say."
+                : activeTags.length > 0
+                  ? "Your tags decide when chat posts this."
+                  : guessed.length > 0
+                    ? `Read from the name: ${guessed.map((tag) => TAG_LABELS[tag]).join(", ")}.`
+                    : "Nothing is known about this one, so chat never posts it. Tag it to put it in rotation."}
             </p>
+
+            <Button
+              variant={activeRule.blocked ? "destructive" : "outline"}
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => updateRule(active.name, { ...activeRule, blocked: !activeRule.blocked })}
+            >
+              <Ban className="size-3.5" />
+              {activeRule.blocked ? "Blocked — click to allow" : "Never use this emote"}
+            </Button>
 
             <div className="flex flex-wrap gap-1.5">
               {EMOTE_TAGS.map((tag) => {
@@ -212,6 +246,44 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
                 );
               })}
             </div>
+
+            {!activeRule.blocked && (
+              <div className="space-y-1.5">
+                <p className="text-[11px] text-muted-foreground">
+                  Never post it when the moment is… (e.g. KEKW, never after a
+                  death: pick Sad)
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {EMOTE_TAGS.filter((tag) => tag !== "general").map((tag) => {
+                    const on = activeNotFor.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() =>
+                          updateRule(active.name, {
+                            ...activeRule,
+                            notFor: on
+                              ? activeNotFor.filter((value) => value !== tag)
+                              : [...activeNotFor, tag],
+                          })
+                        }
+                        className={cn(
+                          "flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                          on
+                            ? "border-destructive bg-destructive/10 text-destructive"
+                            : "border-border text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {on && <Ban className="size-3" />}
+                        {TAG_LABELS[tag]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -231,6 +303,7 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
                 title={`${emote.name} · ${(tags[key] ?? []).map((tag) => TAG_LABELS[tag]).join(", ") || emote.mood}`}
                 className={cn(
                   "relative rounded border p-1 transition-colors",
+                  rules[key]?.blocked && "opacity-35 grayscale",
                   key === selected
                     ? "border-primary bg-primary/10"
                     : tags[key]
