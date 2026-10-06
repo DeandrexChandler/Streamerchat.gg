@@ -174,12 +174,24 @@ is an instruction, not chatter.
 
 ---
 
-## 12. Measure cost against quality — partly done
+## 12. Measure cost against quality — done
 
-The route now logs tokens per call and a running total, plus a cost figure
-when `AI_PRICE_PER_M_INPUT` and `AI_PRICE_PER_M_OUTPUT` are set. Still to
-do: read those numbers off a real session and decide whether the memory
-prompt is worth its input tokens at each tier.
+The route logs tokens per call and a running total, plus a cost figure when
+`AI_PRICE_PER_M_INPUT` and `AI_PRICE_PER_M_OUTPUT` are set.
+
+**Measured, 2026-10-06**, one live session slightly longer than usual: 109
+calls, 108,542 input and 197,762 output tokens. At $0.30 / $2.50 per million
+for `gemini-3.5-flash-lite` that is **$0.53**, about **$0.90–1.90 an hour**
+depending on speed (3 to 6.5 calls a minute).
+
+- **Output is 94% of the cost** — about 1,800 tokens back per call against
+  1,000 sent. The roster and memory sent to the model are in the cheap half,
+  so they stay.
+- **The lever, if cost ever matters:** most of the output is the JSON
+  wrapped around each line rather than the chat itself. `kind` is asked for
+  on every line and only read by the diagnostics log. Dropping it and
+  shortening keys could plausibly cut a third to a half. Not worth doing at
+  these prices; recorded so it is not rediscovered.
 
 ---
 
