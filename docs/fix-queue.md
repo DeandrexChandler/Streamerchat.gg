@@ -321,3 +321,45 @@ a long run is the harness, not the product. `SIM_SECONDS=3600 npm run
 simulate` runs it; the script repeats on a five minute loop so an hour is a
 session rather than three minutes of talking and fifty-seven of silence.
 
+---
+
+# Live session 3 — 2026-10-04, about 30 minutes
+
+## 21. Regulars filled chat at the higher speeds — done
+
+## 22. Unique chatters did not match the viewer count — done (the owner's model)
+
+Measured in the engine: ten regulars at 2/sec were each posting about ten
+lines a minute, and because strangers post once and vanish, the only names
+ever seen twice were the regulars. Real chat, sampled for eight minutes each
+from four live channels between 1.2 and 3.2 messages a second:
+
+| channel | rate | unique names | top-10 share | busiest person |
+|---|---|---|---|---|
+| sodapoppin | 1.2/s | 253 | 25% | 3.1/min |
+| agent00 | 1.7/s | 269 | 22% | 5.2/min |
+| silky | 1.9/s | 296 | 23% | 4.4/min |
+| jynxzi | 3.2/s | 588 | 11% | 2.9/min |
+
+Real chat also has a large middle — 25 to 80 people posting a few times each
+carry about half of it — which this engine does not model. The owner chose
+to keep regulars plus one-off strangers and turn the regulars down, fully
+blended at CHAOS, rather than add a returning crowd.
+
+Now: stranger share 70% / 80% / 85% / 92% at 1 / 1.5 / 2 / 4 per second.
+Busiest regular measured at ~7 / 4.4 / 3.4 / 2.6 lines a minute; regulars'
+share ~20% / 13% / 11% / 5%. The slow conversational tiers are unchanged.
+
+Trade-offs to watch:
+- Unique names per minute are now well above real chat at the fast tiers
+  (~200 at 2/sec against real ~37–73), because every stranger is new. The
+  returning-crowd model would land closer; recorded here if variety starts
+  to read as a firehose.
+- The fast tiers run ~7% quicker than before, because strangers never wait
+  on a cooldown and fewer slots go unfilled (CHAOS ~320 msg/min, was ~300).
+
+## 23. Keyboard-mash usernames still appeared — done
+
+ujmgfwi, vldykh, sidygxm, wjgxh, after the cap from item 20. The style is
+removed outright: names are words, or a word and a number.
+

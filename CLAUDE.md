@@ -86,7 +86,11 @@ Consequences that must stay true:
 - **The room is regulars plus strangers.** Regulars persist, accumulate
   memory and are who the streamer learns: 3 at the slowest tier up to 12 at
   CHAOS. Strangers pass through once and carry no history, rising from none
-  of the traffic to 55%. See `lib/engine/roster.ts`.
+  of the traffic at the slow tiers to 70% at 1/sec and 92% at CHAOS, so no
+  regular posts much above the real busiest chatter (3–5 lines a minute)
+  and at CHAOS they blend into the crowd. Names are always built from words
+  or a word and a number — there is no keyboard-mash style. See
+  `lib/engine/roster.ts`.
 - **Regulars remember, and survive the session.** A few topics, a few lines
   and what the streamer said to them, per person, saved to browser storage
   (`lib/config/roster-store.ts`) and shown to the model at the slow tiers.

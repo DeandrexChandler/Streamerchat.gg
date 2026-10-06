@@ -585,14 +585,21 @@ describe("idle", () => {
   });
 
   it("keeps flowing at the configured speed while idle", async () => {
-    const { messages } = await drive(lastWord + IDLE_AFTER_MS + 60_000, {
-      settings: { messagesPerSecond: 1 },
-      script: [[lastWord, "okay building now"]],
-    });
-    const idle = messages.filter((m) => m.kind === "idle");
-    // Sixty seconds of idle at one a second.
-    expect(idle.length).toBeGreaterThan(35);
-    expect(idle.length).toBeLessThan(95);
+    // Sixty seconds of idle at one a second, averaged over seeds: one seed's
+    // gap draws say nothing about the rate, and anything that changes how
+    // many random numbers are drawn upstream reshuffles them.
+    const counts: number[] = [];
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const { messages } = await drive(lastWord + IDLE_AFTER_MS + 60_000, {
+        seed,
+        settings: { messagesPerSecond: 1 },
+        script: [[lastWord, "okay building now"]],
+      });
+      counts.push(messages.filter((m) => m.kind === "idle").length);
+    }
+    const mean = counts.reduce((a, b) => a + b, 0) / counts.length;
+    expect(mean).toBeGreaterThan(35);
+    expect(mean).toBeLessThan(95);
   });
 
   it("escalates through the stages as silence continues", async () => {
@@ -971,21 +978,46 @@ describe("viewer identity", () => {
   });
 
   it("lets a long tail of one-off names through at a busy tier", async () => {
-    // Both real mid-size chats showed 64 to 68 distinct names in four
-    // minutes while their top ten carried about 40%. A flat roster cannot.
-    const { messages, engine } = await drive(240_000, {
+    // Real mid-size chats show dozens of distinct names a minute. A flat
+    // roster cannot.
+    const { messages } = await drive(240_000, {
       settings: { messagesPerSecond: 1 },
       script: [[1000, "hey"], [60_000, "what do you think"], [120_000, "let's go"]],
     });
     const names = [...new Set(messages.map((m) => m.username))];
     expect(names.length).toBeGreaterThan(30);
+  });
 
-    // The regulars still carry the conversation.
-    const counts = new Map<string, number>();
-    for (const m of messages) counts.set(m.username, (counts.get(m.username) ?? 0) + 1);
-    const top = [...counts.values()].sort((a, b) => b - a).slice(0, engine.stats().simulated);
-    const share = top.reduce((a, b) => a + b, 0) / messages.length;
-    expect(share).toBeGreaterThan(0.5);
+  it("does not let the same few names spam chat at the busier tiers", async () => {
+    /**
+     * From a live session: "the same couple of names spamming chat". Ten
+     * regulars were each posting about ten lines a minute. The busiest real
+     * chatter in four sampled channels (1.2 to 3.2 messages a second) posted
+     * three to five, so nobody here may run far beyond that.
+     */
+    for (const [rate, ceiling] of [[1, 9], [2, 5], [4, 4]] as const) {
+      const minutes = 4;
+      const { messages } = await drive(minutes * 60_000, {
+        settings: { messagesPerSecond: rate },
+        script: [[1000, "hey"], [60_000, "what do you think"], [120_000, "let's go"]],
+      });
+      const counts = new Map<string, number>();
+      for (const m of messages) counts.set(m.username, (counts.get(m.username) ?? 0) + 1);
+      const busiest = Math.max(...counts.values());
+      expect(busiest / minutes).toBeLessThanOrEqual(ceiling);
+    }
+  });
+
+  it("blends the regulars into the crowd at CHAOS", async () => {
+    // The owner's call: at the top tier a regular is no more present than
+    // anyone else, so the room reads as a crowd rather than a cast.
+    const { messages, engine } = await drive(240_000, {
+      settings: { messagesPerSecond: 4 },
+      script: [[1000, "hey"], [60_000, "what do you think"], [120_000, "let's go"]],
+    });
+    const regulars = new Set(engine.exportRoster().map((viewer) => viewer.name));
+    const fromRegulars = messages.filter((m) => regulars.has(m.username)).length;
+    expect(fromRegulars / messages.length).toBeLessThan(0.15);
   });
 
   it("keeps a name's colour and identity for the whole session", async () => {

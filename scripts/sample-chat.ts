@@ -119,6 +119,14 @@ function report(): void {
   console.log(`@mentions       ${pct(mentions)}  (viewer-to-viewer)`);
   console.log(`unique chatters ${perUser.size}`);
   console.log(`top 10 chatters ${pct(topTen)} of all messages`);
+  // The regular-shaped part of a room: people who came back again and again.
+  const repeaters = speakers.filter((n) => n >= 5);
+  const repeaterMsgs = repeaters.reduce((a, b) => a + b, 0);
+  console.log(
+    `repeat chatters ${repeaters.length} people with 5+ lines, ${pct(repeaterMsgs)} of messages; ` +
+      `busiest ${speakers[0]} lines (${(speakers[0] / (elapsed / 60)).toFixed(1)}/min)`,
+  );
+  console.log(`unique per min  ${(perUser.size / (elapsed / 60)).toFixed(1)}  (one-off chatters ${pct(speakers.filter((n) => n === 1).length)} of names)`);
   console.log(`same user, same line twice  ${pct(repeatedByOwner)}`);
 
   // Back to back: the same name on two lines in a row, and the longest run.

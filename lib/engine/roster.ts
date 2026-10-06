@@ -21,14 +21,25 @@
  * is all regulars, because three viewers who each turn up once are not a
  * chat at all. The tail grows with the tier until most of the noise at
  * CHAOS comes from names nobody will see twice.
+ *
+ * The stranger share was raised after a live session at the busier tiers
+ * read as "the same couple of names spamming chat". It was measured: ten
+ * regulars were each posting about ten lines a minute, where the busiest
+ * real chatter in four sampled channels (1.2 to 3.2 messages a second)
+ * posted three to five. These shares keep the busiest regular near that
+ * real ceiling from 1/sec up, and blend them into the crowd at CHAOS, as
+ * the owner asked, rather than letting them stand out from it.
+ *
+ * The two slow tiers are untouched: there the room is a conversation with
+ * a few people the streamer knows, and those few carry it on purpose.
  */
 const BY_RATE: ReadonlyArray<readonly [rate: number, regulars: number, strangerShare: number]> = [
   [0.2, 3, 0],
   [0.5, 4, 0.1],
-  [1, 6, 0.25],
-  [1.5, 8, 0.35],
-  [2, 10, 0.45],
-  [4, 12, 0.55],
+  [1, 6, 0.7],
+  [1.5, 8, 0.8],
+  [2, 10, 0.85],
+  [4, 12, 0.92],
 ];
 
 function tierFor(messagesPerSecond: number) {
