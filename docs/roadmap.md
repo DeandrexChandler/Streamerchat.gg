@@ -18,8 +18,14 @@ is manually believable.
 - [x] Basic contextual emote selection
 - [x] Silent provider failure behaviour
 - [x] Automated tests against a scripted provider
-- [ ] Manual verification with a real key: the chat feels continuously alive,
-      contextually responsive, varied, and recognisably like Twitch chat
+- [ ] Transcription needs work — see `docs/fix-queue.md` items 24 and 25
+- [x] Manual verification with a real key: the chat feels continuously alive,
+      contextually responsive, varied, and recognisably like Twitch chat —
+      signed off by the owner 2026-10-06, apart from the OBS check below
+- [ ] OBS check on stream. Performance, not chat behaviour; the owner runs
+      it after the emote work. Emotes already verified rendering in a
+      browser source with a real pack.
+- [x] Cost measured: about $0.90–1.90 an hour (fix queue item 12)
 
 ## Phase 2 — Emote accuracy (current)
 

@@ -174,12 +174,24 @@ is an instruction, not chatter.
 
 ---
 
-## 12. Measure cost against quality — partly done
+## 12. Measure cost against quality — done
 
-The route now logs tokens per call and a running total, plus a cost figure
-when `AI_PRICE_PER_M_INPUT` and `AI_PRICE_PER_M_OUTPUT` are set. Still to
-do: read those numbers off a real session and decide whether the memory
-prompt is worth its input tokens at each tier.
+The route logs tokens per call and a running total, plus a cost figure when
+`AI_PRICE_PER_M_INPUT` and `AI_PRICE_PER_M_OUTPUT` are set.
+
+**Measured, 2026-10-06**, one live session slightly longer than usual: 109
+calls, 108,542 input and 197,762 output tokens. At $0.30 / $2.50 per million
+for `gemini-3.5-flash-lite` that is **$0.53**, about **$0.90–1.90 an hour**
+depending on speed (3 to 6.5 calls a minute).
+
+- **Output is 94% of the cost** — about 1,800 tokens back per call against
+  1,000 sent. The roster and memory sent to the model are in the cheap half,
+  so they stay.
+- **The lever, if cost ever matters:** most of the output is the JSON
+  wrapped around each line rather than the chat itself. `kind` is asked for
+  on every line and only read by the diagnostics log. Dropping it and
+  shortening keys could plausibly cut a third to a half. Not worth doing at
+  these prices; recorded so it is not rediscovered.
 
 ---
 
@@ -362,4 +374,63 @@ Trade-offs to watch:
 
 ujmgfwi, vldykh, sidygxm, wjgxh, after the cap from item 20. The style is
 removed outright: names are words, or a word and a number.
+
+## 24. Transcription needs work
+
+**Owner's note:** transcription needs work. Not yet broken down into
+specific symptoms — the next live session should note what goes wrong
+(missed sentences, wrong words, slow to appear, cut off mid-sentence,
+stops entirely).
+
+**Now:** the browser's own speech recognition (`lib/transcription/web-speech.ts`).
+Free and low-latency, but:
+
+- Chrome and Edge only.
+- Chrome ends recognition on its own after silence and periodically
+  regardless; the provider restarts itself with backoff. A gap or a lost
+  phrase around a restart is plausible.
+- Trained on formal speech, so slang, names and gamer words come out
+  wrong. `lib/transcription/slang.ts` repairs a short, deliberately
+  conservative list ("low key" to "lowkey", "n g l" to "ngl"), and the
+  prompt tells the model the text is imperfect. Regular names are matched
+  ignoring spacing ("hazel irl").
+- English only (`en-US`).
+- Whatever it hears passes through the attention gate, which can still
+  decide a sentence is not worth reacting to. Typed input never is.
+
+**Shape of the fix:** first, list what actually goes wrong in a real
+session, since the cause differs per symptom. Options already discussed:
+a hosted speech-to-text service (better accuracy and custom vocabulary,
+costs money per minute, adds a round trip), or keeping the browser
+recogniser and widening the repair list and name matching. Measure cost
+and latency before choosing — this is the input every reaction depends on.
+
+---
+
+## 25. Talking without breaks stops chat responding properly
+
+**Seen (owner, live):** speaking normally and continuously, with no real
+pauses, and chat stops responding properly to what is being said.
+
+**Not investigated yet.** Likely causes to check first, each with a
+different fix:
+
+- **No final transcript.** The browser only marks speech as final at a
+  pause (`isFinal` in `lib/transcription/web-speech.ts`). Talking straight
+  through can leave it all as in-progress text that never reaches the
+  engine, so chat has nothing new to answer.
+- **One huge transcript.** When it does finalise, a long run-on can arrive
+  as a single utterance, and the reply is to the whole paragraph rather
+  than to what was just said.
+- **Replies superseding each other.** Every accepted sentence makes the
+  reply already in flight out of date and queues another; fast enough,
+  chat ends up a round trip behind and answering old lines
+  (`supplyReactions` / `freshReply` in `lib/engine/engine.ts`).
+- **The attention gate's fatigue damper.** A lot of recent speech makes the
+  gate more likely to skip a sentence as not worth reacting to
+  (`recentVolume` in `lib/engine/attention.ts`).
+
+**First step:** reproduce it with the transcript panel open — whether lines
+appear late, as one block, or appear and get marked IGNORED tells which of
+these it is. Related to item 24.
 
