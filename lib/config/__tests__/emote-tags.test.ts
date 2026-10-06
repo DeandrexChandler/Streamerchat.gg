@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-/** Same stand-in as emote-store.test.ts: the suite runs on `environment: node`. */
+/** Minimal localStorage stand-in; the suite runs on `environment: node`. */
 class MemoryStorage {
   private data = new Map<string, string>();
   getItem(key: string) { return this.data.get(key) ?? null; }
@@ -16,102 +16,78 @@ Object.defineProperty(globalThis, "window", {
   configurable: true,
 });
 
-import {
-  applyEmoteTags,
-  localEmoteTagStore,
-} from "../emote-tags";
+import { applyEmoteTags, localEmoteTagStore } from "../emote-tags";
 import { mergeEmotes } from "../emote-store";
-import type { Emote } from "../../engine/types";
+import { tagsFor } from "../../emotes/semantic";
 import type { EmotePack } from "../../emotes/seventv";
+import type { Emote } from "../../engine/types";
 
-function emote(name: string, mood: Emote["mood"] = "unknown"): Emote {
-  return { id: `id-${name}`, name, mood, url: `https://cdn/${name}.webp` };
+const KEY = "streamerchat-gg:emote-tags:v1";
+
+function pack(names: string[]): EmotePack {
+  return {
+    id: "p",
+    name: "p",
+    source: "p",
+    importedAt: 0,
+    emotes: names.map((name, i) => ({
+      id: `${i}`,
+      name,
+      mood: "unknown" as const,
+      url: `u/${name}`,
+    })),
+  };
 }
 
-function pack(id: string, emotes: Emote[]): EmotePack {
-  return { id, name: id, source: "7tv", emotes, importedAt: 0 };
-}
+describe("hand-assigned emote meanings", () => {
+  beforeEach(() => storage.clear());
 
-beforeEach(() => storage.clear());
-
-describe("localEmoteTagStore", () => {
-  it("round-trips assignments", () => {
-    localEmoteTagStore.save({ peepohi: ["greeting"] });
-    expect(localEmoteTagStore.load()).toEqual({ peepohi: ["greeting"] });
+  it("persists what the streamer assigned", () => {
+    localEmoteTagStore.save({ forsencd: ["greeting"] });
+    expect(localEmoteTagStore.load()).toEqual({ forsencd: ["greeting"] });
   });
 
-  it("returns nothing when the browser has never stored anything", () => {
-    expect(localEmoteTagStore.load()).toEqual({});
+  it("survives re-importing the pack the emote came from", () => {
+    // Packs are replaced wholesale on re-import — a channel updates its set
+    // and the old array is thrown away — so tags live outside them.
+    localEmoteTagStore.save({ forsencd: ["greeting"] });
+
+    const merged = mergeEmotes([pack(["forsenCD", "KEKW"])], localEmoteTagStore.load());
+    const tagged = merged.find((emote) => emote.name === "forsenCD");
+    expect(tagged?.tags).toEqual(["greeting"]);
   });
 
-  it("survives a corrupt blob rather than throwing", () => {
-    window.localStorage.setItem("streamerchat-gg:emote-tags:v1", "{not json");
-    expect(localEmoteTagStore.load()).toEqual({});
-  });
-
-  it("drops tags an older or newer build wrote that this one does not know", () => {
-    localEmoteTagStore.save({ x: ["greeting", "banana" as never] });
-    expect(localEmoteTagStore.load()).toEqual({ x: ["greeting"] });
-  });
-
-  it("drops an entry whose tags are all unrecognised", () => {
-    window.localStorage.setItem(
-      "streamerchat-gg:emote-tags:v1",
-      JSON.stringify({ x: ["nonsense"], y: "greeting" }),
+  it("survives merging a second pack over the first", () => {
+    localEmoteTagStore.save({ kekw: ["laugh", "general"] });
+    const merged = mergeEmotes(
+      [pack(["KEKW"]), pack(["KEKW", "Pog"])],
+      localEmoteTagStore.load(),
     );
-    expect(localEmoteTagStore.load()).toEqual({});
+    expect(merged.find((emote) => emote.name === "KEKW")?.tags).toEqual(["laugh", "general"]);
   });
 
-  it("keys on the lowercased name, so casing in the pack cannot miss", () => {
-    localEmoteTagStore.save({ PeepoHi: ["greeting"] } as never);
-    expect(localEmoteTagStore.load()).toEqual({ peepohi: ["greeting"] });
-  });
-});
-
-describe("applyEmoteTags", () => {
-  it("attaches tags to the matching emote and leaves the rest alone", () => {
-    const [tagged, untagged] = applyEmoteTags(
-      [emote("peepoHi"), emote("KEKW")],
-      { peepohi: ["greeting"] },
+  it("translates tags written by an older build rather than dropping them", () => {
+    // These were typed by hand once. "achievement" became "victory" and
+    // "struggle" became "frustrated"; the two with no equivalent become
+    // "general", which still means usable.
+    storage.setItem(
+      KEY,
+      JSON.stringify({ a: ["achievement"], b: ["struggle"], c: ["story"], d: ["nonsense"] }),
     );
-    expect(tagged.tags).toEqual(["greeting"]);
-    expect(untagged.tags).toBeUndefined();
+    const loaded = localEmoteTagStore.load();
+    expect(loaded.a).toEqual(["victory"]);
+    expect(loaded.b).toEqual(["frustrated"]);
+    expect(loaded.c).toEqual(["general"]);
+    expect(loaded.d).toBeUndefined();
   });
 
-  it("is a no-op when nothing has been tagged", () => {
-    const emotes = [emote("KEKW")];
-    expect(applyEmoteTags(emotes, {})).toEqual(emotes);
-  });
-});
+  it("returns an emote to automatic classification when its tags are cleared", () => {
+    const emote: Emote = { id: "1", name: "KEKW", mood: "funny", url: "u", tags: ["greeting"] };
+    // While tagged, the hand tag is the whole answer.
+    expect(tagsFor(emote)).toEqual(["greeting"]);
 
-describe("mergeEmotes", () => {
-  it("keeps manual tags when a pack is re-imported", () => {
-    localEmoteTagStore.save({ peepohi: ["greeting"] });
-
-    const first = mergeEmotes([pack("chan", [emote("peepoHi")])]);
-    expect(first[0].tags).toEqual(["greeting"]);
-
-    // The channel updates its set: same emote, new id, new pack object.
-    const reimported = mergeEmotes([
-      pack("chan", [{ ...emote("peepoHi"), id: "new-id" }]),
-    ]);
-    expect(reimported[0].tags).toEqual(["greeting"]);
-  });
-
-  it("carries tags across a name collision between packs", () => {
-    localEmoteTagStore.save({ peepohi: ["greeting"] });
-    const merged = mergeEmotes([
-      pack("global", [emote("peepoHi")]),
-      pack("channel", [{ ...emote("peepoHi"), url: "https://cdn/mine.webp" }]),
-    ]);
-    expect(merged).toHaveLength(1);
-    expect(merged[0].url).toBe("https://cdn/mine.webp");
-    expect(merged[0].tags).toEqual(["greeting"]);
-  });
-
-  it("works on packs stored before tagging existed", () => {
-    const merged = mergeEmotes([pack("old", [emote("KEKW", "funny")])]);
-    expect(merged[0].tags).toBeUndefined();
-    expect(merged[0].mood).toBe("funny");
+    const [reset] = applyEmoteTags([{ ...emote, tags: undefined }], {});
+    // Cleared, the name speaks for itself again.
+    expect(tagsFor(reset as Emote)).toEqual(["laugh"]);
   });
 });

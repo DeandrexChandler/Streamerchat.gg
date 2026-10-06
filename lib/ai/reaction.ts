@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { EmoteMood, Intent } from "../engine/types";
+import { EMOTE_TAGS, type EmoteMood, type Intent } from "../engine/types";
 import type { GenerationPhase } from "./provider";
 
 /**
@@ -46,6 +46,20 @@ export const ReactionSchema = z.object({
    * name is not in the pack. The model never picks an image.
    */
   emote: z.string().max(60).optional(),
+  /**
+   * What the line wants from an emote, in the shared vocabulary.
+   *
+   * Separate from `emote`, which is a specific name the model may have
+   * misremembered. This says what it *meant*, so a pack without that exact
+   * emote can still answer with an equivalent rather than nothing — or,
+   * worse, with whatever happened to be lying around.
+   */
+  emoteIntent: z
+    .enum(EMOTE_TAGS as unknown as [string, ...string[]])
+    .optional()
+    // A word outside the vocabulary drops the field, never the line: the
+    // model inventing "excited" must not cost a message that was fine.
+    .catch(undefined),
   /**
    * The viewer this line belongs to, by name.
    *

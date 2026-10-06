@@ -237,16 +237,30 @@ export type EmoteMood =
  * Deliberately the same vocabulary as Intent plus "idle" and "general", so a
  * tag can be matched against the classifier's output with no translation.
  */
+/**
+ * What an emote *means*, as a small shared vocabulary.
+ *
+ * Used three ways: the streamer tags an emote by hand, the importer guesses
+ * the same tags from the name, and the model may name one as the feeling a
+ * line wants. One vocabulary for all three is what lets a hand-tagged emote
+ * override a guess without any translation between them.
+ *
+ * Overlap is deliberate. `W` is agreement, hype, victory and spam at once,
+ * and a moment that wants any of those should be able to reach it.
+ */
 export type EmoteTag =
   | "greeting"
   | "farewell"
   | "hype"
-  | "achievement"
-  | "struggle"
-  | "confusion"
+  | "agreement"
+  | "victory"
+  | "spam"
+  | "laugh"
+  | "sad"
+  | "frustrated"
+  | "confused"
   | "question"
-  | "showing"
-  | "story"
+  | "love"
   | "idle"
   | "general";
 
@@ -254,12 +268,15 @@ export const EMOTE_TAGS: readonly EmoteTag[] = [
   "greeting",
   "farewell",
   "hype",
-  "achievement",
-  "struggle",
-  "confusion",
+  "agreement",
+  "victory",
+  "spam",
+  "laugh",
+  "sad",
+  "frustrated",
+  "confused",
   "question",
-  "showing",
-  "story",
+  "love",
   "idle",
   "general",
 ];

@@ -21,13 +21,27 @@ is manually believable.
 - [ ] Manual verification with a real key: the chat feels continuously alive,
       contextually responsive, varied, and recognisably like Twitch chat
 
-## Phase 2 — Emote controls
+## Phase 2 — Emote accuracy (current)
 
-Manual per-emote tags. Per-event priorities. Allowed and disallowed
-contexts. Search and filtering. Persistent overrides.
+Choosing the right emote for a line, rather than a random one that exists.
 
-A first version of manual tagging exists on `/settings/emotes` from before
-the scope reset. It is not being extended until Phase 1 is signed off.
+- [x] One meaning vocabulary shared by hand tags, automatic classification
+      and the model (`EMOTE_TAGS`)
+- [x] Automatic classification from the name, with anchored matching, so an
+      uploaded pack works without being configured (`lib/emotes/meaning.ts`)
+- [x] Layered selection: hand tags, the emote the model named, the token
+      chat was told to post and what is on screen, the model's stated
+      feeling, the intent, mood, nothing
+- [x] Unreadable emotes excluded entirely — a relevant line of text beats an
+      unrelated picture
+- [x] W / GG / hype treated as related but distinct families, with variety
+      inside a family and order between families
+- [x] Manual overrides on `/settings/emotes`: search, preview, tag, reset to
+      automatic, and a filter for emotes chat can never use
+- [ ] Per-emote usage counts, so tagging is informed by what chat reaches for
+
+Still to come in this phase: allowed and disallowed contexts per emote
+(a block list), and per-event priority weighting.
 
 ## Phase 3 — Product polish
 

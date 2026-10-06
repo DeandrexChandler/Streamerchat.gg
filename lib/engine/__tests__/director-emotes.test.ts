@@ -280,3 +280,73 @@ describe("returning voices", () => {
     expect(checked).toBeGreaterThan(150);
   });
 });
+
+/**
+ * Emote accuracy, where the director actually renders it.
+ *
+ * The selector decides which emote fits; these cover the three places the
+ * director can put one on screen — a bare emote line, a trailer on a worded
+ * line, and emote-only mode — all of which used to be able to post an
+ * unrelated picture because the pack happened to contain one.
+ */
+describe("only emotes that fit", () => {
+  /** A pack whose names mean nothing to anyone outside the channel. */
+  const MEANINGLESS: Emote[] = [
+    { id: "a", name: "hazelMoment", mood: "unknown", url: "u" },
+    { id: "b", name: "forsenCD", mood: "unknown", url: "u" },
+    { id: "c", name: "gachiBASS", mood: "unknown", url: "u" },
+  ];
+
+  it("never staples an unreadable emote onto a line", () => {
+    for (let seed = 0; seed < 80; seed += 1) {
+      const result = direct(seed, {
+        intent: "story",
+        emotes: MEANINGLESS,
+        reaction: reaction("that is genuinely wild", "story", { emotion: "hype" }),
+      });
+      if (result) expect(result.message.text).toBe("that is genuinely wild");
+    }
+  });
+
+  it("waits rather than posting an unreadable emote in emote-only mode", () => {
+    for (let seed = 0; seed < 20; seed += 1) {
+      const result = direct(seed, {
+        intent: "story",
+        emotes: MEANINGLESS,
+        settings: { ...DEFAULT_SETTINGS, emoteOnlyMode: true },
+        reaction: reaction("a whole sentence", "story"),
+      });
+      expect(result).toBeNull();
+    }
+  });
+
+  it("uses the same selection in emote-only mode as everywhere else", () => {
+    // A greeting in emote-only mode is still a greeting: peepoHi, never Sadge.
+    for (let seed = 0; seed < 30; seed += 1) {
+      const result = direct(seed, {
+        intent: "greeting",
+        settings: { ...DEFAULT_SETTINGS, emoteOnlyMode: true },
+        reaction: reaction("hey", "greeting"),
+      });
+      if (!result) continue;
+      for (const word of result.message.text.split(" ")) expect(word).toBe("peepoHi");
+    }
+  });
+
+  it("answers a spam directive with the token and with emotes that mean it", () => {
+    // "spam W" is both: the token as the streamer's own words, and the
+    // room's equivalents. PogChamp means hype; Sadge must never appear.
+    const seen = new Set<string>();
+    for (let seed = 0; seed < 120; seed += 1) {
+      const result = direct(seed, {
+        intent: "directive",
+        topic: topic("directive", { directiveTarget: "W" }),
+        reaction: reaction("ok chat W", "directive", { emotion: "hype" }),
+      });
+      if (!result) continue;
+      for (const word of result.message.text.split(" ")) seen.add(word);
+    }
+    expect(seen.has("W")).toBe(true);
+    expect(seen.has("Sadge")).toBe(false);
+  });
+});

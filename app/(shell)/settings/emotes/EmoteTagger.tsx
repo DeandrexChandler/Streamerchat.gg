@@ -17,6 +17,7 @@ import {
   type EmoteTagMap,
 } from "@/lib/config/emote-tags";
 import { EMOTE_TAGS, type Emote, type EmoteTag } from "@/lib/engine/types";
+import { meaningsOf } from "@/lib/emotes/meaning";
 import { cn } from "@/lib/utils";
 
 /** Shown on the chips, because "question" alone reads ambiguously. */
@@ -24,14 +25,17 @@ const TAG_LABELS: Record<EmoteTag, string> = {
   greeting: "Greeting",
   farewell: "Goodbye",
   hype: "Hype",
-  achievement: "Win",
-  struggle: "Struggle",
-  confusion: "Confused",
+  agreement: "Agreement",
+  victory: "Win",
+  spam: "Spam",
+  laugh: "Laugh",
+  sad: "Sad",
+  frustrated: "Frustrated",
+  confused: "Confused",
   question: "Question",
-  showing: "Showing",
-  story: "Story",
+  love: "Love",
   idle: "Idle",
-  general: "General",
+  general: "Anywhere",
 };
 
 /** How many thumbnails render at once. A channel pack can be 600 emotes. */
@@ -55,6 +59,7 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [taggedOnly, setTaggedOnly] = useState(false);
+  const [unusedOnly, setUnusedOnly] = useState(false);
 
   const update = useCallback((name: string, next: readonly EmoteTag[]) => {
     setTags((current) => {
@@ -72,15 +77,19 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
     return emotes.filter((emote) => {
       const key = emote.name.toLowerCase();
       if (taggedOnly && !tags[key]) return false;
+      // Never used: no hand tags and nothing readable in the name.
+      if (unusedOnly && (tags[key] || meaningsOf(emote.name).length > 0)) return false;
       return needle === "" || key.includes(needle);
     });
-  }, [emotes, query, tags, taggedOnly]);
+  }, [emotes, query, tags, taggedOnly, unusedOnly]);
 
   const active = selected
     ? emotes.find((emote) => emote.name.toLowerCase() === selected)
     : undefined;
   const activeTags = selected ? (tags[selected] ?? []) : [];
   const taggedCount = Object.keys(tags).length;
+  /** What the name alone says, when nobody has tagged this emote by hand. */
+  const guessed = active ? meaningsOf(active.name) : [];
 
   if (emotes.length === 0) return null;
 
@@ -97,8 +106,10 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
         </CardTitle>
         <CardDescription>
           Tell chat when to use an emote. Tag your wave emote as a greeting and
-          it gets posted when someone says hi. Untagged emotes are still used —
-          chat just guesses from the name. Tags survive re-importing a pack.
+          it gets posted when someone says hi. Untagged emotes are read from
+          their name — `KEKW` is laughter anywhere — and one whose name says
+          nothing is never posted, rather than turning up in the wrong moment.
+          Tags survive re-importing a pack.
         </CardDescription>
       </CardHeader>
 
@@ -120,6 +131,13 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
           >
             Tagged only
           </Button>
+          <Button
+            variant={unusedOnly ? "secondary" : "ghost"}
+            onClick={() => setUnusedOnly((on) => !on)}
+            title="Emotes whose name means nothing to chat, so they are never posted"
+          >
+            Never used
+          </Button>
         </div>
 
         {active && (
@@ -131,6 +149,19 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
                 className="h-8 w-auto"
               />
               <span className="text-sm font-medium">{active.name}</span>
+              <Badge variant={activeTags.length > 0 ? "default" : "secondary"} className="shrink-0">
+                {activeTags.length > 0 ? "Yours" : "Automatic"}
+              </Badge>
+              {activeTags.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-muted-foreground"
+                  onClick={() => update(active.name, [])}
+                >
+                  Reset to automatic
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -141,6 +172,16 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
                 <X className="size-4" />
               </Button>
             </div>
+
+            {/* What chat does with it today, so tagging is a correction
+                rather than a guess about what is already understood. */}
+            <p className="text-[11px] text-muted-foreground">
+              {activeTags.length > 0
+                ? "Your tags decide when chat posts this."
+                : guessed.length > 0
+                  ? `Read from the name: ${guessed.map((tag) => TAG_LABELS[tag]).join(", ")}.`
+                  : "Nothing is known about this one, so chat never posts it. Tag it to put it in rotation."}
+            </p>
 
             <div className="flex flex-wrap gap-1.5">
               {EMOTE_TAGS.map((tag) => {

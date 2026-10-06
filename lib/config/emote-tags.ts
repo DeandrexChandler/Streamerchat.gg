@@ -1,4 +1,4 @@
-import type { EmoteTag } from "../engine/types";
+import { EMOTE_TAGS, type EmoteTag } from "../engine/types";
 
 /**
  * User-assigned emote tags, stored apart from the packs themselves.
@@ -20,10 +20,23 @@ export interface EmoteTagStore {
   save(tags: EmoteTagMap): void;
 }
 
-const VALID = new Set<string>([
-  "greeting", "farewell", "hype", "achievement", "struggle",
-  "confusion", "question", "showing", "story", "idle", "general",
-]);
+const VALID = new Set<string>(EMOTE_TAGS);
+
+/**
+ * Tags an older build wrote, in the vocabulary it had.
+ *
+ * Thrown-away tags are tags the streamer typed by hand, so these are
+ * translated rather than dropped. The two that have no equivalent — a
+ * "showing" or "story" emote — become `general`, which still means "usable",
+ * just not "usable here specifically".
+ */
+const RENAMED: Readonly<Record<string, EmoteTag>> = {
+  achievement: "victory",
+  struggle: "frustrated",
+  confusion: "confused",
+  showing: "general",
+  story: "general",
+};
 
 /** Hand-validated: this reads data an older build may have written. */
 function sanitise(raw: unknown): EmoteTagMap {
@@ -32,9 +45,9 @@ function sanitise(raw: unknown): EmoteTagMap {
 
   for (const [name, tags] of Object.entries(raw as Record<string, unknown>)) {
     if (!Array.isArray(tags)) continue;
-    const kept = tags.filter(
-      (tag): tag is EmoteTag => typeof tag === "string" && VALID.has(tag),
-    );
+    const kept = tags
+      .map((tag) => (typeof tag === "string" ? (RENAMED[tag] ?? tag) : tag))
+      .filter((tag): tag is EmoteTag => typeof tag === "string" && VALID.has(tag));
     if (kept.length > 0) out[name.toLowerCase()] = [...new Set(kept)];
   }
   return out;

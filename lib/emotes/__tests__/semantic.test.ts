@@ -47,14 +47,15 @@ describe("semantic emote selection", () => {
 
   it("does not fire a fragment on an unrelated word", () => {
     // "hi" must not match "thinking" or "whip" — a bare substring test would.
+    // Neither means a greeting and neither has a greeting-ish mood, so the
+    // right answer is no emote at all: a line of text beats a wrong picture.
     const emotes = pack(["thinking", "confused"], ["whip", "unknown"]);
     const picked = pickSemanticEmote({
       emotes,
       intent: "greeting",
       rng: createRng(3),
     });
-    expect(["thinking", "whip"]).toContain(picked?.name);
-    // It fell through to mood/wildcard rather than claiming a name match.
+    expect(picked).toBeNull();
   });
 
   it("varies among equally suitable names", () => {
@@ -109,15 +110,16 @@ describe("semantic emote selection", () => {
 
   it("lets the reaction's own emotion outrank the intent's moods", () => {
     // A joke about a loss is funny, not sad — the line's emotion describes the
-    // message, the intent only describes what the streamer did.
-    const emotes = pack(["someLaugh", "funny"], ["someTear", "sad"]);
+    // message, the intent only describes what the streamer did. Names that
+    // mean nothing, so the mood tier is the one being tested.
+    const emotes = pack(["zzqq", "funny"], ["vvxx", "sad"]);
     const picked = pickSemanticEmote({
       emotes,
       intent: "struggle",
       emotion: "funny",
       rng: createRng(4),
     });
-    expect(picked?.name).toBe("someLaugh");
+    expect(picked?.name).toBe("zzqq");
   });
 
   it("prefers an emote the user tagged as a greeting over the name match", () => {
@@ -157,7 +159,7 @@ describe("semantic emote selection", () => {
 
   it("falls back to mood when nothing carries a matching tag", () => {
     const emotes: Emote[] = [
-      { id: "a", name: "aaa", mood: "sad", url: "u", tags: ["story"] },
+      { id: "a", name: "aaa", mood: "sad", url: "u", tags: ["love"] },
       { id: "b", name: "bbb", mood: "hype", url: "u", tags: ["idle"] },
     ];
     const picked = pickSemanticEmote({
