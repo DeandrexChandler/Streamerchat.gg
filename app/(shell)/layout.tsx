@@ -7,6 +7,7 @@ import { Menu, MessagesSquare, Radio, SlidersHorizontal, X } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { SimulatorSession } from "@/lib/react/simulator-session";
 
 /**
  * App chrome.
@@ -140,7 +141,9 @@ export default function ShellLayout({
           </div>
         </header>
 
-        <main className="flex-1 overflow-hidden p-6">{children}</main>
+        <main className="flex-1 overflow-hidden p-6">
+          <SimulatorSession>{children}</SimulatorSession>
+        </main>
       </div>
 
       {mobileOpen && (

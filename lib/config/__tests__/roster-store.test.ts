@@ -69,6 +69,26 @@ describe("the roster store", () => {
     expect(saved.seenAt).toBe(1_234);
   });
 
+  it("never undoes an edit made after the session loaded the room", () => {
+    // The session outlives a trip to settings. Its copy of the room was
+    // loaded before the streamer added someone there; writing it back would
+    // delete them.
+    localRosterStore.replace([viewer()]);
+    const basedOn = localRosterStore.revision();
+
+    localRosterStore.replace([viewer(), viewer({ id: "v2", name: "newfriend", edited: true })]);
+    localRosterStore.save([viewer({ seenAt: 9_999 })], basedOn);
+    expect(localRosterStore.load().map((v) => v.name)).toEqual(["hazelirl", "newfriend"]);
+
+    localRosterStore.clear();
+    localRosterStore.save([viewer()], basedOn);
+    expect(localRosterStore.load()).toEqual([]);
+
+    // A session that loaded the current room writes as before.
+    localRosterStore.save([viewer({ seenAt: 9_999 })], localRosterStore.revision());
+    expect(localRosterStore.load()[0].seenAt).toBe(9_999);
+  });
+
   it("lets a session update anyone the streamer has not touched", () => {
     localRosterStore.replace([viewer({ name: "original" })]);
     localRosterStore.save([viewer({ name: "renamed by the engine" })]);

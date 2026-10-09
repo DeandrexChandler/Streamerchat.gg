@@ -434,3 +434,31 @@ different fix:
 appear late, as one block, or appear and get marked IGNORED tells which of
 these it is. Related to item 24.
 
+
+---
+
+## 26. Leaving the simulator wiped the session — done
+
+**Seen (owner):** going to settings, or anywhere else in the app, and back
+reset the simulator: chat, the transcript and the running session all gone.
+
+**Cause:** the whole session — engine, chat, transcript, mic — lived inside
+the simulator page, and Next unmounts a page on navigation.
+
+**Now:** the session is owned by the app shell (`lib/react/simulator-session.tsx`),
+which outlives navigation. Leaving the simulator pauses chat and releases
+the mic, as Pause does; coming back finds it paused with everything kept,
+and Play carries on. Settings changed while away are read in on return.
+The only ways to end a session are **Reset session** (the old Clear chat
+button, renamed) and reloading the window.
+
+- **Regulars edited mid-session apply after Reset session.** The running
+  session keeps the room it started with. A session's roster write-back
+  would otherwise delete someone just added or bring back someone just
+  removed, so it stops writing once the regulars are edited
+  (`revision` in `lib/config/roster-store.ts`).
+- Reset session now also zeroes the viewer and message counters, which it
+  used to leave showing the old session's numbers.
+- Verified in the running app with the provider stubbed: chat and
+  transcript survive a trip to settings and back, no AI calls while away,
+  Resume continues, Reset wipes it all.
