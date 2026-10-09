@@ -150,3 +150,44 @@ describe("emote accuracy", () => {
     expect(pickSemanticEmote({ emotes: wrong, intent: "achievement", event: "win", rng: createRng(1) })).toBeNull();
   });
 });
+
+/**
+ * The streamer's "never".
+ *
+ * Tags say where an emote belongs; these say where it must not go, which no
+ * amount of tagging can express. KEKW is laughter and belongs in a funny
+ * moment, and still must never land straight after a death.
+ */
+describe("blocked emotes and moments an emote is barred from", () => {
+  it("never posts a blocked emote, whatever points at it", () => {
+    const emotes: Emote[] = PACK.map((emote) =>
+      emote.name === "hi" ? { ...emote, blocked: true, tags: ["greeting"] } : emote,
+    );
+    // Hand-tagged for greetings, asked for by name, and the moment is a
+    // greeting: still never.
+    const names = spread({ emotes, intent: "greeting", preferred: "hi" });
+    expect(names.has("hi")).toBe(false);
+    expect(names.has("peepoHi")).toBe(true);
+  });
+
+  it("keeps a barred emote out of that moment, even when the model names it", () => {
+    const emotes: Emote[] = PACK.map((emote) =>
+      emote.name === "KEKW" ? { ...emote, notFor: ["sad"] } : emote,
+    );
+    const death = spread({ emotes, intent: "mundane", event: "death", preferred: "KEKW" });
+    expect(death.has("KEKW")).toBe(false);
+  });
+
+  it("still uses a barred emote in moments it is not barred from", () => {
+    const emotes: Emote[] = PACK.map((emote) =>
+      emote.name === "KEKW" ? { ...emote, notFor: ["sad"] } : emote,
+    );
+    // An ordinary line wanting a laugh: nothing sad about it.
+    expect(pick({ emotes, intent: "mundane", preferred: "KEKW", rng: createRng(1) })).toBe("KEKW");
+  });
+
+  it("returns nothing when every candidate is blocked", () => {
+    const emotes: Emote[] = PACK.map((emote) => ({ ...emote, blocked: true }));
+    expect(pickSemanticEmote({ emotes, intent: "excitement", rng: createRng(1) })).toBeNull();
+  });
+});

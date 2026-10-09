@@ -189,6 +189,18 @@ export function pickSemanticEmote({
   ];
   const wanted = [...explicit, ...MOMENT_TAGS[intent]].flat();
 
+  /**
+   * The streamer's "never" comes before every tier, the model's own pick
+   * included. A blocked emote is gone; a `notFor` emote is gone for any
+   * moment that wants one of the meanings it is barred from — which is what
+   * keeps KEKW out of a death even when the model asks for it by name.
+   */
+  const moment = new Set<EmoteTag>([...wanted, ...(emoteIntent ? [emoteIntent] : [])]);
+  emotes = emotes.filter(
+    (emote) => !emote.blocked && !emote.notFor?.some((tag) => moment.has(tag)),
+  );
+  if (emotes.length === 0) return null;
+
   // 1. What the streamer said this emote is for. Never overruled by a guess.
   const handTagged = emotes.filter((emote) => (emote.tags?.length ?? 0) > 0);
   for (const tag of wanted) {

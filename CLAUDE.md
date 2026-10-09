@@ -102,7 +102,10 @@ Consequences that must stay true:
   what chat was told to post and what is on screen, the model's stated
   feeling, the intent, mood, then nothing. An emote nobody tagged and whose
   name means nothing is never posted — text with no emote is the better
-  answer. See `lib/emotes/semantic.ts`.
+  answer. See `lib/emotes/semantic.ts`. The streamer's "never" comes before
+  all of it: a blocked emote is never posted or offered to the model, and an
+  emote barred from a meaning stays out of any moment that wants it
+  (`lib/config/emote-rules.ts`).
 - **Every regular types differently.** Line length, caps, punctuation,
   questions, stretched words and two things they bring up — sampled once per
   person from ranges measured off real chats (`lib/data/voices.ts`, from

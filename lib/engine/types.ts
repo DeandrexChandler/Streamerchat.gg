@@ -294,6 +294,13 @@ export interface Emote {
    * the person who imported the pack gets the final say.
    */
   tags?: readonly EmoteTag[];
+  /** The streamer never wants this one posted, anywhere. */
+  blocked?: boolean;
+  /**
+   * Moments this emote must never be posted into, even when it otherwise
+   * fits — KEKW belongs in a funny moment and still not after a death.
+   */
+  notFor?: readonly EmoteTag[];
   /** Image URL. Required — there is no text-only emote tier. */
   url: string;
   width?: number;
