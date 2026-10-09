@@ -59,6 +59,18 @@ function getConstructor(): SpeechRecognitionCtor | null {
 const MIN_RESTART_DELAY_MS = 250;
 const MAX_RESTART_DELAY_MS = 8_000;
 
+/**
+ * Talking straight through, the transcript is handed over this often.
+ *
+ * Chrome only finalises at a pause, and only finals reach the engine, so a
+ * streamer who never stops was a streamer chat could not hear — then one
+ * paragraph arrived at once. Long enough that a sentence with an ordinary
+ * pause finalises on its own first; short enough that chat keeps up.
+ */
+const COMMIT_AFTER_MS = 5_000;
+/** Fewer words than this is not worth a reply of its own yet. */
+const COMMIT_MIN_WORDS = 4;
+
 export class WebSpeechProvider implements TranscriptionProvider {
   readonly name = "web-speech";
   readonly events = new Emitter<TranscriptionEvents>();
@@ -68,6 +80,10 @@ export class WebSpeechProvider implements TranscriptionProvider {
   private wantRunning = false;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private restartDelay = MIN_RESTART_DELAY_MS;
+  /** Words at the front of the unfinished text already handed over. */
+  private committedWords = 0;
+  /** When the unfinished text started, or was last handed over. */
+  private pendingSince: number | null = null;
 
   constructor(private readonly lang: string = "en-US") {}
 
@@ -114,6 +130,8 @@ export class WebSpeechProvider implements TranscriptionProvider {
   }
 
   private spawn(Ctor: SpeechRecognitionCtor): void {
+    this.committedWords = 0;
+    this.pendingSince = null;
     const recognition = new Ctor();
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -133,22 +151,37 @@ export class WebSpeechProvider implements TranscriptionProvider {
         if (!text) continue;
 
         if (result.isFinal) {
-          // Repaired before anything downstream sees it: the classifier
-          // matches on words, so a mistranscribed "low key" silently becomes
-          // chat ignoring you.
-          const trimmed = repairSlang(text.trim());
-          if (isLikelyArtefact(trimmed)) continue;
-          // Real speech means the connection is healthy — reset the backoff.
-          this.restartDelay = MIN_RESTART_DELAY_MS;
-          this.events.emit("final", { text: trimmed });
+          // Whatever of it was already handed over early is not sent twice.
+          const words = text.trim().split(/\s+/);
+          const skip = Math.min(this.committedWords, words.length);
+          this.committedWords -= skip;
+          this.pendingSince = null;
+          this.emitFinal(words.slice(skip).join(" "));
         } else {
           interim += text;
         }
       }
 
-      if (interim.trim()) {
-        this.events.emit("interim", { text: interim.trim() });
+      const words = interim.trim().split(/\s+/).filter(Boolean);
+      if (words.length === 0) {
+        this.committedWords = 0;
+        this.pendingSince = null;
+        return;
       }
+
+      const now = Date.now();
+      this.pendingSince ??= now;
+      const fresh = words.slice(this.committedWords);
+      if (now - this.pendingSince >= COMMIT_AFTER_MS && fresh.length > COMMIT_MIN_WORDS) {
+        // The last word is the one Chrome is still revising; it waits.
+        const chunk = fresh.slice(0, -1);
+        this.committedWords += chunk.length;
+        this.pendingSince = now;
+        this.emitFinal(chunk.join(" "));
+      }
+
+      const shown = words.slice(this.committedWords).join(" ");
+      if (shown) this.events.emit("interim", { text: shown });
     };
 
     recognition.onerror = (event) => {
@@ -187,6 +220,16 @@ export class WebSpeechProvider implements TranscriptionProvider {
       // InvalidStateError when a previous instance hasn't fully released.
       this.scheduleRestart(Ctor);
     }
+  }
+
+  private emitFinal(text: string): void {
+    // Repaired before anything downstream sees it: the classifier matches on
+    // words, so a mistranscribed "low key" silently becomes chat ignoring you.
+    const trimmed = repairSlang(text.trim());
+    if (isLikelyArtefact(trimmed)) return;
+    // Real speech means the connection is healthy — reset the backoff.
+    this.restartDelay = MIN_RESTART_DELAY_MS;
+    this.events.emit("final", { text: trimmed });
   }
 
   private scheduleRestart(Ctor: SpeechRecognitionCtor): void {

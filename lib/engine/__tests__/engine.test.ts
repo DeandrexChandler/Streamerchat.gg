@@ -469,6 +469,21 @@ describe("active generation", () => {
     expect(messages.filter((m) => m.at >= 9_000 && m.at < 16_000).length).toBeGreaterThan(3);
   });
 
+  it("keeps up with a streamer who talks for a minute without stopping", async () => {
+    // What the recogniser now hands over when nobody pauses: a chunk every
+    // five seconds. Chat has to keep talking throughout and keep answering
+    // the latest chunk, not fall a minute behind.
+    const script: Array<[number, string]> = [];
+    for (let at = 1_000; at <= 61_000; at += 5_000) script.push([at, `and then chunk ${at / 1000} of the story`]);
+    const { messages, requests } = await drive(70_000, { latencyMs: 3_000, script });
+
+    for (let from = 5_000; from < 65_000; from += 10_000) {
+      expect(messages.filter((m) => m.at >= from && m.at < from + 10_000).length).toBeGreaterThan(2);
+    }
+    const answered = requests.filter((r) => r.phase === "active" && !r.continuation).map((r) => r.utterance);
+    expect(answered).toContain("and then chunk 61 of the story");
+  });
+
   it("ignores a reply carrying an abandoned ticket", () => {
     // The streamer spoke during a slow arrival call. The arrival reply lands
     // after the reaction request went out; it must not be mistaken for the

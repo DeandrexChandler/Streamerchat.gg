@@ -135,6 +135,53 @@ describe("WebSpeechProvider", () => {
     expect(onFinal).not.toHaveBeenCalled();
   });
 
+  it("hands over speech that never pauses, a few seconds at a time", async () => {
+    // Chrome only finalises at a pause. Talking straight through left
+    // everything as interim text, and the engine never sees interim text,
+    // so chat had nothing new to answer until the streamer stopped.
+    const provider = new WebSpeechProvider();
+    const onFinal = vi.fn();
+    const onInterim = vi.fn();
+    provider.events.on("final", onFinal);
+    provider.events.on("interim", onInterim);
+    await provider.start();
+
+    latest().emitInterim("so i was");
+    vi.advanceTimersByTime(2_000);
+    latest().emitInterim("so i was walking down the");
+    expect(onFinal).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(4_000);
+    latest().emitInterim("so i was walking down the road and i saw");
+    // The last word is still being revised, so it stays behind.
+    expect(onFinal).toHaveBeenCalledWith({ text: "so i was walking down the road and i" });
+    expect(onInterim).toHaveBeenLastCalledWith({ text: "saw" });
+
+    // When Chrome does finalise, only what was not already handed over goes.
+    latest().emitFinal("so i was walking down the road and i saw a dog");
+    expect(onFinal).toHaveBeenCalledTimes(2);
+    expect(onFinal).toHaveBeenLastCalledWith({ text: "saw a dog" });
+
+    // And the next sentence starts clean.
+    latest().emitFinal("anyway chat");
+    expect(onFinal).toHaveBeenLastCalledWith({ text: "anyway chat" });
+  });
+
+  it("leaves a sentence alone when the streamer pauses in time", async () => {
+    const provider = new WebSpeechProvider();
+    const onFinal = vi.fn();
+    provider.events.on("final", onFinal);
+    await provider.start();
+
+    latest().emitInterim("chat what do");
+    vi.advanceTimersByTime(3_000);
+    latest().emitInterim("chat what do you think of this");
+    latest().emitFinal("chat what do you think of this build");
+
+    expect(onFinal).toHaveBeenCalledTimes(1);
+    expect(onFinal).toHaveBeenCalledWith({ text: "chat what do you think of this build" });
+  });
+
   it("filters recogniser artefacts out of finals", async () => {
     const provider = new WebSpeechProvider();
     const onFinal = vi.fn();

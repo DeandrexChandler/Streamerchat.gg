@@ -175,6 +175,39 @@ describe("chat-candidates route", () => {
     expect(log.warn.mock.calls.some(([line]) => String(line).includes("count"))).toBe(true);
   });
 
+  it("trims an over-long transcript or memory rather than refusing the batch", async () => {
+    // Two minutes of talking without a pause is one 1,500 character
+    // transcript, and a regular addressed at length carries a long memory.
+    // Refused, every later request carried the same text and failed the
+    // same way: chat went silent with nothing anywhere but the server log.
+    let received: Parameters<CandidateProvider["generate"]>[0] | null = null;
+    const provider: CandidateProvider = {
+      name: "spy",
+      async generate(request) {
+        received = request;
+        return ok(["x"]);
+      },
+    };
+    const { handler } = make(provider);
+    const long = "and then ".repeat(200);
+    const res = await read(
+      await handler(
+        post({
+          ...body,
+          utterance: long,
+          history: [long],
+          roster: [{ name: "hazelirl", persona: "p".repeat(300), notes: "n".repeat(700) }],
+        }),
+      ),
+    );
+
+    expect(res.status).toBe("ok");
+    expect(received!.utterance.length).toBeLessThanOrEqual(1000);
+    expect(received!.history[0].length).toBeLessThanOrEqual(1000);
+    expect(received!.roster![0].notes!.length).toBeLessThanOrEqual(400);
+    expect(received!.roster![0].persona.length).toBeLessThanOrEqual(200);
+  });
+
   it("clamps the batch to the configured ceiling", async () => {
     let requested = 0;
     const provider: CandidateProvider = {
