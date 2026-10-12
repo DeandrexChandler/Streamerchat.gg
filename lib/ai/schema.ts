@@ -41,13 +41,23 @@ const _sentimentsAreExhaustive: MissingSentiment extends never ? true : never = 
 void _intentsAreExhaustive;
 void _sentimentsAreExhaustive;
 
+/**
+ * Free text that is trimmed to its cap rather than refused.
+ *
+ * Everything here is built by the engine from speech and memory, and a
+ * refusal is silent by design — the same oversized transcript rode in every
+ * following request, so one long run-on silenced chat for minutes. The cap
+ * still bounds the prompt; it just no longer costs the whole batch.
+ */
+const text = (max: number) => z.string().transform((value) => value.slice(0, max));
+
 export const CandidateRequestSchema = z
   .object({
     phase: z.enum(["startup", "active", "idle"]).default("active"),
     /** What the streamer said. Empty only during startup. */
-    utterance: z.string().max(1000).default(""),
+    utterance: text(1000).default(""),
     /** Recent utterances, oldest first. Capped so a long stream cannot grow the prompt without bound. */
-    history: z.array(z.string().max(1000)).max(12).default([]),
+    history: z.array(text(1000)).max(12).default([]),
     classification: z.object({
       intent: z.enum(INTENTS),
       sentiment: z.enum(SENTIMENTS),
@@ -59,14 +69,14 @@ export const CandidateRequestSchema = z
     silenceSeconds: z.number().min(0).max(100_000).default(0),
     idleStage: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
     emotes: z.array(z.string().max(60)).max(200).default([]),
-    recent: z.array(z.string().max(200)).max(30).default([]),
+    recent: z.array(text(200)).max(30).default([]),
     /**
      * Nullish rather than optional: JSON.stringify drops `undefined`, but any
      * caller that sends an explicit `null` should be treated as "not set" rather
      * than failing the whole request over an absent nicety.
      */
-    streamer: z.string().max(40).nullish().transform((v) => v ?? undefined),
-    topic: z.string().max(80).nullish().transform((v) => v ?? undefined),
+    streamer: text(40).nullish().transform((v) => v ?? undefined),
+    topic: text(80).nullish().transform((v) => v ?? undefined),
     count: z.number().int().min(1).max(70).default(16),
     /**
      * Base64 JPEG of the streamer's screen. Capped well under the route's
@@ -85,9 +95,9 @@ export const CandidateRequestSchema = z
           name: z.string().max(40),
           // Archetype plus typing habits plus what they bring up: the whole
           // voice, which is a sentence, not a label.
-          persona: z.string().max(200),
-          notes: z.string().max(400).optional(),
-          character: z.string().max(200).optional(),
+          persona: text(200),
+          notes: text(400).optional(),
+          character: text(200).optional(),
         }),
       )
       .max(12)
