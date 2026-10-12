@@ -90,3 +90,70 @@ function tryJson(raw: string): unknown {
 
 
 
+
+/**
+ * Reactions out of JSON that is still arriving.
+ *
+ * A streamed reply is released line by line, so each reaction is handed on
+ * the moment its closing brace lands rather than when the whole array does.
+ * Tracks strings and escapes, so a brace inside a chat line ("hi :}") is
+ * text, not structure. Whatever shape the model chose, `finish` reparses the
+ * whole thing at the end and returns what this missed.
+ */
+export class ReactionStream {
+  private text = "";
+  private pos = 0;
+  private depth = 0;
+  private inString = false;
+  private escaped = false;
+  private start = -1;
+  /** Brace depth reactions sit at: 0 in a bare array, 1 inside a wrapper. */
+  private itemDepth: number | null = null;
+  private readonly seen = new Set<string>();
+
+  push(chunk: string): Reaction[] {
+    this.text += chunk;
+    const out: Reaction[] = [];
+    for (; this.pos < this.text.length; this.pos += 1) {
+      const c = this.text[this.pos];
+      if (this.inString) {
+        if (this.escaped) this.escaped = false;
+        else if (c === "\\") this.escaped = true;
+        else if (c === '"') this.inString = false;
+        continue;
+      }
+      if (c === '"') this.inString = true;
+      else if (c === "[" && this.itemDepth === null) this.itemDepth = this.depth;
+      else if (c === "{") {
+        // A brace before any array is the wrapper object around it.
+        if (this.depth === this.itemDepth) this.start = this.pos;
+        this.depth += 1;
+      } else if (c === "}") {
+        this.depth -= 1;
+        if (this.depth === this.itemDepth && this.start !== -1) {
+          out.push(...this.keep(coerce([tryJson(this.text.slice(this.start, this.pos + 1))])));
+          this.start = -1;
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Everything the full reply holds that was not already handed on. */
+  finish(): Reaction[] {
+    return this.keep(parseReactions(this.text));
+  }
+
+  /** The text so far, for the event label and the log. */
+  get raw(): string {
+    return this.text;
+  }
+
+  private keep(reactions: Reaction[]): Reaction[] {
+    return reactions.filter((reaction) => {
+      if (this.seen.has(reaction.text)) return false;
+      this.seen.add(reaction.text);
+      return true;
+    });
+  }
+}
