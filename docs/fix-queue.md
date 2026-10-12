@@ -407,33 +407,44 @@ and latency before choosing — this is the input every reaction depends on.
 
 ---
 
-## 25. Talking without breaks stops chat responding properly
+## 25. Talking without breaks stops chat responding properly — fixed, to confirm live
 
 **Seen (owner, live):** speaking normally and continuously, with no real
 pauses, and chat stops responding properly to what is being said.
 
-**Not investigated yet.** Likely causes to check first, each with a
-different fix:
+**Found in the code**, three causes, the second and third worse than the
+symptom suggested:
 
-- **No final transcript.** The browser only marks speech as final at a
-  pause (`isFinal` in `lib/transcription/web-speech.ts`). Talking straight
-  through can leave it all as in-progress text that never reaches the
-  engine, so chat has nothing new to answer.
-- **One huge transcript.** When it does finalise, a long run-on can arrive
-  as a single utterance, and the reply is to the whole paragraph rather
-  than to what was just said.
-- **Replies superseding each other.** Every accepted sentence makes the
-  reply already in flight out of date and queues another; fast enough,
-  chat ends up a round trip behind and answering old lines
-  (`supplyReactions` / `freshReply` in `lib/engine/engine.ts`).
-- **The attention gate's fatigue damper.** A lot of recent speech makes the
-  gate more likely to skip a sentence as not worth reacting to
-  (`recentVolume` in `lib/engine/attention.ts`).
+- **Nothing reached the engine.** Chrome only marks speech final at a
+  pause, and only finals were fed to the engine — interim text was display
+  only. Talking straight through, chat had nothing new to answer.
+- **Then one paragraph, which killed chat.** When it did finalise, a long
+  run-on arrived as one transcript. Over 1,000 characters (about a minute
+  of talking) the route refused the request. Refusals are silent by design,
+  and the same text rode along in every later request as the last thing
+  said and in history for eight more, so chat went dead with nothing but
+  `[ai] INVALID REQUEST` in the server log.
+- **The same at the slow tiers from memory alone.** A regular's notes —
+  topics, their lines, what the streamer said to them — could reach about
+  700 characters against a 400 cap, long sentences addressed to them being
+  the biggest part. Saved to browser storage, so it survived a restart.
 
-**First step:** reproduce it with the transcript panel open — whether lines
-appear late, as one block, or appear and get marked IGNORED tells which of
-these it is. Related to item 24.
+**Now:**
+- Unpaused speech is handed to the engine every five seconds
+  (`COMMIT_AFTER_MS` in `lib/transcription/web-speech.ts`), holding back
+  the last word while Chrome is still revising it. When Chrome finalises,
+  only the words not already sent go. A sentence with an ordinary pause is
+  untouched.
+- The request schema trims free text to its cap instead of refusing the
+  batch (`lib/ai/schema.ts`). The prompt is bounded the same; one long
+  field no longer costs chat.
+- Checked in the engine: a chunk every five seconds for a minute, against
+  a three second provider, keeps chat posting throughout and answering the
+  latest chunk. The fatigue damper suspected earlier was already gone.
 
+**To confirm live:** talk without stopping for a minute or two with the
+transcript panel open. Lines should appear every few seconds, and chat
+should follow them.
 
 ---
 

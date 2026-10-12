@@ -75,8 +75,9 @@ describe("chat-candidates request contract", () => {
     expect(RequestSchema.safeParse({ ...valid, history: long }).success).toBe(false);
   });
 
-  it("rejects an oversized streamer name", () => {
-    const bad = { ...valid, streamer: "x".repeat(41) };
-    expect(RequestSchema.safeParse(bad).success).toBe(false);
+  it("trims an oversized streamer name rather than refusing the batch", () => {
+    const parsed = RequestSchema.safeParse({ ...valid, streamer: "x".repeat(41) });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.streamer).toHaveLength(40);
   });
 });
