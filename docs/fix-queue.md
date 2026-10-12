@@ -473,3 +473,83 @@ button, renamed) and reloading the window.
 - Verified in the running app with the provider stubbed: chat and
   transcript survive a trip to settings and back, no AI calls while away,
   Resume continues, Reset wipes it all.
+
+---
+
+# Owner priorities — 2026-10-12
+
+Transcription first. OBS check moved to the very end (roadmap, "Final
+product check").
+
+## 27. Chat lags behind speech, or forgets what was said earlier — proposed
+
+**Want (owner):** chat never pauses or falls behind while the streamer
+talks, and earlier things said are not simply dropped — chat should feel
+like it was listening to all of it.
+
+**Why it happens now:**
+- A reply only reaches chat once the whole batch is written: 3–4s for 30
+  lines, about 8s for 64 (0.12s a line, measured).
+- Each new sentence's reply *replaces* the queue when it lands, so lines
+  about the sentence before are thrown away unsaid. Talking steadily, every
+  sentence gets one round trip of chat and is then gone.
+- The prompt carries earlier sentences as context only; nothing asks the
+  model to come back to them.
+
+**Proposal, in order of payoff:**
+1. **Stream the reply.** Ask for one line per row and release each as it
+   arrives, so the first lines post about a second after the request
+   instead of after the whole batch. A request with no first line in ~4s
+   is a hang: abort and retry then, not at 12s. Biggest single fix for lag
+   and for timeouts (item 28).
+2. **Hand over, don't replace.** When a reply to a newer sentence lands,
+   keep two or three of the unsaid lines about the previous one, mixed in.
+   Real chat answers the last thing and the thing before at once.
+3. **Open threads, in short memory.** The engine keeps the last few things
+   said (about five, two minutes at most) with how many lines answered
+   each. The prompt gets them as "earlier, still worth a callback", and a
+   batch spends a line or two going back to one: "wait the dog thing tho".
+   Dropped once answered enough or too old. Bounded, so it costs a few
+   dozen input tokens.
+4. **Say everything since the last ask.** A request lists every sentence
+   that arrived since the previous one, in order, rather than only the
+   newest, so a sentence said while a reply was on the wire is not skipped.
+
+## 28. AI timeouts — proposed
+
+**Seen (owner):** timeout errors.
+
+**Cause, as far as the code shows:** two things stack.
+- Our own cutoff is 12s (`TIMEOUT_MS` in `lib/ai/gemini.ts`), and fast
+  tiers ask for up to 70 lines — about 8s on a good call, so an ordinary
+  slow call crosses it, then the retry asks for the same 70 lines again.
+- Gemini's latency is bimodal: usually a few seconds, occasionally a 15–30s
+  hang. Measured here before, and reported widely for the Flash-Lite
+  models.
+
+A paid key alone does not change either. Billing (Tier 1) lifts the free
+tier's request limits and keeps prompts out of Google's training data;
+the latency fix is structural:
+- Streaming with a first-line deadline (item 27, step 1).
+- Smaller batches at the fast tiers, more often. Output is 94% of cost
+  and is the same total either way; the extra input is about $0.0004 a call.
+- Optionally, Priority processing on the Gemini key (1.8x the price) for
+  fewer hangs.
+
+**Model options, priced at this app's measured usage** (about 1,000 tokens
+in and 1,800 out per call, 3–6.5 calls a minute):
+
+| Model | In / out per 1M | Per hour | Images | Notes |
+|---|---|---|---|---|
+| Gemini 3.5 Flash-Lite (now) | $0.30 / $2.50 | $0.90–1.90 | yes | no thinking tokens, measured |
+| same, Priority | $0.54 / $4.50 | $1.60–3.40 | yes | fewer hangs, same model |
+| Gemini 3.1 Flash-Lite | $0.25 / $1.50 | ~$0.55–1.15 | yes | spent 121 thinking tokens at LOW; untested at MINIMAL |
+| OpenAI gpt-6-luna | $0.10 / $0.50 | ~$0.20–0.40 | yes | reasoning can be off; untested here |
+| Groq gpt-oss-20b | $0.075 / $0.30 | ~$0.10–0.25 | **no** | ~1,000 tokens/s; no images, so no screen capture |
+| Gemini 2.5 Flash-Lite | $0.10 / $0.40 | — | yes | 404 for new keys; ruled out |
+
+Estimates for untested models assume no thinking tokens. None of this is
+decided until measured: about twenty real calls per candidate on the real
+prompt (under a cent each) for latency, cost and whether the lines read
+like Twitch. Switching provider overturns the one-provider rule in
+CLAUDE.md and needs the owner's say-so.

@@ -22,9 +22,7 @@ is manually believable.
 - [x] Manual verification with a real key: the chat feels continuously alive,
       contextually responsive, varied, and recognisably like Twitch chat —
       signed off by the owner 2026-10-06, apart from the OBS check below
-- [ ] OBS check on stream. Performance, not chat behaviour; the owner runs
-      it after the emote work. Emotes already verified rendering in a
-      browser source with a real pack.
+- [ ] OBS check — moved to the final product check below.
 - [x] Cost measured: about $0.90–1.90 an hour (fix queue item 12)
 
 ## Phase 2 — Emote accuracy (current)
@@ -64,6 +62,12 @@ control panel while capture is on.)
 
 Accounts. Authentication. Security hardening. Database. Billing. Usage
 limits. Deployment. Monetisation.
+
+## Final product check (last)
+
+- [ ] OBS check on stream. Performance, not chat behaviour, run once
+      everything above is done. Emotes already verified rendering in a
+      browser source with a real pack.
 
 ## Deferred and recorded, not planned
 
