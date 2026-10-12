@@ -481,7 +481,7 @@ button, renamed) and reloading the window.
 Transcription first. OBS check moved to the very end (roadmap, "Final
 product check").
 
-## 27. Chat lags behind speech, or forgets what was said earlier — step 1 done
+## 27. Chat lags behind speech, or forgets what was said earlier — done, to confirm live
 
 **Want (owner):** chat never pauses or falls behind while the streamer
 talks, and earlier things said are not simply dropped — chat should feel
@@ -504,18 +504,26 @@ like it was listening to all of it.
    streaming about an older sentence is cut off when the streamer speaks,
    and the provider stops writing it. Measured live, 2026-10-12: first lines
    after 0.85–3.1s against 2.5–6.2s for the whole batch.
-2. **Hand over, don't replace.** When a reply to a newer sentence lands,
-   keep two or three of the unsaid lines about the previous one, mixed in.
-   Real chat answers the last thing and the thing before at once.
-3. **Open threads, in short memory.** The engine keeps the last few things
-   said (about five, two minutes at most) with how many lines answered
-   each. The prompt gets them as "earlier, still worth a callback", and a
-   batch spends a line or two going back to one: "wait the dog thing tho".
-   Dropped once answered enough or too old. Bounded, so it costs a few
-   dozen input tokens.
-4. **Say everything since the last ask.** A request lists every sentence
-   that arrived since the previous one, in order, rather than only the
-   newest, so a sentence said while a reply was on the wire is not skipped.
+2. **Hand over, don't replace — done.** When a reply to a newer sentence
+   lands, up to three unsaid lines about the previous one ride along behind
+   its first lines (`CARRY_OVER` in `lib/engine/engine.ts`).
+3. **Open threads, in short memory — done.** The engine keeps the last
+   five things said, two minutes at most, with how many released lines
+   answered each. Fewer than four, and it goes to the model as a callback:
+   "one or two lines in this batch go back to one of them". Not for a
+   directive batch. (`Thread`, `THREAD_MS`, `THREAD_ANSWERED`.)
+4. **Say everything since the last ask — done.** A fresh reply answers
+   every sentence that arrived since the previous one, joined in order,
+   so a piece said while a reply was on the wire is not skipped.
+
+Verified live with the real key: four lines typed 2.5s apart; each cut off
+the reply still streaming about the one before (the provider stopped
+after 15, 2 and 3 lines), and the last request, carrying callbacks, was
+answered with 44 lines.
+
+**To confirm live:** talk steadily for a couple of minutes about two or
+three things. Chat should keep up, and every so often go back to
+something from earlier.
 
 ## 28. AI timeouts — proposed
 

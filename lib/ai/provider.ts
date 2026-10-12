@@ -96,6 +96,14 @@ export interface CandidateRequest {
   roster?: readonly RosterEntry[];
   /** The regular the streamer just addressed by name, if any. */
   addressed?: string;
+  /**
+   * Things said recently that chat barely answered, newest last.
+   *
+   * Chat's short memory: talking steadily, each reply is cut short by the
+   * next, and this is what lets a batch circle back to something from half
+   * a minute ago instead of forgetting it.
+   */
+  callbacks?: readonly string[];
 }
 
 export type ScreenReason = "changed" | "asked";
