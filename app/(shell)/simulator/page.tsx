@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Maximize2, Minimize2, SendHorizontal } from "lucide-react";
 import { ChatList } from "@/app/components/chat/ChatList";
-import { useSimulator } from "@/lib/react/use-simulator";
+import { useSimulatorSession } from "@/lib/react/simulator-session";
 import { ControlPanel } from "./ControlPanel";
 import { EmoteBanner } from "./EmoteBanner";
 import { TranscriptPanel } from "./TranscriptPanel";
@@ -19,7 +19,7 @@ import { TranscriptPanel } from "./TranscriptPanel";
  * rather than as a chat. Do not change `w-96` to `flex-1`.
  */
 function Simulator() {
-  const simulator = useSimulator();
+  const simulator = useSimulatorSession();
   const { status, messages, settings } = simulator;
 
   const live = status === "running";

@@ -94,7 +94,8 @@ export default function RegularsSettingsPage() {
               ? "At your current chat speed these people are written by name, in their own voice, and they remember your stream between sessions."
               : "At your current chat speed chat is a crowd, so names are not sent to the AI. These people still fill the room; drop to 0.5 or 0.2 messages a second to talk to them by name."}{" "}
             Pinned people stay in the room; anyone else can be replaced as
-            the room changes. Changes apply the next time you press Play.
+            the room changes. A session already running keeps its room; changes
+            apply after Reset session on the simulator, or a reload.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

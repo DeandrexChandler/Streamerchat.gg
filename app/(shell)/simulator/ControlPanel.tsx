@@ -189,11 +189,11 @@ export function ControlPanel({
         <button
           type="button"
           onClick={onClear}
-          title="Wipe the chat, release the microphone, and reset to Play"
+          title="End this session: wipe chat and transcript, release the microphone, back to Play"
           className="mt-1.5 flex w-full items-center justify-center gap-1 rounded border border-gray-300 py-1.5 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-700"
         >
           <Trash2 size={12} />
-          Clear chat
+          Reset session
         </button>
       </div>
     </aside>

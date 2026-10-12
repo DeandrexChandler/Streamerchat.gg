@@ -87,7 +87,10 @@ injectable dependencies so tests drive it with a scripted provider.
 
 ## Hook (`lib/react/use-simulator.ts`)
 
-Binds microphone, transcription and engine to React. Every tick: `tick`,
+Binds microphone, transcription and engine to React. Owned by the app shell
+(`lib/react/simulator-session.tsx`), not the simulator page, so a session
+survives navigation: leaving the simulator pauses it, and only Reset session
+or a reload ends it. Every tick: `tick`,
 then `pump` — ask the engine what it needs, fetch it, hand it back. One
 request in flight at a time. Failures are silent in the UI by design.
 

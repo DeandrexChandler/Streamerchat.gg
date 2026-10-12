@@ -13,6 +13,16 @@ import { z } from "zod";
  */
 
 const KEY = "streamerchat-gg:roster:v1";
+/** Bumped by every hand edit, so a session can tell its copy is out of date. */
+const REVISION_KEY = "streamerchat-gg:roster:revision";
+
+function bumpRevision(): void {
+  try {
+    window.localStorage.setItem(REVISION_KEY, String(localRosterStore.revision() + 1));
+  } catch {
+    // Unwritable storage: nothing was saved for a session to overwrite.
+  }
+}
 
 const SavedViewerSchema = z.object({
   id: z.string().max(40),
@@ -86,8 +96,19 @@ export const localRosterStore = {
    * and character it started with. Memory and last-spoken always come from
    * the session, which is the half it actually owns.
    */
-  save(roster: readonly SavedViewer[]): void {
+  save(roster: readonly SavedViewer[], basedOn?: number): void {
     if (typeof window === "undefined") return;
+    /**
+     * The streamer changed who is in the room since this session loaded it.
+     *
+     * The session outlives a trip to settings, so its copy can predate an
+     * edit there: writing it back would delete someone just added and bring
+     * back someone just removed. The edit wins, and the session stops writing
+     * until Reset session loads the new room.
+     * ponytail: the rest of that session's memory is not saved; merge it per
+     * person if editing mid-stream turns out to be common.
+     */
+    if (basedOn !== undefined && basedOn !== this.revision()) return;
     const edited = new Map(
       this.load()
         // `pinned` alone counts for rosters saved before the two were
@@ -113,9 +134,20 @@ export const localRosterStore = {
     }
   },
 
+  /** Which hand edit the stored roster reflects. Zero before the first. */
+  revision(): number {
+    if (typeof window === "undefined") return 0;
+    try {
+      return Number(window.localStorage.getItem(REVISION_KEY)) || 0;
+    } catch {
+      return 0;
+    }
+  },
+
   /** Writes exactly what it is given. Used by the editor itself. */
   replace(roster: readonly SavedViewer[]): void {
     if (typeof window === "undefined") return;
+    bumpRevision();
     try {
       window.localStorage.setItem(KEY, JSON.stringify(roster.slice(0, 12)));
     } catch {
@@ -125,6 +157,7 @@ export const localRosterStore = {
 
   clear(): void {
     if (typeof window === "undefined") return;
+    bumpRevision();
     try {
       window.localStorage.removeItem(KEY);
     } catch {

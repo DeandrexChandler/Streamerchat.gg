@@ -66,6 +66,20 @@ const SCREEN_EVENT_THRESHOLD = 0.18;
  */
 const MAX_RENDERED_MESSAGES = 500;
 
+const EMPTY_STATS: EngineStats = {
+  audience: 0,
+  simulated: 0,
+  pending: 0,
+  released: 0,
+  ignored: 0,
+  bySource: {},
+  phase: "startup",
+  queued: 0,
+  slotsWaited: 0,
+  linesDropped: 0,
+  latencyMs: 0,
+};
+
 /** Where an utterance came from. Never inferred from the text itself. */
 export type TranscriptSource = "microphone" | "typed";
 
@@ -129,6 +143,9 @@ export interface UseSimulatorResult {
   /** True while the mic is off by choice. Chat keeps running on typed input. */
   muted: boolean;
   setMuted: (on: boolean) => Promise<void>;
+
+  /** Re-reads settings and emotes from storage, for after a trip to settings. */
+  reloadStored: () => void;
 }
 
 export function useSimulator(): UseSimulatorResult {
@@ -137,19 +154,7 @@ export function useSimulator(): UseSimulatorResult {
   const [interim, setInterim] = useState("");
   const [heard, setHeard] = useState<HeardUtterance[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<EngineStats>({
-    audience: 0,
-    simulated: 0,
-    pending: 0,
-    released: 0,
-    ignored: 0,
-    bySource: {},
-    phase: "startup",
-    queued: 0,
-    slotsWaited: 0,
-    linesDropped: 0,
-    latencyMs: 0,
-  });
+  const [stats, setStats] = useState<EngineStats>(EMPTY_STATS);
   const [settings, setSettings] = useState<SimulationSettings>(DEFAULT_SETTINGS);
   const [emotes, setEmotes] = useState<Emote[]>(() => []);
   const [overlaySubscribers, setOverlaySubscribers] = useState(0);
@@ -164,6 +169,8 @@ export function useSimulator(): UseSimulatorResult {
   const emotesRef = useRef<Emote[]>([]);
   const pausedRef = useRef(false);
   const lastRosterSaveAt = useRef(0);
+  /** Which edit of the regulars this session's engine was built from. */
+  const rosterRevisionRef = useRef(0);
   /** Read inside callbacks that must not re-create on every toggle. */
   const mutedRef = useRef(false);
   const overlayRef = useRef<OverlayTransport | null>(null);
@@ -182,26 +189,36 @@ export function useSimulator(): UseSimulatorResult {
   /** Level subscribers, kept outside React entirely. */
   const levelSubscribers = useRef(new Set<(level: number) => void>());
 
-  // Settings and emote packs are read from localStorage after mount, not
-  // during render, so server and client markup agree.
-  useEffect(() => {
+  /**
+   * Settings and emotes, from storage.
+   *
+   * Again on every return to the simulator: the session outlives a trip to
+   * settings, so what was changed there has to reach the running engine.
+   */
+  const reloadStored = useCallback(() => {
     const loaded = localSettingsStore.load();
     settingsRef.current = loaded;
     setSettings(loaded);
     engineRef.current?.updateSettings(loaded);
 
-    const packs = localEmotePackStore.load();
-    const merged = mergeEmotes(packs);
+    const merged = mergeEmotes(localEmotePackStore.load());
     emotesRef.current = merged;
     setEmotes(merged);
     engineRef.current?.setEmotes(merged);
+    overlayRef.current?.setEmotes(merged);
+  }, []);
+
+  // Read from localStorage after mount, not during render, so server and
+  // client markup agree.
+  useEffect(() => {
+    reloadStored();
 
     // The OBS relay is created here rather than on start(), because the key
     // comes from localStorage and this is the first point at which it can be
     // read without desyncing server and client markup.
     overlayRef.current = new OverlayTransport({ key: loadOverlayKey() });
     overlayRef.current.setEmotes(emotesRef.current);
-  }, []);
+  }, [reloadStored]);
 
   const subscribeLevel = useCallback((handler: (level: number) => void) => {
     levelSubscribers.current.add(handler);
@@ -213,6 +230,7 @@ export function useSimulator(): UseSimulatorResult {
   const ensureEngine = useCallback((): SimulationEngine => {
     if (!engineRef.current) {
       // Capture may already be running when the engine is (re)built.
+      rosterRevisionRef.current = localRosterStore.revision();
       engineRef.current = new SimulationEngine({
         settings: settingsRef.current,
         emotes: emotesRef.current,
@@ -316,7 +334,7 @@ export function useSimulator(): UseSimulatorResult {
       // crash or a refresh must not cost the streamer their chat.
       if (now - lastRosterSaveAt.current > ROSTER_SAVE_MS) {
         lastRosterSaveAt.current = now;
-        localRosterStore.save(engine.exportRoster());
+        localRosterStore.save(engine.exportRoster(), rosterRevisionRef.current);
       }
 
       // The scheduler is the only source of released messages, so this is the
@@ -532,7 +550,7 @@ export function useSimulator(): UseSimulatorResult {
   }, [status, ensureEngine, startTicking, listen]);
 
   const stop = useCallback(() => {
-    if (engineRef.current) localRosterStore.save(engineRef.current.exportRoster());
+    if (engineRef.current) localRosterStore.save(engineRef.current.exportRoster(), rosterRevisionRef.current);
     stopTicking();
     providerRef.current?.stop();
     providerRef.current = null;
@@ -637,7 +655,7 @@ export function useSimulator(): UseSimulatorResult {
   const clear = useCallback(() => {
     // Clearing wipes the session, not the people: the regulars are who the
     // streamer knows, and Clear is a "start this stream over" button.
-    if (engineRef.current) localRosterStore.save(engineRef.current.exportRoster());
+    if (engineRef.current) localRosterStore.save(engineRef.current.exportRoster(), rosterRevisionRef.current);
     stopTicking();
     providerRef.current?.stop();
     providerRef.current = null;
@@ -657,6 +675,7 @@ export function useSimulator(): UseSimulatorResult {
 
     setMessages([]);
     setHeard([]);
+    setStats(EMPTY_STATS);
     setInterim("");
     setError(null);
     setStatus("idle");
@@ -703,5 +722,6 @@ export function useSimulator(): UseSimulatorResult {
     setWatching: setWatchingScreen,
     muted,
     setMuted,
+    reloadStored,
   };
 }
