@@ -41,6 +41,20 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("look at this roof I just built");
   });
 
+  it("asks for a line or two back to what chat only half answered", () => {
+    const prompt = buildPrompt(request({ callbacks: ["i adopted a cat yesterday"] }));
+    expect(prompt).toContain("i adopted a cat yesterday");
+    expect(prompt).toContain("One or two lines");
+    // A directive batch is the talk around the spam, not a catch-up.
+    const directive = buildPrompt(
+      request({
+        callbacks: ["i adopted a cat yesterday"],
+        classification: { intent: "directive", sentiment: "neutral", energy: 0.5, keywords: [], confidence: 1 },
+      }),
+    );
+    expect(directive).not.toContain("i adopted a cat yesterday");
+  });
+
   it("includes recent chat so it does not repeat", () => {
     expect(buildPrompt(request())).toContain("actual cinema");
   });

@@ -214,6 +214,35 @@ const RECENT_LINES = 20;
 const HISTORY_LINES = 8;
 
 /**
+ * Chat's short memory of what the streamer said.
+ *
+ * Talking steadily, each sentence's reply is cut short by the next one, so a
+ * thing said thirty seconds ago may have had two lines of chat and then
+ * nothing. A thread is one thing said and how many lines answered it; one
+ * that is recent and barely answered goes to the model as worth a callback.
+ */
+interface Thread {
+  /** The utterance the reply was asked for. */
+  id: number;
+  text: string;
+  at: number;
+  answered: number;
+}
+/** Long enough for a callback to make sense, short enough to stay small. */
+const THREAD_MS = 120_000;
+/** Answered by this many lines, it has been heard. */
+const THREAD_ANSWERED = 4;
+const MAX_THREADS = 5;
+const MAX_CALLBACKS = 3;
+/**
+ * Lines about the previous sentence kept when a reply to a newer one lands.
+ *
+ * Real chat answers the last thing and the thing before it at once; dropping
+ * them all made every sentence one round trip of chat and then gone.
+ */
+const CARRY_OVER = 3;
+
+/**
  * What the hot word did, for the transcript panel.
  *
  * "off" is capture not running, "cooldown" is too soon since the last one,
@@ -345,6 +374,11 @@ export class SimulationEngine {
   private lastClassification: Classification | null = null;
   /** Counts accepted inputs, so a batch can say which one it answers. */
   private utteranceId = 0;
+  /** Said since the last fresh reply went out, oldest first. */
+  private sinceAsked: string[] = [];
+  /** What the reply in progress answers: everything said since the one before. */
+  private answering: string[] = [];
+  private threads: Thread[] = [];
   /** Lines chat released recently, for the prompt's do-not-repeat list. */
   private recentLines: string[] = [];
 
@@ -503,6 +537,9 @@ export class SimulationEngine {
     this.nextEmitAt = now;
     this.history = [];
     this.lastUtterance = "";
+    this.sinceAsked = [];
+    this.answering = [];
+    this.threads = [];
     this.lastClassification = null;
     this.recentLines = [];
     this.recentSpeakers = [];
@@ -720,6 +757,7 @@ export class SimulationEngine {
     this.utteranceId += 1;
     this.lastUtterance = text;
     this.lastClassification = classification;
+    this.sinceAsked.push(text);
     this.history.push(text);
     if (this.history.length > HISTORY_LINES) this.history.shift();
     this.scheduler.trimBeyond(now, 1_500);
@@ -990,6 +1028,22 @@ export class SimulationEngine {
       !continuation && ONE_SHOT_INTENTS.has(this.lastClassification.intent)
         ? Math.min(count, this.population.size)
         : count;
+    /**
+     * Everything said since the last reply was asked for.
+     *
+     * A sentence that arrived while a reply was on the wire used to be
+     * skipped — the next request carried only the newest — so a streamer
+     * talking in five-second pieces had every other piece go unanswered.
+     */
+    if (!continuation) {
+      this.answering = this.sinceAsked.length > 0 ? this.sinceAsked : [this.lastUtterance];
+      this.sinceAsked = [];
+      this.threads = [
+        ...this.threads.filter((thread) => now - thread.at < THREAD_MS).slice(-(MAX_THREADS - 1)),
+        { id: this.utteranceId, text: this.answering.join(" "), at: now, answered: 0 },
+      ];
+    }
+    const callbacks = this.callbacks(now);
     this.inFlight = {
       id: this.issue(now),
       requestedAt: now,
@@ -1004,12 +1058,26 @@ export class SimulationEngine {
       ...shared,
       count: wave,
       phase: "active",
-      utterance: this.lastUtterance,
-      history: this.history.slice(0, -1),
+      utterance: this.answering.join(" ") || this.lastUtterance,
+      history: this.history.slice(0, -Math.max(1, this.answering.length)),
       classification: this.lastClassification,
       continuation,
       silenceSeconds,
+      ...(callbacks.length > 0 ? { callbacks } : {}),
     };
+  }
+
+  /** Recent things said that chat barely got to, newest last. */
+  private callbacks(now: number): string[] {
+    return this.threads
+      .filter(
+        (thread) =>
+          thread.id !== this.utteranceId &&
+          now - thread.at < THREAD_MS &&
+          thread.answered < THREAD_ANSWERED,
+      )
+      .slice(-MAX_CALLBACKS)
+      .map((thread) => thread.text);
   }
 
   /** The regulars and their memory, for the caller to persist. */
@@ -1169,6 +1237,7 @@ export class SimulationEngine {
       intent: pending.intent,
       phase: pending.phase,
       wave: pending.wave,
+      ...(pending.phase === "active" ? { utteranceId: pending.utteranceId } : {}),
     }));
     /**
      * Eager first, but only as a lean.
@@ -1199,7 +1268,14 @@ export class SimulationEngine {
      */
     if (first && pending.supersedes) {
       this.nextEmitAt = Math.min(this.nextEmitAt, now);
-      this.reactions = queued;
+      // A few lines about what was said before ride along behind the first.
+      const carried =
+        pending.phase === "active" && !pending.screen
+          ? this.reactions
+              .filter((line) => line.utteranceId !== undefined && line.utteranceId !== pending.utteranceId)
+              .slice(0, CARRY_OVER)
+          : [];
+      this.reactions = [...queued, ...carried];
       this.waveSpeakers.clear();
     } else {
       this.reactions.push(...queued);
@@ -1544,6 +1620,8 @@ export class SimulationEngine {
       }
 
       this.reactions.splice(index, 1);
+      const thread = this.threads.find((t) => t.id === reaction.utteranceId);
+      if (thread) thread.answered += 1;
       this.population.remember(result.viewerId, said, intent, at, {
         line: result.message.text,
         // The live topic when there is one, and otherwise what the streamer
