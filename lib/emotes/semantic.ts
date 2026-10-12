@@ -1,5 +1,5 @@
 import type { GameEvent } from "../ai/moment";
-import type { Emote, EmoteMood, EmoteTag, Intent } from "../engine/types";
+import type { Emote, EmoteMeaning, EmoteMood, EmoteTag, Intent } from "../engine/types";
 import type { Rng } from "../engine/rng";
 import { meaningsOf, normalise } from "./meaning";
 
@@ -124,7 +124,7 @@ export interface SemanticEmoteOptions {
    */
   preferred?: string;
   /** The feeling the AI said the line wants, in the shared vocabulary. */
-  emoteIntent?: EmoteTag;
+  emoteIntent?: EmoteMeaning;
   /** The token chat was told to post, for a directive. */
   directive?: string;
   /** What the screen is doing, when capture is on. */
@@ -133,7 +133,7 @@ export interface SemanticEmoteOptions {
 }
 
 /** Everything known about an emote's meaning: hand-tagged first, then read. */
-export function tagsFor(emote: Emote): readonly EmoteTag[] {
+export function tagsFor(emote: Emote): readonly EmoteMeaning[] {
   if (emote.tags && emote.tags.length > 0) return emote.tags;
   return meaningsOf(emote.name);
 }
@@ -151,7 +151,7 @@ function bestMatch(
   return null;
 }
 
-function matching(emotes: readonly Emote[], tags: readonly EmoteTag[]): Emote[] {
+function matching(emotes: readonly Emote[], tags: readonly EmoteMeaning[]): Emote[] {
   return emotes.filter((emote) => {
     const known = tagsFor(emote);
     return tags.some((tag) => known.includes(tag));
@@ -197,7 +197,7 @@ export function pickSemanticEmote({
    * moment that wants one of the meanings it is barred from — which is what
    * keeps KEKW out of a death even when the model asks for it by name.
    */
-  const moment = new Set<EmoteTag>([...wanted, ...(emoteIntent ? [emoteIntent] : [])]);
+  const moment = new Set<EmoteMeaning>([...wanted, ...(emoteIntent ? [emoteIntent] : [])]);
   emotes = emotes.filter(
     (emote) => !emote.blocked && !emote.notFor?.some((tag) => moment.has(tag)),
   );

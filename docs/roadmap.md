@@ -49,7 +49,10 @@ Choosing the right emote for a line, rather than a random one that exists.
       to cope), 7 chat actions, 6 topics — and a name reader that reads words
       (`SpeedLaugh` is laugh, not "ends in ugh"). On a real 659-emote pack,
       emotes with no meaning went from 519 to 320, most of the rest numbered
-- [ ] Custom tags the streamer writes, which the model can read
+- [x] Custom meanings the streamer writes (`lib/config/custom-tags.ts`): a
+      name and a sentence saying what it is for. The model is shown the ones
+      some emote carries and can ask for them like any other; they reach
+      only the emotes tagged with them, and work in "never post it when…"
 - [ ] Per-emote usage counts, so tagging is informed by what chat reaches for
 
 Still to come in this phase: per-event priority weighting.

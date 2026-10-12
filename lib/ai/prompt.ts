@@ -148,7 +148,13 @@ export function buildPrompt(request: CandidateRequest): string {
     '    "emotion": one of hype | funny | sad | confused | love | chill,',
     '    "kind": one of answer | reaction | question | opinion | joke | callback | emote,',
     '    "emote": optional — one name from the emotes list to attach to this line, only if its feeling fits,',
-    `    "emoteIntent": optional — what the line wants from an emote, one of ${EMOTE_TAGS.join(" | ")}. Say this whenever an emote would fit, even when you also name one: it is what lets a pack without that exact emote still answer with the right kind. ${TAG_GLOSS}`,
+    `    "emoteIntent": optional — what the line wants from an emote, one of ${[...EMOTE_TAGS, ...(request.customTags ?? []).map((tag) => tag.name)].join(" | ")}. Say this whenever an emote would fit, even when you also name one: it is what lets a pack without that exact emote still answer with the right kind. ${TAG_GLOSS}`,
+    ...(request.customTags?.length
+      ? [
+          "    This streamer's own meanings, for moments only their chat has — use one when the line is about that thing:",
+          ...request.customTags.map((tag) => `      ${tag.name} = ${tag.description}`),
+        ]
+      : []),
     '    "eagerness": number 0-1, where 1 is a reflexive one-word reply and 0 is someone who took a while to type }',
     "No other text.",
   );

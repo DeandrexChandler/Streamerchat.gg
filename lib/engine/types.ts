@@ -245,6 +245,13 @@ export type EmoteMood =
 export type EmoteTag = (typeof EMOTE_TAGS)[number];
 
 /**
+ * A meaning an emote can carry: a built-in tag, or one the streamer wrote
+ * (`lib/config/custom-tags.ts`). Strings, because the streamer's own are
+ * not known until runtime.
+ */
+export type EmoteMeaning = EmoteTag | (string & {});
+
+/**
  * Feelings first, then what chat is doing, then what it is about.
  *
  * The order is the order the tagger shows them in, and the feelings come
@@ -302,14 +309,14 @@ export interface Emote {
    * guessing a category from a name like "GAMBA" or "xqcWOT" is unreliable, so
    * the person who imported the pack gets the final say.
    */
-  tags?: readonly EmoteTag[];
+  tags?: readonly EmoteMeaning[];
   /** The streamer never wants this one posted, anywhere. */
   blocked?: boolean;
   /**
    * Moments this emote must never be posted into, even when it otherwise
    * fits — KEKW belongs in a funny moment and still not after a death.
    */
-  notFor?: readonly EmoteTag[];
+  notFor?: readonly EmoteMeaning[];
   /** Image URL. Required — there is no text-only emote tier. */
   url: string;
   width?: number;

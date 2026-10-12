@@ -103,6 +103,10 @@ export const CandidateRequestSchema = z
       .max(12)
       .optional(),
     addressed: z.string().max(40).optional(),
+    customTags: z
+      .array(z.object({ name: text(24), description: text(120) }))
+      .max(16)
+      .optional(),
   })
   .refine(
     // A screen batch may come before the streamer has said anything: the

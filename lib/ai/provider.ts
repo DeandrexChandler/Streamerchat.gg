@@ -96,6 +96,11 @@ export interface CandidateRequest {
   roster?: readonly RosterEntry[];
   /** The regular the streamer just addressed by name, if any. */
   addressed?: string;
+  /**
+   * Meanings the streamer wrote, with what each is for. Only those some
+   * emote in the pack carries. The model may ask for one by name.
+   */
+  customTags?: readonly { name: string; description: string }[];
 }
 
 export type ScreenReason = "changed" | "asked";

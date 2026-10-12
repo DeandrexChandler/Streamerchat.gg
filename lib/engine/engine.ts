@@ -1,4 +1,5 @@
 import type { SimulationSettings } from "../config/settings";
+import type { CustomTag } from "../config/custom-tags";
 import { DEFAULT_SETTINGS } from "../config/settings";
 import type {
   CandidateRequest,
@@ -315,6 +316,7 @@ export class SimulationEngine {
   private filter: Filter;
 
   private emotes: readonly Emote[];
+  private customTags: readonly CustomTag[] = [];
   private emoteNames = new Set<string>();
   private readonly topics = new TopicTracker();
   /** When the rate governor says the next message should land. */
@@ -485,6 +487,20 @@ export class SimulationEngine {
   setEmotes(emotes: readonly Emote[]): void {
     this.emotes = emotes;
     this.emoteNames = new Set(emotes.map((emote) => emote.name));
+  }
+
+  /** The streamer's own meanings, so the model can ask for them. */
+  setCustomTags(tags: readonly CustomTag[]): void {
+    this.customTags = tags;
+  }
+
+  /**
+   * The custom meanings worth telling the model about: only those some
+   * usable emote actually carries, or asking for one reaches nothing.
+   */
+  private usableCustomTags(): CustomTag[] {
+    const used = new Set(this.emotes.filter((emote) => !emote.blocked).flatMap((emote) => emote.tags ?? []));
+    return this.customTags.filter((tag) => used.has(tag.name));
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -851,6 +867,7 @@ export class SimulationEngine {
         : {}),
       // A blocked emote is never offered: the model cannot ask for what the
       // streamer has said never to post, and it costs nothing to leave out.
+      customTags: this.usableCustomTags(),
       emotes: this.emotes
         .filter((emote) => !emote.blocked)
         .slice(0, MAX_EMOTES_IN_PROMPT)
