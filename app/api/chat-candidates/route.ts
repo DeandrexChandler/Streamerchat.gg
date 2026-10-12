@@ -3,7 +3,8 @@ import { RateLimiter, clientKey } from "@/lib/http/rate-limit";
 import { createGeminiProvider } from "@/lib/ai/gemini";
 import { AiRateLimiter, loadAiConfig, type AiConfig } from "@/lib/ai/config";
 import type { CandidateProvider } from "@/lib/ai/provider";
-import { validateReactions } from "@/lib/ai/validate";
+import { ReactionValidator } from "@/lib/ai/validate";
+import { BATCH_CONTENT_TYPE, type BatchMessage, type BatchStatus } from "@/lib/ai/batch-stream";
 import { CandidateRequestSchema } from "@/lib/ai/schema";
 import { describeShape, shapeOf } from "@/lib/ai/diagnostics";
 import type { Reaction } from "@/lib/ai/reaction";
@@ -13,7 +14,9 @@ import type { GameEvent } from "@/lib/ai/moment";
  * Chat batch generation.
  *
  * One request per batch, returning lines the simulation releases over the
- * following seconds. Never one call per rendered message.
+ * following seconds. Never one call per rendered message. The lines are
+ * streamed — each group goes out as soon as it is validated, so chat starts
+ * about a second after asking rather than after the whole batch is written.
  *
  * The key lives here and only here — never NEXT_PUBLIC_, which would inline it
  * into the client bundle.
@@ -39,9 +42,9 @@ export const dynamic = "force-dynamic";
  */
 const MAX_BODY_BYTES = 512 * 1024;
 
-/** The only two things a client ever learns. */
-export type BatchStatus = "ok" | "unavailable";
+export type { BatchStatus };
 
+/** A refusal before anything was generated, as one plain JSON body. */
 export interface BatchResponse {
   reactions: Reaction[];
   status: BatchStatus;
@@ -149,72 +152,126 @@ export function createCandidatesHandler(deps: HandlerDeps) {
       return NextResponse.json(unavailable(), noStore);
     }
 
-    /**
-     * Exactly one retry.
-     *
-     * A transient failure — a timeout, a 5xx, a batch the validator emptied —
-     * is worth a second attempt, because the alternative is ten seconds of
-     * silence on stream. A second failure is not worth a third: at that point
-     * the provider is down or the key is wrong, and hammering it fixes
-     * neither. The next batch will try again on its own.
-     */
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      // A beat before the retry. Gemini's 503 is "overloaded"; asking again
-      // in the same instant tends to get the same answer.
-      if (attempt > 1) await deps.pause?.(RETRY_PAUSE_MS);
-      limiter.record();
-      const started = Date.now();
-      const generated = await provider.generate({ ...candidateRequest, count });
-      const elapsed = Date.now() - started;
+    const validation = {
+      emotes: candidateRequest.emotes,
+      directive: candidateRequest.classification.intent === "directive",
+      roster: candidateRequest.roster?.map((entry) => entry.name),
+    };
+    const encoder = new TextEncoder();
 
-      // Validation runs server-side so a client cannot skip it.
-      const validated = validateReactions(generated.reactions, candidateRequest.recent, {
-        emotes: candidateRequest.emotes,
-        directive: candidateRequest.classification.intent === "directive",
-        roster: candidateRequest.roster?.map((entry) => entry.name),
-      });
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (message: BatchMessage) => {
+          // The browser may have hung up; what is left is not worth throwing over.
+          if (!request.signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify(message)}\n`));
+        };
+        const close = () => {
+          try {
+            controller.close();
+          } catch {
+            // Already cancelled by the browser hanging up.
+          }
+        };
+        let sentEvent = false;
 
-      if (generated.status === "ok" && validated.reactions.length > 0) {
-        const dropped = Object.entries(validated.rejected)
-          .filter(([, n]) => n > 0)
-          .map(([rule, n]) => `${rule}=${n}`)
-          .join(" ");
-        log.log(
-          `[ai] ← ${validated.reactions.length} lines in ${elapsed}ms` +
-            `${attempt > 1 ? " (retry)" : ""} | ${label}` +
-            `${validated.echoed ? " | echoes only" : ""}` +
-            `${dropped ? ` | dropped ${dropped}` : ""}`,
-        );
-        log.log(
-          `[ai]   ${describeShape(shapeOf(validated.reactions, candidateRequest))}` +
-            `${candidateRequest.frame ? ` | saw ${generated.event ?? "?"}` : ""}` +
-            recordSpend(generated.usage),
-        );
-        return NextResponse.json(
-          {
-            reactions: validated.reactions,
-            status: "ok",
-            ...(generated.event ? { event: generated.event } : {}),
-          } satisfies BatchResponse,
-          noStore,
-        );
-      }
+        /**
+         * Exactly one retry, and only for a batch that produced nothing.
+         *
+         * A transient failure — a hang, a 5xx, a batch the validator emptied —
+         * is worth a second attempt, because the alternative is ten seconds of
+         * silence on stream. A second failure is not worth a third: at that
+         * point the provider is down or the key is wrong, and hammering it
+         * fixes neither. Once lines have reached chat the batch has worked,
+         * however it ended.
+         */
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          // A beat before the retry. Gemini's 503 is "overloaded"; asking again
+          // in the same instant tends to get the same answer.
+          if (attempt > 1) await deps.pause?.(RETRY_PAUSE_MS);
+          limiter.record();
+          const started = Date.now();
+          let firstAt = 0;
 
-      const counts = Object.entries(validated.rejected)
-        .filter(([, n]) => n > 0)
-        .map(([rule, n]) => `${rule}=${n}`)
-        .join(" ");
-      log.warn(
-        `[ai] ← EMPTY (attempt ${attempt}/2) after ${elapsed}ms` +
-          ` | provider=${generated.status}` +
-          `${counts ? ` | rejected ${counts}` : ""}` +
-          `${generated.detail ? ` | ${generated.detail}` : ""}` +
-          ` | ${label}`,
-      );
-    }
+          // Validation runs server-side so a client cannot skip it.
+          const validator = new ReactionValidator(candidateRequest.recent, validation);
+          const streamed = new Set<Reaction>();
+          const kept: Reaction[] = [];
+          const deliver = (lines: Reaction[], event?: GameEvent) => {
+            const passed = validator.push(lines);
+            if (passed.length === 0) return;
+            kept.push(...passed);
+            firstAt ||= Date.now() - started;
+            const withEvent = event && !sentEvent;
+            if (withEvent) sentEvent = true;
+            send({ reactions: passed, ...(withEvent ? { event } : {}) });
+          };
 
-    log.warn(`[ai] GIVING UP on this batch — chat stays quiet | ${label}`);
-    return NextResponse.json(unavailable(), noStore);
+          const generated = await provider.generate(
+            { ...candidateRequest, count },
+            {
+              signal: request.signal,
+              onLines: (lines, event) => {
+                for (const line of lines) streamed.add(line);
+                deliver(lines, event);
+              },
+            },
+          );
+          // A provider that answers all at once, and anything the stream missed.
+          deliver(generated.reactions.filter((line) => !streamed.has(line)), generated.event);
+          deliver(validator.finish(), generated.event);
+          const elapsed = Date.now() - started;
+
+          if (request.signal.aborted) {
+            log.log(`[ai] ← cut off after ${validator.count} lines in ${elapsed}ms — the browser moved on | ${label}`);
+            recordSpend(generated.usage);
+            close();
+            return;
+          }
+
+          if (validator.count > 0) {
+            const dropped = Object.entries(validator.rejected)
+              .filter(([, n]) => n > 0)
+              .map(([rule, n]) => `${rule}=${n}`)
+              .join(" ");
+            log.log(
+              `[ai] ← ${validator.count} lines in ${elapsed}ms (first after ${firstAt}ms)` +
+                `${attempt > 1 ? " (retry)" : ""} | ${label}` +
+                `${generated.status !== "ok" ? ` | cut short (${generated.status})` : ""}` +
+                `${validator.echoed ? " | echoes only" : ""}` +
+                `${dropped ? ` | dropped ${dropped}` : ""}`,
+            );
+            log.log(
+              `[ai]   ${describeShape(shapeOf(kept, candidateRequest))}` +
+                `${candidateRequest.frame ? ` | saw ${generated.event ?? "?"}` : ""}` +
+                recordSpend(generated.usage),
+            );
+            send({ status: "ok", ...(generated.event && !sentEvent ? { event: generated.event } : {}) });
+            close();
+            return;
+          }
+
+          const counts = Object.entries(validator.rejected)
+            .filter(([, n]) => n > 0)
+            .map(([rule, n]) => `${rule}=${n}`)
+            .join(" ");
+          log.warn(
+            `[ai] ← EMPTY (attempt ${attempt}/2) after ${elapsed}ms` +
+              ` | provider=${generated.status}` +
+              `${counts ? ` | rejected ${counts}` : ""}` +
+              `${generated.detail ? ` | ${generated.detail}` : ""}` +
+              ` | ${label}`,
+          );
+        }
+
+        log.warn(`[ai] GIVING UP on this batch — chat stays quiet | ${label}`);
+        send({ status: "unavailable" });
+        close();
+      },
+    });
+
+    return new Response(body, {
+      headers: { "content-type": BATCH_CONTENT_TYPE, "cache-control": "no-store" },
+    });
   };
 }
 

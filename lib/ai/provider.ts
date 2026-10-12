@@ -101,6 +101,15 @@ export interface CandidateRequest {
    * emote in the pack carries. The model may ask for one by name.
    */
   customTags?: readonly { name: string; description: string }[];
+
+  /**
+   * Things said recently that chat barely answered, newest last.
+   *
+   * Chat's short memory: talking steadily, each reply is cut short by the
+   * next, and this is what lets a batch circle back to something from half
+   * a minute ago instead of forgetting it.
+   */
+  callbacks?: readonly string[];
 }
 
 export type ScreenReason = "changed" | "asked";
@@ -147,6 +156,22 @@ export interface GenerationResult {
   detail?: string;
 }
 
+export interface GenerateOptions {
+  /**
+   * Lines as they arrive, before the batch is finished.
+   *
+   * The result still carries every line at the end; this is what lets the
+   * first of them reach chat a second after asking instead of after the
+   * whole batch is written.
+   */
+  onLines?: (reactions: Reaction[], event?: GameEvent) => void;
+  /**
+   * The browser went away — usually because the engine moved on to newer
+   * speech. Output is most of the cost, so the provider stops writing.
+   */
+  signal?: AbortSignal;
+}
+
 export interface CandidateProvider {
   readonly name: string;
   /**
@@ -155,5 +180,5 @@ export interface CandidateProvider {
    * Never throws. Chat is AI-only, so a failure means chat stays quiet for
    * this batch — never a deterministic pool standing in.
    */
-  generate(request: CandidateRequest): Promise<GenerationResult>;
+  generate(request: CandidateRequest, options?: GenerateOptions): Promise<GenerationResult>;
 }

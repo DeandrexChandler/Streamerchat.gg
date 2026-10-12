@@ -388,7 +388,53 @@ describe("active generation", () => {
     expect(next?.utterance).toBe("actually valorant");
     expect(next?.continuation).toBe(false);
     engine.supplyReactions([{ text: "valorant lets go" }, { text: "finally" }], 5_500, engine.generationTicket!);
-    expect(engine.pendingReactions).toBe(2);
+    // The new reply, with a few lines about minecraft riding along behind it.
+    expect(engine.pendingReactions).toBe(2 + Math.min(3, before));
+  });
+
+  describe("chat's short memory of what was said", () => {
+    it("answers everything said since the last reply, not just the newest piece", () => {
+      // Talking in five-second pieces, the piece said while a reply was on
+      // the wire used to go unanswered.
+      const engine = new SimulationEngine({ seed: 3, now: 0 });
+      engine.beginSession(0);
+      engine.handleTranscript("so i was walking down the road", 0, undefined, true);
+      engine.nextGeneration(0);
+      engine.handleTranscript("and i saw this massive dog", 2_000, undefined, true);
+      engine.handleTranscript("like the size of a horse", 4_000, undefined, true);
+      engine.supplyReactions([{ text: "a road" }], 4_500, engine.generationTicket!);
+
+      const next = engine.nextGeneration(4_600)!;
+      expect(next.utterance).toBe("and i saw this massive dog like the size of a horse");
+      expect(next.history).toEqual(["so i was walking down the road"]);
+    });
+
+    it("brings back something said recently that chat barely answered", () => {
+      const engine = new SimulationEngine({ seed: 3, now: 0 });
+      engine.beginSession(0);
+      engine.handleTranscript("i adopted a cat yesterday", 0, undefined, true);
+      engine.nextGeneration(0);
+      engine.supplyReactions([{ text: "no way" }, { text: "name?" }, { text: "pics" }], 1_000, engine.generationTicket!);
+      engine.tick(1_000);
+
+      engine.handleTranscript("anyway lets build the roof", 3_000, undefined, true);
+      expect(engine.nextGeneration(3_000)!.callbacks).toEqual(["i adopted a cat yesterday"]);
+    });
+
+    it("lets a thing go once chat has answered it properly, or it is old", async () => {
+      const { engine } = await drive(30_000, { script: [[1_000, "i adopted a cat yesterday"]] });
+      engine.handleTranscript("anyway lets build the roof", 30_000, undefined, true);
+      // Thirty seconds of chat answered the cat plenty.
+      expect(engine.nextGeneration(30_000)?.callbacks).toBeUndefined();
+
+      const quiet = new SimulationEngine({ seed: 3, now: 0 });
+      quiet.beginSession(0);
+      quiet.handleTranscript("i adopted a cat yesterday", 0, undefined, true);
+      quiet.nextGeneration(0);
+      quiet.supplyReactions([{ text: "no way" }], 1_000, quiet.generationTicket!);
+      quiet.handleTranscript("anyway lets build the roof", 200_000, undefined, true);
+      expect(quiet.nextGeneration(200_000)?.callbacks).toBeUndefined();
+    });
   });
 
   it("does not go quiet between two sentences said a few seconds apart", async () => {
@@ -482,6 +528,69 @@ describe("active generation", () => {
     }
     const answered = requests.filter((r) => r.phase === "active" && !r.continuation).map((r) => r.utterance);
     expect(answered).toContain("and then chunk 61 of the story");
+  });
+
+  describe("a streamed reply", () => {
+    it("posts its first lines while the rest is still coming, and asks for nothing else meanwhile", () => {
+      const engine = new SimulationEngine({ seed: 3, now: 0 });
+      engine.beginSession(0);
+      engine.handleTranscript("look at this roof", 0, undefined, true);
+      expect(engine.nextGeneration(0)).not.toBeNull();
+      const ticket = engine.generationTicket!;
+
+      engine.supplyReactions([{ text: "no shot" }, { text: "actual cinema" }], 900, ticket, undefined, true);
+      const out = engine.tick(1_000);
+      expect(out.length).toBeGreaterThan(0);
+      // Still the same request: a refill must not go out over it.
+      expect(engine.nextGeneration(1_200)).toBeNull();
+
+      engine.supplyReactions([{ text: "clip it" }], 2_000, ticket, undefined, true);
+      engine.supplyReactions([], 3_000, ticket);
+      expect(engine.generationTicket).toBeNull();
+    });
+
+    it("is not a failure when it breaks after delivering", () => {
+      const engine = new SimulationEngine({ seed: 3, now: 0 });
+      engine.beginSession(0);
+      engine.handleTranscript("look at this roof", 0, undefined, true);
+      engine.nextGeneration(0);
+      const ticket = engine.generationTicket!;
+      engine.supplyReactions([{ text: "no shot" }], 900, ticket, undefined, true);
+      engine.generationFailed(5_000, ticket);
+
+      // No failure backoff: the next sentence is answered at once.
+      engine.handleTranscript("ok next room", 5_100, undefined, true);
+      expect(engine.nextGeneration(5_100)?.utterance).toBe("ok next room");
+    });
+
+    it("is cut off when the streamer says something new, so the answer is not held behind it", () => {
+      // The rest of a 70-line batch about the last sentence takes seconds
+      // to finish writing. Waiting for it is the lag the streamer saw.
+      const engine = new SimulationEngine({ seed: 3, now: 0 });
+      engine.beginSession(0);
+      engine.handleTranscript("look at this roof", 0, undefined, true);
+      engine.nextGeneration(0);
+      const old = engine.generationTicket!;
+      engine.supplyReactions([{ text: "no shot" }], 900, old, undefined, true);
+
+      engine.handleTranscript("anyway the pool is next", 2_000, undefined, true);
+      const next = engine.nextGeneration(2_000);
+      expect(next?.utterance).toBe("anyway the pool is next");
+
+      // Late pieces of the old reply are ignored.
+      const before = engine.pendingReactions;
+      engine.supplyReactions([{ text: "about the roof still" }], 2_500, old, undefined, true);
+      expect(engine.pendingReactions).toBe(before);
+    });
+
+    it("still waits for a reply that has not produced anything yet", () => {
+      const engine = new SimulationEngine({ seed: 3, now: 0 });
+      engine.beginSession(0);
+      engine.handleTranscript("look at this roof", 0, undefined, true);
+      engine.nextGeneration(0);
+      engine.handleTranscript("anyway the pool is next", 500, undefined, true);
+      expect(engine.nextGeneration(500)).toBeNull();
+    });
   });
 
   it("ignores a reply carrying an abandoned ticket", () => {

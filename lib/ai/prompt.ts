@@ -294,6 +294,7 @@ function situation(request: CandidateRequest): string[] {
       `The streamer last said "${utterance}", about ${describeSilence(silenceSeconds)} ago, and has been busy playing since. That is normal on a stream, and nobody mentions that they have gone quiet.`,
       "",
       "Chat is just being chat: reacting to the game and what is on screen, talking to each other, small talk, jokes, backseating, the odd callback to what they said. For this batch lines can be about the stream in general and to each other.",
+      ...callbacksNote(request),
     ];
   }
 
@@ -305,6 +306,7 @@ function situation(request: CandidateRequest): string[] {
       `  "${utterance}"`,
       "",
       `That was about ${describeSilence(silenceSeconds)} ago and they haven't said anything since. Chat is still on it: late answers, follow-up questions, opinions, someone riffing on it, someone who only just read it. Stay about THAT line — do not start new subjects, and do not react as though it was just said this second.`,
+      ...callbacksNote(request),
     ];
   }
 
@@ -314,7 +316,25 @@ function situation(request: CandidateRequest): string[] {
     "The streamer just said, to chat:",
     `  "${utterance}"`,
     "",
-    request.classification.intent === "directive" ? DIRECTIVE_NOTE : ANSWER_NOTE,
+    ...(request.classification.intent === "directive"
+      ? [DIRECTIVE_NOTE]
+      : [ANSWER_NOTE, ...callbacksNote(request)]),
+  ];
+}
+
+/**
+ * What chat only half got to.
+ *
+ * A streamer talking steadily moves on before chat has finished with each
+ * thing, and real chat catches up out loud. A line or two, not the batch:
+ * the moment is still what was just said.
+ */
+function callbacksNote(request: CandidateRequest): string[] {
+  if (!request.callbacks?.length) return [];
+  return [
+    "",
+    "Chat only half got to these earlier, before the streamer moved on. One or two lines in this batch go back to one of them, the way chat catches up — 'wait go back to the dog thing', 'nah but the roof tho':",
+    ...request.callbacks.map((line) => `  "${line}"`),
   ];
 }
 

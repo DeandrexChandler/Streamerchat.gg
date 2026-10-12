@@ -107,6 +107,7 @@ export const CandidateRequestSchema = z
       .array(z.object({ name: text(24), description: text(120) }))
       .max(16)
       .optional(),
+    callbacks: z.array(text(200)).max(3).optional(),
   })
   .refine(
     // A screen batch may come before the streamer has said anything: the

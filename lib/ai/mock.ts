@@ -1,6 +1,7 @@
 import type {
   CandidateProvider,
   CandidateRequest,
+  GenerateOptions,
   GenerationResult,
 } from "./provider";
 import type { Reaction } from "./reaction";
@@ -96,7 +97,7 @@ export function createMockProvider(): CandidateProvider {
 
   return {
     name: "mock",
-    async generate(request: CandidateRequest): Promise<GenerationResult> {
+    async generate(request: CandidateRequest, options?: GenerateOptions): Promise<GenerationResult> {
       const { count } = request;
       const base = served;
       served += count;
@@ -112,6 +113,7 @@ export function createMockProvider(): CandidateProvider {
         return vary(ACTIVE[n % ACTIVE.length](said), n);
       });
 
+      options?.onLines?.(reactions);
       return { reactions, status: "ok" };
     },
   };

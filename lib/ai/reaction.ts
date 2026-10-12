@@ -99,4 +99,6 @@ export interface QueuedReaction extends Reaction {
   wave?: boolean;
   /** Release order within the batch: eagerness, jittered so shapes interleave. */
   order?: number;
+  /** The streamer line a reply answers, so chat's memory can count it. */
+  utteranceId?: number;
 }

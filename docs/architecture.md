@@ -80,10 +80,13 @@ Poisson governor in the engine is what actually paces chat.
 
 ## Route (`app/api/chat-candidates/route.ts`)
 
-Validates, rate-limits, calls the provider, validates the output, retries
-exactly once, and returns `{ reactions, status: "ok" | "unavailable" }`.
-Nothing else reaches the browser; causes go to the server log. Built from
-injectable dependencies so tests drive it with a scripted provider.
+Validates, rate-limits, calls the provider and streams the validated lines
+back as newline-delimited JSON (`lib/ai/batch-stream.ts`): groups of
+`{ reactions }` as the model writes them, then `{ status: "ok" |
+"unavailable" }`. Retries exactly once, and only when nothing reached the
+browser. A browser that hangs up stops the provider writing. Nothing else
+reaches the browser; causes go to the server log. Built from injectable
+dependencies so tests drive it with a scripted provider.
 
 ## Hook (`lib/react/use-simulator.ts`)
 
@@ -91,8 +94,10 @@ Binds microphone, transcription and engine to React. Owned by the app shell
 (`lib/react/simulator-session.tsx`), not the simulator page, so a session
 survives navigation: leaving the simulator pauses it, and only Reset session
 or a reload ends it. Every tick: `tick`,
-then `pump` — ask the engine what it needs, fetch it, hand it back. One
-request in flight at a time. Failures are silent in the UI by design.
+then `pump` — ask the engine what it needs, fetch it, hand each group of
+lines to the engine as it arrives (`supplyReactions(..., more)`), close the
+request when the stream ends. One request in flight at a time. Failures are
+silent in the UI by design.
 
 ## Harness (`scripts/simulate.ts`)
 

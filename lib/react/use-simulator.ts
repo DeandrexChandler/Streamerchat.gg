@@ -8,8 +8,7 @@ import type { SimulationSettings } from "../config/settings";
 import { localEmotePackStore, mergeEmotes } from "../config/emote-store";
 import { localRosterStore } from "../config/roster-store";
 import { localCustomTagStore } from "../config/custom-tags";
-import type { Reaction } from "../ai/reaction";
-import type { GameEvent } from "../ai/moment";
+import { readBatch } from "../ai/batch-stream";
 import type { Emote } from "../engine/types";
 import {
   SimulationEngine,
@@ -285,21 +284,31 @@ export function useSimulator(): UseSimulatorResult {
         body: JSON.stringify(frame ? { ...request, frame } : request),
         signal: controller.signal,
       });
-      const body = (await response.json()) as {
-        reactions?: Reaction[];
-        status?: string;
-        event?: GameEvent;
-      };
+      /**
+       * Lines go to the engine as they arrive. The first group takes the
+       * request's place in the queue and posts at once; the rest join it,
+       * and the request stays open until the stream ends.
+       */
+      let landed = 0;
+      let status: string | undefined;
+      await readBatch(response, (message) => {
+        if (message.status) status = message.status;
+        if (message.reactions?.length) {
+          if (landed === 0) {
+            console.debug(`[chat] ← first lines for ${request.phase}${message.event ? `, saw ${message.event}` : ""}`);
+          }
+          landed += message.reactions.length;
+          engine.supplyReactions(message.reactions, Date.now(), ticket, message.event, true);
+        }
+      });
 
-      if (!response.ok || body.status !== "ok" || !body.reactions?.length) {
+      if (!response.ok || landed === 0) {
         console.debug(`[chat] ← nothing for ${request.phase} (the server log says why)`);
         engine.generationFailed(Date.now(), ticket);
         return;
       }
-      console.debug(
-        `[chat] ← ${body.reactions.length} lines for ${request.phase}${body.event ? `, saw ${body.event}` : ""}`,
-      );
-      engine.supplyReactions(body.reactions, Date.now(), ticket, body.event);
+      console.debug(`[chat] ← ${landed} lines for ${request.phase} (${status ?? "ended"})`);
+      engine.supplyReactions([], Date.now(), ticket);
     } catch (error) {
       // An abort is the engine having moved on; there is nothing to report.
       if (!controller.signal.aborted) engine.generationFailed(Date.now(), ticket);

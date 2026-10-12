@@ -62,10 +62,14 @@ Consequences that must stay true:
 - **There is no deterministic chat text.** No pools, no templates, no
   fallback lines. If the model did not write it, it is the streamer's own
   directive token or it is nothing.
-- **A provider failure is silent to the streamer.** The route retries once,
-  logs the cause server-side, and returns `{reactions: [], status:
-  "unavailable"}`. No banner, no provider name, no error text in the UI. The
-  next batch tries on its own.
+- **A provider failure is silent to the streamer.** The route retries once
+  (only if nothing reached chat), logs the cause server-side, and ends the
+  stream with `{status: "unavailable"}`. No banner, no provider name, no
+  error text in the UI. The next batch tries on its own.
+- **Replies are streamed.** Lines reach chat as the model writes them, about
+  a second after asking. No first line in 5s is a hang and is retried then
+  (`FIRST_LINE_MS` in `lib/ai/gemini.ts`). A reply still streaming about an
+  older sentence is cut off when the streamer says something new.
 - **One provider, one model, fixed.** Gemini `gemini-3.5-flash-lite` via
   `GOOGLE_API_KEY`. No selection anywhere. If Gemini is down or the key is
   out of credit, the answer is to add credit — never another provider.

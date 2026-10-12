@@ -197,80 +197,103 @@ export function validateReactions(
   recent: readonly string[],
   options: ValidationOptions = {},
 ): ValidationResult {
-  /**
-   * Only the last few lines.
-   *
-   * The whole recent buffer was used, which for a greeting is fatal: chat's
-   * greeting vocabulary is about six words wide, so after one round of hellos
-   * every subsequent greeting batch deduplicated to nothing and the streamer
-   * was told the AI had produced nothing usable.
-   */
-  const window = recent.slice(-RECENT_WINDOW);
-  const seen = new Set(window.map((line) => line.trim().toLowerCase()));
-  const rejected = { empty: 0, tooLong: 0, hostile: 0, duplicate: 0, emoteSurplus: 0 };
-  const emoteNames = new Set(options.emotes ?? []);
-  const roster = new Set((options.roster ?? []).map((name) => name.toLowerCase()));
-  const out: Reaction[] = [];
+  const validator = new ReactionValidator(recent, options);
+  const out = [...validator.push(reactions), ...validator.finish()];
+  return { reactions: out, rejected: validator.rejected, echoed: validator.echoed };
+}
+
+/**
+ * The same rules, a few lines at a time.
+ *
+ * A streamed reply is checked as it arrives, so every rule here holds over
+ * what has been let through so far rather than over a finished batch: the
+ * bare-emote share is a running share, and the echo fallback waits for
+ * `finish`, when it is known that nothing else survived.
+ */
+export class ReactionValidator {
+  readonly rejected = { empty: 0, tooLong: 0, hostile: 0, duplicate: 0, emoteSurplus: 0 };
+  echoed = false;
+  private readonly seen: Set<string>;
+  private readonly emoteNames: ReadonlySet<string>;
+  private readonly roster: ReadonlySet<string>;
   /** Survived every rule except the recent-chat check. */
-  const echoes: Reaction[] = [];
+  private readonly echoes: Reaction[] = [];
+  private passed = 0;
+  private bare = 0;
 
-  for (const reaction of reactions) {
-    if (typeof reaction?.text !== "string") {
-      rejected.empty += 1;
-      continue;
-    }
-
-    const text = clean(reaction.text);
-    if (!text) {
-      rejected.empty += 1;
-      continue;
-    }
-    if (text.length > MAX_CHARS || text.split(/\s+/).length > MAX_WORDS) {
-      rejected.tooLong += 1;
-      continue;
-    }
-    if (isHostileToStreamer(text)) {
-      rejected.hostile += 1;
-      continue;
-    }
-
-    const key = text.toLowerCase();
-    if (seen.has(key)) {
-      rejected.duplicate += 1;
-      // Held aside rather than discarded, in case nothing else survives.
-      if (!echoes.some((e) => e.text.toLowerCase() === key)) {
-        echoes.push({ ...reaction, text, from: named(reaction.from, roster) });
-      }
-      continue;
-    }
-    seen.add(key);
-
-    out.push({ ...reaction, text, from: named(reaction.from, roster) });
+  constructor(
+    recent: readonly string[],
+    private readonly options: ValidationOptions = {},
+  ) {
+    /**
+     * Only the last few lines.
+     *
+     * The whole recent buffer was used, which for a greeting is fatal: chat's
+     * greeting vocabulary is about six words wide, so after one round of hellos
+     * every subsequent greeting batch deduplicated to nothing and the streamer
+     * was told the AI had produced nothing usable.
+     */
+    this.seen = new Set(recent.slice(-RECENT_WINDOW).map((line) => line.trim().toLowerCase()));
+    this.emoteNames = new Set(options.emotes ?? []);
+    this.roster = new Set((options.roster ?? []).map((name) => name.toLowerCase()));
   }
 
-  /**
-   * Bare emotes are seasoning, not the meal.
-   *
-   * Kept from the front of the batch in the order the model wrote them, so
-   * the ones that survive are the ones it reached for first.
-   */
-  if (out.length > 0 && (options.directive || emoteNames.size > 0)) {
-    const share = options.directive ? MAX_DIRECTIVE_BARE_SHARE : MAX_EMOTE_ONLY_SHARE;
-    const allowed = Math.max(1, Math.floor(out.length * share));
-    let kept = 0;
-    for (let i = 0; i < out.length; i += 1) {
-      const bare = options.directive
-        ? isBare(out[i].text, emoteNames)
-        : out[i].text.split(/\s+/).every((word) => emoteNames.has(word));
-      if (!bare) continue;
-      if (kept < allowed) {
-        kept += 1;
+  push(reactions: readonly Reaction[]): Reaction[] {
+    const out: Reaction[] = [];
+    for (const reaction of reactions) {
+      if (typeof reaction?.text !== "string") {
+        this.rejected.empty += 1;
         continue;
       }
-      out.splice(i, 1);
-      i -= 1;
-      rejected.emoteSurplus += 1;
+
+      const text = clean(reaction.text);
+      if (!text) {
+        this.rejected.empty += 1;
+        continue;
+      }
+      if (text.length > MAX_CHARS || text.split(/\s+/).length > MAX_WORDS) {
+        this.rejected.tooLong += 1;
+        continue;
+      }
+      if (isHostileToStreamer(text)) {
+        this.rejected.hostile += 1;
+        continue;
+      }
+
+      const key = text.toLowerCase();
+      const line = { ...reaction, text, from: named(reaction.from, this.roster) };
+      if (this.seen.has(key)) {
+        this.rejected.duplicate += 1;
+        // Held aside rather than discarded, in case nothing else survives.
+        if (!this.echoes.some((e) => e.text.toLowerCase() === key)) this.echoes.push(line);
+        continue;
+      }
+      this.seen.add(key);
+
+      /**
+       * Bare emotes are seasoning, not the meal.
+       *
+       * A running share of what has been let through, so the ones that
+       * survive are the ones the model reached for first.
+       */
+      if (this.options.directive || this.emoteNames.size > 0) {
+        const isBareLine = this.options.directive
+          ? isBare(text, this.emoteNames)
+          : text.split(/\s+/).every((word) => this.emoteNames.has(word));
+        if (isBareLine) {
+          const share = this.options.directive ? MAX_DIRECTIVE_BARE_SHARE : MAX_EMOTE_ONLY_SHARE;
+          if (this.bare >= Math.max(1, Math.floor((this.passed + 1) * share))) {
+            this.rejected.emoteSurplus += 1;
+            continue;
+          }
+          this.bare += 1;
+        }
+      }
+
+      this.passed += 1;
+      out.push(line);
     }
+    return out;
   }
 
   /**
@@ -280,11 +303,17 @@ export function validateReactions(
    * of them is a far better outcome than telling the streamer the AI failed.
    * They said hello twice; chat saying hello twice is correct.
    */
-  if (out.length === 0 && echoes.length > 0) {
-    return { reactions: echoes.slice(0, ECHO_FALLBACK), rejected, echoed: true };
+  finish(): Reaction[] {
+    if (this.passed > 0 || this.echoes.length === 0) return [];
+    this.echoed = true;
+    this.passed = Math.min(ECHO_FALLBACK, this.echoes.length);
+    return this.echoes.slice(0, ECHO_FALLBACK);
   }
 
-  return { reactions: out, rejected, echoed: false };
+  /** Lines let through so far, echoes included. */
+  get count(): number {
+    return this.passed;
+  }
 }
 
 /**
