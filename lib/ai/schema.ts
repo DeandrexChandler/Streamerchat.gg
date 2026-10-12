@@ -108,6 +108,8 @@ export const CandidateRequestSchema = z
       .max(16)
       .optional(),
     callbacks: z.array(text(200)).max(3).optional(),
+    /** DEV-MODEL-TOGGLE: which model answers. Removed once one is chosen. */
+    devModel: z.enum(["gemini", "openai"]).optional(),
   })
   .refine(
     // A screen batch may come before the streamer has said anything: the

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { RateLimiter, clientKey } from "@/lib/http/rate-limit";
 import { createGeminiProvider } from "@/lib/ai/gemini";
+import { createOpenAiProvider } from "@/lib/ai/openai";
 import { AiRateLimiter, loadAiConfig, type AiConfig } from "@/lib/ai/config";
-import type { CandidateProvider } from "@/lib/ai/provider";
+import type { CandidateProvider, DevModel, TokenUsage } from "@/lib/ai/provider";
 import { ReactionValidator } from "@/lib/ai/validate";
 import { BATCH_CONTENT_TYPE, type BatchMessage, type BatchStatus } from "@/lib/ai/batch-stream";
 import { CandidateRequestSchema } from "@/lib/ai/schema";
@@ -60,38 +61,84 @@ export interface HandlerDeps {
   log?: Pick<Console, "log" | "warn">;
   /** Waits before the retry. Injectable so tests need not. */
   pause?: (ms: number) => Promise<void>;
+  /** DEV-MODEL-TOGGLE: the models a request may pick, when their keys are set. */
+  devProviders?: Partial<Record<DevModel, CandidateProvider>>;
 }
 
 /** Breathing room before the one retry. */
 const RETRY_PAUSE_MS = 750;
 
 /**
- * Tokens spent since the server started, and what they cost.
+ * Price per million tokens, input and output, by provider name.
+ *
+ * Published rates on 2026-10-12. A model not listed falls back to
+ * AI_PRICE_PER_M_INPUT / _OUTPUT from the env, and to tokens only.
+ */
+const PRICE_PER_M: Readonly<Record<string, readonly [number, number]>> = {
+  "gemini:gemini-3.5-flash-lite": [0.3, 2.5],
+  "openai:gpt-6-luna": [0.1, 0.5],
+};
+
+/**
+ * What each model has done since the server started: the scoreboard.
  *
  * Here rather than in the engine because this is the only place that spends
- * money, and the browser must never be told about it. Prices are per million
- * tokens, from the env, because a rate baked into the source goes stale the
- * week it changes; with none set the log still reports tokens.
+ * money, and the browser must never be told about it. One line per batch
+ * sums every model used, which is how the comparison is read: run the same
+ * session on each and look at the last line.
  */
-const spend = { input: 0, output: 0, calls: 0 };
+interface Tally {
+  calls: number;
+  failed: number;
+  firstMs: number;
+  totalMs: number;
+  input: number;
+  output: number;
+}
 
-function recordSpend(usage: { input: number; output: number } | undefined): string {
-  if (!usage) return "";
-  spend.input += usage.input;
-  spend.output += usage.output;
-  spend.calls += 1;
+const tallies: Map<string, Tally> = ((globalThis as { __aiTallies?: Map<string, Tally> }).__aiTallies ??= new Map());
 
-  const inPrice = Number(process.env.AI_PRICE_PER_M_INPUT ?? "");
-  const outPrice = Number(process.env.AI_PRICE_PER_M_OUTPUT ?? "");
-  const priced = Number.isFinite(inPrice) && Number.isFinite(outPrice) && inPrice + outPrice > 0;
-  const cost = priced
-    ? ` | $${((spend.input * inPrice + spend.output * outPrice) / 1_000_000).toFixed(4)} so far`
-    : "";
+function tally(model: string): Tally {
+  let entry = tallies.get(model);
+  if (!entry) {
+    entry = { calls: 0, failed: 0, firstMs: 0, totalMs: 0, input: 0, output: 0 };
+    tallies.set(model, entry);
+  }
+  return entry;
+}
 
-  return (
-    ` | tokens ${usage.input}in/${usage.output}out` +
-    ` (${spend.calls} calls: ${spend.input}in/${spend.output}out)${cost}`
-  );
+function costOf(model: string, entry: Pick<Tally, "input" | "output">): number | null {
+  const [inPrice, outPrice] = PRICE_PER_M[model] ?? [
+    Number(process.env.AI_PRICE_PER_M_INPUT ?? ""),
+    Number(process.env.AI_PRICE_PER_M_OUTPUT ?? ""),
+  ];
+  if (!Number.isFinite(inPrice) || !Number.isFinite(outPrice) || inPrice + outPrice <= 0) return null;
+  return (entry.input * inPrice + entry.output * outPrice) / 1_000_000;
+}
+
+function recordSpend(model: string, usage: TokenUsage | undefined, firstMs: number, totalMs: number): string {
+  const entry = tally(model);
+  entry.calls += 1;
+  entry.firstMs += firstMs;
+  entry.totalMs += totalMs;
+  entry.input += usage?.input ?? 0;
+  entry.output += usage?.output ?? 0;
+  return usage ? ` | tokens ${usage.input}in/${usage.output}out` : "";
+}
+
+/** Every model used so far, side by side. */
+function scoreboard(): string {
+  return [...tallies.entries()]
+    .map(([model, t]) => {
+      const answered = Math.max(1, t.calls);
+      const cost = costOf(model, t);
+      return (
+        `${model}: ${t.calls} calls, ${t.failed} failed, first line ${(t.firstMs / answered / 1000).toFixed(1)}s, ` +
+        `batch ${(t.totalMs / answered / 1000).toFixed(1)}s` +
+        (cost === null ? "" : `, $${cost.toFixed(4)} ($${(cost / answered).toFixed(5)}/call)`)
+      );
+    })
+    .join("  ||  ");
 }
 
 const unavailable = (): BatchResponse => ({ reactions: [], status: "unavailable" });
@@ -139,9 +186,13 @@ export function createCandidatesHandler(deps: HandlerDeps) {
     const count = Math.min(candidateRequest.count, config.maxBatchSize);
     const label = describe(candidateRequest);
 
+    // DEV-MODEL-TOGGLE: the model the request asked for, when it is available.
+    const active =
+      (candidateRequest.devModel && deps.devProviders?.[candidateRequest.devModel]) || provider;
+
     // Checked per request, never cached: a key added after the first call
     // must start working on the next one.
-    if (!config.apiKey) {
+    if (active === provider && !config.apiKey) {
       log.warn(`[ai] REFUSED (no-key) | ${label}`);
       return NextResponse.json(unavailable(), noStore);
     }
@@ -206,7 +257,7 @@ export function createCandidatesHandler(deps: HandlerDeps) {
             send({ reactions: passed, ...(withEvent ? { event } : {}) });
           };
 
-          const generated = await provider.generate(
+          const generated = await active.generate(
             { ...candidateRequest, count },
             {
               signal: request.signal,
@@ -223,7 +274,7 @@ export function createCandidatesHandler(deps: HandlerDeps) {
 
           if (request.signal.aborted) {
             log.log(`[ai] ← cut off after ${validator.count} lines in ${elapsed}ms — the browser moved on | ${label}`);
-            recordSpend(generated.usage);
+            recordSpend(active.name, generated.usage, firstAt, elapsed);
             close();
             return;
           }
@@ -234,7 +285,7 @@ export function createCandidatesHandler(deps: HandlerDeps) {
               .map(([rule, n]) => `${rule}=${n}`)
               .join(" ");
             log.log(
-              `[ai] ← ${validator.count} lines in ${elapsed}ms (first after ${firstAt}ms)` +
+              `[ai] ${active.name} ← ${validator.count} lines in ${elapsed}ms (first after ${firstAt}ms)` +
                 `${attempt > 1 ? " (retry)" : ""} | ${label}` +
                 `${generated.status !== "ok" ? ` | cut short (${generated.status})` : ""}` +
                 `${validator.echoed ? " | echoes only" : ""}` +
@@ -243,8 +294,9 @@ export function createCandidatesHandler(deps: HandlerDeps) {
             log.log(
               `[ai]   ${describeShape(shapeOf(kept, candidateRequest))}` +
                 `${candidateRequest.frame ? ` | saw ${generated.event ?? "?"}` : ""}` +
-                recordSpend(generated.usage),
+                recordSpend(active.name, generated.usage, firstAt, elapsed),
             );
+            log.log(`[ai]   scoreboard — ${scoreboard()}`);
             send({ status: "ok", ...(generated.event && !sentEvent ? { event: generated.event } : {}) });
             close();
             return;
@@ -263,7 +315,8 @@ export function createCandidatesHandler(deps: HandlerDeps) {
           );
         }
 
-        log.warn(`[ai] GIVING UP on this batch — chat stays quiet | ${label}`);
+        tally(active.name).failed += 1;
+        log.warn(`[ai] ${active.name} GIVING UP on this batch — chat stays quiet | ${label}`);
         send({ status: "unavailable" });
         close();
       },
@@ -315,6 +368,10 @@ export async function POST(request: Request) {
     }),
     limiter: (globalRef.__aiLimiter ??= new AiRateLimiter(config)),
     pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    // DEV-MODEL-TOGGLE: OpenAI is offered only while its key is set.
+    devProviders: process.env.OPENAI_API_KEY
+      ? { openai: createOpenAiProvider({ apiKey: process.env.OPENAI_API_KEY, maxOutputTokens: config.maxOutputTokens }) }
+      : {},
     httpLimiter: (globalRef.__aiHttpLimiter ??= new RateLimiter({
       windowMs: 60_000,
       maxRequests: 60,
