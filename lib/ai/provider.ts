@@ -97,6 +97,12 @@ export interface CandidateRequest {
   /** The regular the streamer just addressed by name, if any. */
   addressed?: string;
   /**
+   * Meanings the streamer wrote, with what each is for. Only those some
+   * emote in the pack carries. The model may ask for one by name.
+   */
+  customTags?: readonly { name: string; description: string }[];
+
+  /**
    * Things said recently that chat barely answered, newest last.
    *
    * Chat's short memory: talking steadily, each reply is cut short by the

@@ -9,7 +9,6 @@ import type { Rng } from "./rng";
 import type { MomentumBand, Topic, TopicStage } from "./topics";
 import type {
   Emote,
-  EmoteTag,
   Intent,
   MessageKind,
   MessageSource,
@@ -125,7 +124,7 @@ function emoteReply(
     intent: moment,
     emotion: reaction.emotion,
     preferred: reaction.emote,
-    emoteIntent: reaction.emoteIntent as EmoteTag | undefined,
+    emoteIntent: reaction.emoteIntent,
     ...context,
     rng,
   });
@@ -144,7 +143,7 @@ function emoteReply(
     emotes,
     intent: moment,
     emotion: reaction.emotion,
-    emoteIntent: reaction.emoteIntent as EmoteTag | undefined,
+    emoteIntent: reaction.emoteIntent,
     ...context,
     rng,
   });
@@ -262,7 +261,7 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
       intent: moment,
       emotion: reaction.emotion,
       preferred: reaction.emote,
-      emoteIntent: reaction.emoteIntent as EmoteTag | undefined,
+      emoteIntent: reaction.emoteIntent,
       ...context,
       rng,
     });
@@ -362,7 +361,7 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
         intent: moment,
         emotion: reaction.emotion,
         preferred: reaction.emote,
-        emoteIntent: reaction.emoteIntent as EmoteTag | undefined,
+        emoteIntent: reaction.emoteIntent,
         ...context,
         rng,
       });

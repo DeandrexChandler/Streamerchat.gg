@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Ban, Check, Search, X } from "lucide-react";
+import { Ban, Check, Plus, Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,8 +21,15 @@ import {
   EMOTE_FEELINGS,
   EMOTE_TOPICS,
   type Emote,
+  type EmoteMeaning,
   type EmoteTag,
 } from "@/lib/engine/types";
+import {
+  customTagName,
+  localCustomTagStore,
+  MAX_CUSTOM_TAGS,
+  type CustomTag,
+} from "@/lib/config/custom-tags";
 import { meaningsOf } from "@/lib/emotes/meaning";
 import { localEmoteRuleStore, type EmoteRule, type EmoteRuleMap } from "@/lib/config/emote-rules";
 import { cn } from "@/lib/utils";
@@ -66,8 +73,13 @@ const TAG_LABELS: Record<EmoteTag, string> = {
   general: "Anywhere",
 };
 
+/** A built-in tag's label, or a custom tag's own name. */
+function labelOf(tag: EmoteMeaning): string {
+  return TAG_LABELS[tag as EmoteTag] ?? tag;
+}
+
 /** Feelings first: every moment has one. */
-const TAG_GROUPS: ReadonlyArray<readonly [string, readonly EmoteTag[]]> = [
+const TAG_GROUPS: ReadonlyArray<readonly [string, readonly EmoteMeaning[]]> = [
   ["Feelings", EMOTE_FEELINGS],
   ["Chat", EMOTE_ACTIONS],
   ["Topics", EMOTE_TOPICS],
@@ -75,18 +87,22 @@ const TAG_GROUPS: ReadonlyArray<readonly [string, readonly EmoteTag[]]> = [
 
 /** One row of toggle chips per group. */
 function TagChips({
+  custom,
   isOn,
   onToggle,
   barring = false,
 }: {
-  isOn: (tag: EmoteTag) => boolean;
-  onToggle: (tag: EmoteTag) => void;
+  custom: readonly CustomTag[];
+  isOn: (tag: EmoteMeaning) => boolean;
+  onToggle: (tag: EmoteMeaning) => void;
   /** Marking where the emote must never go, rather than where it belongs. */
   barring?: boolean;
 }) {
+  const groups =
+    custom.length > 0 ? [...TAG_GROUPS, ["Yours", custom.map((tag) => tag.name)] as const] : TAG_GROUPS;
   return (
     <div className="space-y-1.5">
-      {TAG_GROUPS.map(([label, group]) => (
+      {groups.map(([label, group]) => (
         <div key={label} className="flex flex-wrap items-center gap-1.5">
           <span className="w-16 shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
             {label}
@@ -100,6 +116,7 @@ function TagChips({
                   key={tag}
                   type="button"
                   aria-pressed={on}
+                  title={custom.find((entry) => entry.name === tag)?.description}
                   onClick={() => onToggle(tag)}
                   className={cn(
                     "flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
@@ -111,7 +128,7 @@ function TagChips({
                   )}
                 >
                   {on && (barring ? <Ban className="size-3" /> : <Check className="size-3" />)}
-                  {TAG_LABELS[tag]}
+                  {labelOf(tag)}
                 </button>
               );
             })}
@@ -144,6 +161,51 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
   const [taggedOnly, setTaggedOnly] = useState(false);
   const [unusedOnly, setUnusedOnly] = useState(false);
   const [rules, setRules] = useState<EmoteRuleMap>(() => localEmoteRuleStore.load());
+  const [custom, setCustom] = useState<CustomTag[]>(() => localCustomTagStore.load());
+  const [draftName, setDraftName] = useState("");
+  const [draftDescription, setDraftDescription] = useState("");
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  const addCustom = useCallback(() => {
+    const name = customTagName(draftName, custom);
+    if (typeof name !== "string") return setDraftError(name.error);
+    if (!draftDescription.trim()) return setDraftError("Say what it is for — that is what the AI reads.");
+    const next = [...custom, { name, description: draftDescription.trim().slice(0, 120) }];
+    localCustomTagStore.save(next);
+    setCustom(next);
+    setDraftName("");
+    setDraftDescription("");
+    setDraftError(null);
+  }, [draftName, draftDescription, custom]);
+
+  /**
+   * Deleting a meaning takes it off every emote too. Left behind, an emote
+   * whose only tag was this one would count as hand-tagged with nothing
+   * chat can ask for, and quietly never be posted.
+   */
+  const removeCustom = useCallback((name: string) => {
+    const next = custom.filter((tag) => tag.name !== name);
+    localCustomTagStore.save(next);
+    setCustom(next);
+    setTags((current) => {
+      const cleaned: Record<string, readonly EmoteMeaning[]> = {};
+      for (const [emote, assigned] of Object.entries(current)) {
+        const kept = assigned.filter((tag) => tag !== name);
+        if (kept.length > 0) cleaned[emote] = kept;
+      }
+      localEmoteTagStore.save(cleaned);
+      return cleaned;
+    });
+    setRules((current) => {
+      const cleaned: Record<string, EmoteRule> = {};
+      for (const [emote, rule] of Object.entries(current)) {
+        const notFor = rule.notFor?.filter((tag) => tag !== name);
+        if (rule.blocked || (notFor && notFor.length > 0)) cleaned[emote] = { ...rule, notFor };
+      }
+      localEmoteRuleStore.save(cleaned);
+      return cleaned;
+    });
+  }, [custom]);
 
   /** Writes one emote's rule, dropping it entirely once nothing is set. */
   const updateRule = useCallback((name: string, next: EmoteRule) => {
@@ -157,7 +219,7 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
     });
   }, []);
 
-  const update = useCallback((name: string, next: readonly EmoteTag[]) => {
+  const update = useCallback((name: string, next: readonly EmoteMeaning[]) => {
     setTags((current) => {
       const key = name.toLowerCase();
       const merged = { ...current };
@@ -244,6 +306,68 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
           </Button>
         </div>
 
+        <div className="space-y-2 rounded-md border border-dashed border-border p-3">
+          <p className="text-xs font-medium">Your own meanings</p>
+          <p className="text-[11px] text-muted-foreground">
+            For moments only your chat has — a running joke, a friend, a
+            thing that keeps happening. The AI reads the description and asks
+            for it when a line is about that; tag the emotes that fit.
+          </p>
+          {custom.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {custom.map((tag) => (
+                <span
+                  key={tag.name}
+                  title={tag.description}
+                  className="flex items-center gap-1 rounded-full border border-border py-0.5 pl-2.5 pr-1 text-xs"
+                >
+                  {tag.name}
+                  <span className="max-w-48 truncate text-muted-foreground">— {tag.description}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeCustom(tag.name)}
+                    aria-label={`Delete ${tag.name}`}
+                    className="rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {custom.length < MAX_CUSTOM_TAGS && (
+            <form
+              className="flex flex-wrap gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                addCustom();
+              }}
+            >
+              <Input
+                value={draftName}
+                onChange={(event) => setDraftName(event.target.value)}
+                placeholder="name, e.g. bald"
+                maxLength={24}
+                aria-label="New meaning name"
+                className="h-8 w-36"
+              />
+              <Input
+                value={draftDescription}
+                onChange={(event) => setDraftDescription(event.target.value)}
+                placeholder="what it's for, e.g. anything about the streamer's bald head"
+                maxLength={120}
+                aria-label="What the new meaning is for"
+                className="h-8 min-w-48 flex-1"
+              />
+              <Button type="submit" size="sm" variant="outline" className="h-8">
+                <Plus className="size-3.5" />
+                Add
+              </Button>
+            </form>
+          )}
+          {draftError && <p className="text-[11px] text-destructive">{draftError}</p>}
+        </div>
+
         {active && (
           <div className="space-y-2.5 rounded-md border border-border bg-muted/30 p-3">
             <div className="flex items-center gap-2">
@@ -285,7 +409,7 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
                 : activeTags.length > 0
                   ? "Your tags decide when chat posts this."
                   : guessed.length > 0
-                    ? `Read from the name: ${guessed.map((tag) => TAG_LABELS[tag]).join(", ")}.`
+                    ? `Read from the name: ${guessed.map(labelOf).join(", ")}.`
                     : "Nothing is known about this one, so chat never posts it. Tag it to put it in rotation."}
             </p>
 
@@ -300,6 +424,7 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
             </Button>
 
             <TagChips
+              custom={custom}
               isOn={(tag) => activeTags.includes(tag)}
               onToggle={(tag) =>
                 update(
@@ -318,6 +443,7 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
                   death: pick Sad)
                 </p>
                 <TagChips
+                  custom={custom}
                   barring
                   isOn={(tag) => activeNotFor.includes(tag)}
                   onToggle={(tag) =>
@@ -347,7 +473,7 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
                 key={emote.id}
                 type="button"
                 onClick={() => setSelected(key === selected ? null : key)}
-                title={`${emote.name} · ${(tags[key] ?? []).map((tag) => TAG_LABELS[tag]).join(", ") || emote.mood}`}
+                title={`${emote.name} · ${(tags[key] ?? []).map(labelOf).join(", ") || emote.mood}`}
                 className={cn(
                   "relative rounded border p-1 transition-colors",
                   rules[key]?.blocked && "opacity-35 grayscale",

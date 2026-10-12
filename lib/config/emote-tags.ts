@@ -1,4 +1,5 @@
-import { EMOTE_TAGS, type EmoteTag } from "../engine/types";
+import type { EmoteMeaning, EmoteTag } from "../engine/types";
+import { knownMeanings } from "./custom-tags";
 
 /**
  * User-assigned emote tags, stored apart from the packs themselves.
@@ -13,14 +14,12 @@ import { EMOTE_TAGS, type EmoteTag } from "../engine/types";
 const STORAGE_KEY = "streamerchat-gg:emote-tags:v1";
 
 /** Lowercased emote name to the tags assigned to it. */
-export type EmoteTagMap = Readonly<Record<string, readonly EmoteTag[]>>;
+export type EmoteTagMap = Readonly<Record<string, readonly EmoteMeaning[]>>;
 
 export interface EmoteTagStore {
   load(): EmoteTagMap;
   save(tags: EmoteTagMap): void;
 }
-
-const VALID = new Set<string>(EMOTE_TAGS);
 
 /**
  * Tags an older build wrote, in the vocabulary it had.
@@ -39,15 +38,16 @@ const RENAMED: Readonly<Record<string, EmoteTag>> = {
 };
 
 /** Hand-validated: this reads data an older build may have written. */
-function sanitise(raw: unknown): EmoteTagMap {
+function sanitise(raw: unknown, known: ReadonlySet<string>): EmoteTagMap {
   if (typeof raw !== "object" || raw === null) return {};
-  const out: Record<string, EmoteTag[]> = {};
+  const out: Record<string, EmoteMeaning[]> = {};
 
   for (const [name, tags] of Object.entries(raw as Record<string, unknown>)) {
     if (!Array.isArray(tags)) continue;
     const kept = tags
       .map((tag) => (typeof tag === "string" ? (RENAMED[tag] ?? tag) : tag))
-      .filter((tag): tag is EmoteTag => typeof tag === "string" && VALID.has(tag));
+      // A built-in meaning, or one the streamer wrote and still has.
+      .filter((tag): tag is EmoteMeaning => typeof tag === "string" && known.has(tag));
     if (kept.length > 0) out[name.toLowerCase()] = [...new Set(kept)];
   }
   return out;
@@ -58,7 +58,7 @@ export const localEmoteTagStore: EmoteTagStore = {
     if (typeof window === "undefined") return {};
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
-      return raw ? sanitise(JSON.parse(raw)) : {};
+      return raw ? sanitise(JSON.parse(raw), knownMeanings()) : {};
     } catch {
       return {};
     }
@@ -83,7 +83,7 @@ export const localEmoteTagStore: EmoteTagStore = {
 export function applyEmoteTags<T extends { name: string }>(
   emotes: readonly T[],
   tags: EmoteTagMap,
-): Array<T & { tags?: readonly EmoteTag[] }> {
+): Array<T & { tags?: readonly EmoteMeaning[] }> {
   if (Object.keys(tags).length === 0) return [...emotes];
   return emotes.map((emote) => {
     const assigned = tags[emote.name.toLowerCase()];

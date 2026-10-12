@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EMOTE_TAGS, type EmoteMood, type Intent } from "../engine/types";
+import type { EmoteMood, Intent } from "../engine/types";
 import type { GenerationPhase } from "./provider";
 
 /**
@@ -55,10 +55,13 @@ export const ReactionSchema = z.object({
    * worse, with whatever happened to be lying around.
    */
   emoteIntent: z
-    .enum(EMOTE_TAGS as unknown as [string, ...string[]])
+    .string()
+    .max(40)
+    .transform((value) => value.trim().toLowerCase())
     .optional()
-    // A word outside the vocabulary drops the field, never the line: the
-    // model inventing "excited" must not cost a message that was fine.
+    // A malformed field drops the field, never the line. A word nobody
+    // tagged anything with simply matches no emote; the streamer's own tags
+    // are why this is not a fixed list.
     .catch(undefined),
   /**
    * The viewer this line belongs to, by name.

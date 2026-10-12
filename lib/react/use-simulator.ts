@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS, localSettingsStore } from "../config/settings";
 import type { SimulationSettings } from "../config/settings";
 import { localEmotePackStore, mergeEmotes } from "../config/emote-store";
 import { localRosterStore } from "../config/roster-store";
+import { localCustomTagStore } from "../config/custom-tags";
 import { readBatch } from "../ai/batch-stream";
 import type { Emote } from "../engine/types";
 import {
@@ -205,6 +206,7 @@ export function useSimulator(): UseSimulatorResult {
     setEmotes(merged);
     engineRef.current?.setEmotes(merged);
     overlayRef.current?.setEmotes(merged);
+    engineRef.current?.setCustomTags(localCustomTagStore.load());
   }, []);
 
   // Read from localStorage after mount, not during render, so server and
@@ -236,6 +238,7 @@ export function useSimulator(): UseSimulatorResult {
         // The regulars from previous streams, with what they remember.
         roster: localRosterStore.load(),
       });
+      engineRef.current.setCustomTags(localCustomTagStore.load());
     }
     engineRef.current.setCapturing(screenRef.current?.active ?? false);
     return engineRef.current;

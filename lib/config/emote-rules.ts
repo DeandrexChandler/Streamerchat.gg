@@ -1,4 +1,5 @@
-import { EMOTE_TAGS, type EmoteTag } from "../engine/types";
+import type { EmoteMeaning } from "../engine/types";
+import { knownMeanings } from "./custom-tags";
 
 /**
  * Where an emote must never go, per emote, set by the streamer.
@@ -24,16 +25,14 @@ const STORAGE_KEY = "streamerchat-gg:emote-rules:v1";
 
 export interface EmoteRule {
   blocked?: boolean;
-  notFor?: readonly EmoteTag[];
+  notFor?: readonly EmoteMeaning[];
 }
 
 /** Lowercased emote name to its rule. Emotes without one are absent. */
 export type EmoteRuleMap = Readonly<Record<string, EmoteRule>>;
 
-const VALID = new Set<string>(EMOTE_TAGS);
-
 /** Hand-validated: this reads storage, which an older build or a person may have edited. */
-function sanitise(raw: unknown): EmoteRuleMap {
+function sanitise(raw: unknown, known: ReadonlySet<string> = knownMeanings()): EmoteRuleMap {
   if (typeof raw !== "object" || raw === null) return {};
   const out: Record<string, EmoteRule> = {};
 
@@ -46,7 +45,7 @@ function sanitise(raw: unknown): EmoteRuleMap {
         ? {
             notFor: [
               ...new Set(
-                notFor.filter((tag): tag is EmoteTag => typeof tag === "string" && VALID.has(tag)),
+                notFor.filter((tag): tag is EmoteMeaning => typeof tag === "string" && known.has(tag)),
               ),
             ],
           }
