@@ -232,12 +232,6 @@ export type EmoteMood =
   | "unknown";
 
 /**
- * What a moment an emote suits.
- *
- * Deliberately the same vocabulary as Intent plus "idle" and "general", so a
- * tag can be matched against the classifier's output with no translation.
- */
-/**
  * What an emote *means*, as a small shared vocabulary.
  *
  * Used three ways: the streamer tags an emote by hand, the importer guesses
@@ -248,38 +242,53 @@ export type EmoteMood =
  * Overlap is deliberate. `W` is agreement, hype, victory and spam at once,
  * and a moment that wants any of those should be able to reach it.
  */
-export type EmoteTag =
-  | "greeting"
-  | "farewell"
-  | "hype"
-  | "agreement"
-  | "victory"
-  | "spam"
-  | "laugh"
-  | "sad"
-  | "frustrated"
-  | "confused"
-  | "question"
-  | "love"
-  | "idle"
-  | "general";
+export type EmoteTag = (typeof EMOTE_TAGS)[number];
 
-export const EMOTE_TAGS: readonly EmoteTag[] = [
+/**
+ * Feelings first, then what chat is doing, then what it is about.
+ *
+ * The order is the order the tagger shows them in, and the feelings come
+ * first because every moment has one: an emote should be findable for any
+ * feeling before it is findable for a topic.
+ */
+export const EMOTE_FEELINGS = [
+  "happy",
+  "love",
+  "hype",
+  "laugh",
+  "shock",
+  "scared",
+  "relief",
+  "sad",
+  "comfort",
+  "angry",
+  "frustrated",
+  "disgust",
+  "cringe",
+  "confused",
+  "sus",
+  "aura",
+  "respect",
+  "chill",
+  "crazy",
+  "troll",
+  "cope",
+  "idle",
+] as const;
+
+export const EMOTE_ACTIONS = [
   "greeting",
   "farewell",
-  "hype",
   "agreement",
+  "disagree",
+  "question",
   "victory",
   "spam",
-  "laugh",
-  "sad",
-  "frustrated",
-  "confused",
-  "question",
-  "love",
-  "idle",
-  "general",
-];
+] as const;
+
+export const EMOTE_TOPICS = ["watching", "dance", "money", "food", "freaky", "general"] as const;
+
+export const EMOTE_TAGS = [...EMOTE_FEELINGS, ...EMOTE_ACTIONS, ...EMOTE_TOPICS] as const;
 
 export interface Emote {
   id: string;

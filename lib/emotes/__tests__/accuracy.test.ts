@@ -112,8 +112,54 @@ describe("emote accuracy", () => {
       { id: "a", name: "widePeepoHappy", mood: "unknown", url: "u" },
       { id: "b", name: "HELLO_there", mood: "unknown", url: "u" },
     ];
-    expect(meaningsOf("widePeepoHappy")).toContain("love");
+    expect(meaningsOf("widePeepoHappy")).toContain("happy");
     expect(pick({ emotes: odd, intent: "greeting", rng: createRng(2) })).toBe("HELLO_there");
+  });
+
+  /**
+   * Misreads found in a real 659-emote channel pack.
+   *
+   * The reader used to match the END of a name, so a laughing emote was
+   * frustrated ("laugh" ends in "ugh") and BANGER was angry ("anger"). In a
+   * struggle moment that posted laughing emotes at the streamer.
+   */
+  it("reads names by their words, not by how they end", () => {
+    for (const name of ["SpeedLaugh", "wideSpeedLaugh", "PepeLaugh", "LacyLaugh"]) {
+      expect(meaningsOf(name)).toContain("laugh");
+      expect(meaningsOf(name)).not.toContain("frustrated");
+    }
+    expect(meaningsOf("BANGER")).not.toContain("angry");
+    expect(meaningsOf("BANGER")).toContain("hype");
+    expect(meaningsOf("MYEYES")).not.toContain("agreement");
+    expect(meaningsOf("SillyCatTryingToDrinkWater")).not.toContain("confused");
+  });
+
+  it("reads numbered and stretched variants as the word they are", () => {
+    expect(meaningsOf("wideSpeedLaugh16")).toContain("laugh");
+    expect(meaningsOf("NOOOOOO")).toContain("frustrated");
+    expect(meaningsOf("LOLLL")).toContain("laugh");
+    expect(meaningsOf("o7")).toEqual(expect.arrayContaining(["respect", "greeting", "farewell"]));
+    expect(meaningsOf("o7")).not.toContain("shock");
+  });
+
+  it("covers the feelings chat actually has", () => {
+    expect(meaningsOf("JUMPSCARE")).toContain("scared");
+    expect(meaningsOf("omeSHOCK")).toContain("shock");
+    expect(meaningsOf("COPIUM")).toContain("cope");
+    expect(meaningsOf("omeDisgust")).toContain("disgust");
+    expect(meaningsOf("Susge")).toContain("sus");
+    expect(meaningsOf("catJAM")).toContain("dance");
+    expect(meaningsOf("catJAM")).not.toContain("idle");
+    expect(meaningsOf("RAGEY")).toContain("angry");
+    expect(meaningsOf("Prayge")).toContain("respect");
+  });
+
+  it("never answers a struggle with a laugh, even when the pack is full of them", () => {
+    const pack: Emote[] = ["SpeedLaugh", "wideSpeedLaugh2", "PepeLaugh", "Sadge", "peepoHug"].map(
+      (name, i) => ({ id: `${i}`, name, mood: "unknown", url: "u" }),
+    );
+    const seen = spread({ emotes: pack, intent: "struggle" });
+    for (const name of seen.keys()) expect(["Sadge", "peepoHug"]).toContain(name);
   });
 
   it("reads what is on screen when capture is on", () => {

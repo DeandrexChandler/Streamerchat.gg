@@ -16,28 +16,110 @@ import {
   localEmoteTagStore,
   type EmoteTagMap,
 } from "@/lib/config/emote-tags";
-import { EMOTE_TAGS, type Emote, type EmoteTag } from "@/lib/engine/types";
+import {
+  EMOTE_ACTIONS,
+  EMOTE_FEELINGS,
+  EMOTE_TOPICS,
+  type Emote,
+  type EmoteTag,
+} from "@/lib/engine/types";
 import { meaningsOf } from "@/lib/emotes/meaning";
 import { localEmoteRuleStore, type EmoteRule, type EmoteRuleMap } from "@/lib/config/emote-rules";
 import { cn } from "@/lib/utils";
 
 /** Shown on the chips, because "question" alone reads ambiguously. */
 const TAG_LABELS: Record<EmoteTag, string> = {
+  happy: "Happy",
+  love: "Love",
+  hype: "Hype",
+  laugh: "Laugh",
+  shock: "Shock",
+  scared: "Scared",
+  relief: "Relief",
+  sad: "Sad",
+  comfort: "Comfort",
+  angry: "Angry",
+  frustrated: "Frustrated",
+  disgust: "Disgust",
+  cringe: "Cringe",
+  confused: "Confused",
+  sus: "Sus",
+  aura: "Aura",
+  respect: "Respect",
+  chill: "Chill",
+  crazy: "Crazy",
+  troll: "Troll",
+  cope: "Cope",
+  idle: "Bored / AFK",
   greeting: "Greeting",
   farewell: "Goodbye",
-  hype: "Hype",
   agreement: "Agreement",
+  disagree: "Disagree",
+  question: "Question",
   victory: "Win",
   spam: "Spam",
-  laugh: "Laugh",
-  sad: "Sad",
-  frustrated: "Frustrated",
-  confused: "Confused",
-  question: "Question",
-  love: "Love",
-  idle: "Idle",
+  watching: "Watching",
+  dance: "Dance",
+  money: "Money",
+  food: "Food",
+  freaky: "Freaky",
   general: "Anywhere",
 };
+
+/** Feelings first: every moment has one. */
+const TAG_GROUPS: ReadonlyArray<readonly [string, readonly EmoteTag[]]> = [
+  ["Feelings", EMOTE_FEELINGS],
+  ["Chat", EMOTE_ACTIONS],
+  ["Topics", EMOTE_TOPICS],
+];
+
+/** One row of toggle chips per group. */
+function TagChips({
+  isOn,
+  onToggle,
+  barring = false,
+}: {
+  isOn: (tag: EmoteTag) => boolean;
+  onToggle: (tag: EmoteTag) => void;
+  /** Marking where the emote must never go, rather than where it belongs. */
+  barring?: boolean;
+}) {
+  return (
+    <div className="space-y-1.5">
+      {TAG_GROUPS.map(([label, group]) => (
+        <div key={label} className="flex flex-wrap items-center gap-1.5">
+          <span className="w-16 shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            {label}
+          </span>
+          {group
+            .filter((tag) => !(barring && tag === "general"))
+            .map((tag) => {
+              const on = isOn(tag);
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => onToggle(tag)}
+                  className={cn(
+                    "flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                    on
+                      ? barring
+                        ? "border-destructive bg-destructive/10 text-destructive"
+                        : "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {on && (barring ? <Ban className="size-3" /> : <Check className="size-3" />)}
+                  {TAG_LABELS[tag]}
+                </button>
+              );
+            })}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** How many thumbnails render at once. A channel pack can be 600 emotes. */
 const PAGE = 72;
@@ -217,35 +299,17 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
               {activeRule.blocked ? "Blocked — click to allow" : "Never use this emote"}
             </Button>
 
-            <div className="flex flex-wrap gap-1.5">
-              {EMOTE_TAGS.map((tag) => {
-                const on = activeTags.includes(tag);
-                return (
-                  <button
-                    key={tag}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() =>
-                      update(
-                        active.name,
-                        on
-                          ? activeTags.filter((value) => value !== tag)
-                          : [...activeTags, tag],
-                      )
-                    }
-                    className={cn(
-                      "flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
-                      on
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {on && <Check className="size-3" />}
-                    {TAG_LABELS[tag]}
-                  </button>
-                );
-              })}
-            </div>
+            <TagChips
+              isOn={(tag) => activeTags.includes(tag)}
+              onToggle={(tag) =>
+                update(
+                  active.name,
+                  activeTags.includes(tag)
+                    ? activeTags.filter((value) => value !== tag)
+                    : [...activeTags, tag],
+                )
+              }
+            />
 
             {!activeRule.blocked && (
               <div className="space-y-1.5">
@@ -253,35 +317,18 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
                   Never post it when the moment is… (e.g. KEKW, never after a
                   death: pick Sad)
                 </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {EMOTE_TAGS.filter((tag) => tag !== "general").map((tag) => {
-                    const on = activeNotFor.includes(tag);
-                    return (
-                      <button
-                        key={tag}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() =>
-                          updateRule(active.name, {
-                            ...activeRule,
-                            notFor: on
-                              ? activeNotFor.filter((value) => value !== tag)
-                              : [...activeNotFor, tag],
-                          })
-                        }
-                        className={cn(
-                          "flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
-                          on
-                            ? "border-destructive bg-destructive/10 text-destructive"
-                            : "border-border text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {on && <Ban className="size-3" />}
-                        {TAG_LABELS[tag]}
-                      </button>
-                    );
-                  })}
-                </div>
+                <TagChips
+                  barring
+                  isOn={(tag) => activeNotFor.includes(tag)}
+                  onToggle={(tag) =>
+                    updateRule(active.name, {
+                      ...activeRule,
+                      notFor: activeNotFor.includes(tag)
+                        ? activeNotFor.filter((value) => value !== tag)
+                        : [...activeNotFor, tag],
+                    })
+                  }
+                />
               </div>
             )}
           </div>
