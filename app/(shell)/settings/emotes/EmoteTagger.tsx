@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Ban, Check, Plus, Search, X } from "lucide-react";
+import { Ban, Check, ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -138,8 +138,11 @@ function TagChips({
   );
 }
 
-/** How many thumbnails render at once. A channel pack can be 600 emotes. */
-const PAGE = 72;
+/**
+ * Thumbnails per page. A channel pack can be 600 emotes: all at once is a
+ * wall nobody tags from, and searching needs a name you already remember.
+ */
+const PAGE = 100;
 
 /**
  * Hand-tagging for emotes.
@@ -160,6 +163,7 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [taggedOnly, setTaggedOnly] = useState(false);
   const [unusedOnly, setUnusedOnly] = useState(false);
+  const [page, setPage] = useState(0);
   const [rules, setRules] = useState<EmoteRuleMap>(() => localEmoteRuleStore.load());
   const [custom, setCustom] = useState<CustomTag[]>(() => localCustomTagStore.load());
   const [draftName, setDraftName] = useState("");
@@ -259,6 +263,10 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
 
   if (emotes.length === 0) return null;
 
+  const pages = Math.max(1, Math.ceil(results.length / PAGE));
+  // A filter that shrinks the list can leave the page past its end.
+  const shown = Math.min(page, pages - 1);
+
   return (
     <Card>
       <CardHeader>
@@ -285,21 +293,30 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(0);
+              }}
               placeholder="Search emotes"
               className="pl-8"
             />
           </div>
           <Button
             variant={taggedOnly ? "secondary" : "ghost"}
-            onClick={() => setTaggedOnly((on) => !on)}
+            onClick={() => {
+              setTaggedOnly((on) => !on);
+              setPage(0);
+            }}
             disabled={taggedCount === 0}
           >
             Tagged only
           </Button>
           <Button
             variant={unusedOnly ? "secondary" : "ghost"}
-            onClick={() => setUnusedOnly((on) => !on)}
+            onClick={() => {
+              setUnusedOnly((on) => !on);
+              setPage(0);
+            }}
             title="Emotes whose name means nothing to chat, so they are never posted"
           >
             Never used
@@ -385,7 +402,11 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
                   variant="ghost"
                   size="sm"
                   className="h-7 text-xs text-muted-foreground"
-                  onClick={() => update(active.name, [])}
+                  onClick={() => {
+                    // Done with this one: back to the grid.
+                    update(active.name, []);
+                    setSelected(null);
+                  }}
                 >
                   Reset to automatic
                 </Button>
@@ -466,7 +487,7 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
               No emotes match “{query}”.
             </p>
           )}
-          {results.slice(0, PAGE).map((emote) => {
+          {results.slice(shown * PAGE, (shown + 1) * PAGE).map((emote) => {
             const key = emote.name.toLowerCase();
             return (
               <button
@@ -493,12 +514,40 @@ export function EmoteTagger({ emotes }: { emotes: readonly Emote[] }) {
               </button>
             );
           })}
-          {results.length > PAGE && (
-            <span className="self-center px-1 text-xs text-muted-foreground">
-              +{results.length - PAGE} more — search to narrow it down
-            </span>
-          )}
         </div>
+
+        {pages > 1 && (
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="tabular-nums">
+              {shown * PAGE + 1}–{Math.min(results.length, (shown + 1) * PAGE)} of {results.length}
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7"
+                disabled={shown === 0}
+                onClick={() => setPage(shown - 1)}
+              >
+                <ChevronLeft className="size-3.5" />
+                Previous
+              </Button>
+              <span className="tabular-nums">
+                {shown + 1} / {pages}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7"
+                disabled={shown >= pages - 1}
+                onClick={() => setPage(shown + 1)}
+              >
+                Next
+                <ChevronRight className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
