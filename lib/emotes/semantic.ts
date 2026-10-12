@@ -1,5 +1,5 @@
 import type { GameEvent } from "../ai/moment";
-import type { Emote, EmoteMeaning, EmoteMood, EmoteTag, Intent } from "../engine/types";
+import type { Emote, EmoteMeaning, EmoteMood, EmoteTag, Intent, Sentiment } from "../engine/types";
 import type { Rng } from "../engine/rng";
 import { meaningsOf, normalise } from "./meaning";
 
@@ -12,16 +12,23 @@ import { meaningsOf, normalise } from "./meaning";
  * obviously right emote no likelier than any other. Saying "hi" to a chat
  * that owns a `hi` emote and getting `catJAM` is the failure this fixes.
  *
- * Priority, highest first:
+ * Priority, highest first — and within each, an emote the streamer tagged
+ * with that meaning before one whose name merely suggests it:
  *
- *   1. A tag the streamer assigned by hand — the only source that is not a
- *      guess, so nothing outranks it
- *   2. The emote the model asked for by name, when the pack has it
- *   3. What the moment is: the token chat was told to spam, then what is on
- *      screen, then the intent — matched against meanings read off names
- *   4. The feeling the model said the line wants, when it named one
- *   5. A mood match, which is the weakest signal and the last one
- *   6. Nothing. A relevant line of text beats an unrelated picture
+ *   1. What chat was told to post ("spam W")
+ *   2. What THIS line is: the emote the model named, when it fits the
+ *      feeling the model gave the line (`emoteIntent`), then that feeling
+ *   3. What is on screen, when capture is on
+ *   4. What the moment generally is: the intent, leaning sad when what was
+ *      said was bad news, then the line's coarse emotion
+ *   5. A mood match, the weakest signal
+ *   6. Something the streamer marked usable anywhere, or nothing — a
+ *      relevant line of text beats an unrelated picture
+ *
+ * Hand tags used to outrank everything, across meanings: an emote tagged
+ * for the general moment beat what the line actually felt, so a sad line in
+ * casual chat got the streamer's laugh emote. A tag says what an emote
+ * means, not that it should win.
  *
  * There is no wildcard tier. An emote nobody has tagged and whose name says
  * nothing — most of a large channel pack — is never posted into a moment it
@@ -110,6 +117,36 @@ const MOMENT_MOODS: Record<EmoteMoment, readonly EmoteMood[]> = {
   idle: ["chill", "confused", "funny"],
 };
 
+/** The model's coarse emotion for a line, as meanings. */
+const EMOTION_TAGS: Partial<Record<EmoteMood, readonly EmoteTag[]>> = {
+  hype: ["hype", "victory"],
+  funny: ["laugh"],
+  sad: ["sad", "comfort"],
+  confused: ["confused"],
+  love: ["love", "happy"],
+  chill: ["chill", "happy"],
+};
+
+/**
+ * Bad news reads as bad news whatever its shape.
+ *
+ * "my dog died" classifies as a story, and a story reaches for watching and
+ * laugh emotes. When what was said was negative, grief and comfort come
+ * first for the moments that do not already carry a feeling of their own.
+ */
+const LEANS_ON_SENTIMENT: ReadonlySet<EmoteMoment> = new Set(["story", "mundane", "showing", "question_to_chat"]);
+const BAD_NEWS: ReadonlyArray<readonly EmoteTag[]> = [["sad", "comfort"], ["frustrated"]];
+
+/**
+ * Never posted after bad news, whatever the line or the model asked for.
+ *
+ * Measured live: "my dog passed away this morning" got three laughing
+ * emotes among the grief. A laugh there reads as chat laughing at the
+ * streamer, which is the one thing chat never does. The same rule as the
+ * streamer's own "never post it when the moment is sad", applied for them.
+ */
+const NOT_AFTER_BAD_NEWS: ReadonlySet<EmoteMeaning> = new Set(["laugh", "troll", "hype", "dance", "freaky"]);
+
 export interface SemanticEmoteOptions {
   emotes: readonly Emote[];
   intent: EmoteMoment;
@@ -129,6 +166,8 @@ export interface SemanticEmoteOptions {
   directive?: string;
   /** What the screen is doing, when capture is on. */
   event?: GameEvent;
+  /** How what the streamer said felt, from the classifier. */
+  sentiment?: Sentiment;
   rng: Rng;
 }
 
@@ -138,15 +177,23 @@ export function tagsFor(emote: Emote): readonly EmoteMeaning[] {
   return meaningsOf(emote.name);
 }
 
-/** The first group of equivalents the pack can answer with, picked freely. */
+/**
+ * The first group of equivalents the pack can answer with.
+ *
+ * Within a group, emotes the streamer tagged with it come first, and the
+ * choice among them is free — that is where variety comes from. Only when
+ * nobody tagged anything for it do emotes whose names suggest it compete.
+ */
 function bestMatch(
   emotes: readonly Emote[],
-  groups: ReadonlyArray<readonly EmoteTag[]>,
+  groups: ReadonlyArray<readonly EmoteMeaning[]>,
   rng: Rng,
 ): Emote | null {
   for (const group of groups) {
     const pool = matching(emotes, group);
-    if (pool.length > 0) return rng.pick(pool);
+    if (pool.length === 0) continue;
+    const tagged = pool.filter((emote) => emote.tags?.some((tag) => group.includes(tag)));
+    return rng.pick(tagged.length > 0 ? tagged : pool);
   }
   return null;
 }
@@ -173,23 +220,26 @@ export function pickSemanticEmote({
   emoteIntent,
   directive,
   event,
+  sentiment,
   rng,
 }: SemanticEmoteOptions): Emote | null {
   if (emotes.length === 0) return null;
 
-  /**
-   * What the moment explicitly is, and what it is only generally.
-   *
-   * The token chat was told to post and what is on screen are statements
-   * about *this* message. The intent behind it is a weaker claim, which is
-   * why the model's own stated feeling sits between them: for an ordinary
-   * line, "this one wants a laugh" beats "people are chatting".
-   */
-  const explicit = [
+  const moment: ReadonlyArray<readonly EmoteMeaning[]> =
+    sentiment === "negative" && LEANS_ON_SENTIMENT.has(intent)
+      ? [...BAD_NEWS, ...MOMENT_TAGS[intent]]
+      : MOMENT_TAGS[intent];
+
+  /** Every group of equivalents, in priority order. */
+  const groups: ReadonlyArray<readonly EmoteMeaning[]> = [
     ...(directive ? directiveTags(directive) : []),
+    ...(emoteIntent ? [[emoteIntent]] : []),
     ...(event ? (EVENT_TAGS[event] ?? []) : []),
+    ...moment,
+    // The coarse emotion every line carries — one of six — ranks below the
+    // moment; the specific emoteIntent above it is what speaks for the line.
+    ...(emotion && EMOTION_TAGS[emotion] ? [EMOTION_TAGS[emotion]!] : []),
   ];
-  const wanted = [...explicit, ...MOMENT_TAGS[intent]].flat();
 
   /**
    * The streamer's "never" comes before every tier, the model's own pick
@@ -197,43 +247,38 @@ export function pickSemanticEmote({
    * moment that wants one of the meanings it is barred from — which is what
    * keeps KEKW out of a death even when the model asks for it by name.
    */
-  const moment = new Set<EmoteMeaning>([...wanted, ...(emoteIntent ? [emoteIntent] : [])]);
+  const barred = new Set<EmoteMeaning>(groups.flat());
   emotes = emotes.filter(
-    (emote) => !emote.blocked && !emote.notFor?.some((tag) => moment.has(tag)),
+    (emote) =>
+      !emote.blocked &&
+      !emote.notFor?.some((tag) => barred.has(tag)) &&
+      !(sentiment === "negative" && tagsFor(emote).some((tag) => NOT_AFTER_BAD_NEWS.has(tag))),
   );
   if (emotes.length === 0) return null;
 
-  // 1. What the streamer said this emote is for. Never overruled by a guess.
-  const handTagged = emotes.filter((emote) => (emote.tags?.length ?? 0) > 0);
-  for (const tag of wanted) {
-    const picked = handTagged.filter((emote) => emote.tags?.includes(tag));
-    if (picked.length > 0) return rng.pick(picked);
-  }
-  // A "general" emote is the streamer saying "use this anywhere".
-  const general = handTagged.filter((emote) => emote.tags?.includes("general"));
+  // 1. What chat was told to post comes first: the streamer asked for it.
+  const told = directive ? bestMatch(emotes, directiveTags(directive), rng) : null;
+  if (told) return told;
 
-  // 2. What the model asked for, if the pack has it.
+  /**
+   * 2. The emote the model named, when the pack has it and it fits what the
+   * line is. A name it picked against its own stated feeling — KEKW on a
+   * line it called sad — is a slip, and the feeling wins.
+   */
   if (preferred) {
     const target = normalise(preferred);
     const exact = emotes.find((emote) => normalise(emote.name) === target);
-    if (exact) return exact;
+    const known = exact ? tagsFor(exact) : [];
+    // Only one whose meaning is known: an emote nothing is known about is
+    // never posted, and the model naming it does not make it mean anything.
+    if (exact && known.length > 0 && (!emoteIntent || known.includes(emoteIntent))) return exact;
   }
 
-  // 3. What chat was told to post, and what is on screen.
-  const explicitly = bestMatch(emotes, explicit, rng);
-  if (explicitly) return explicitly;
+  // 2–4. The line, then the screen, then the moment.
+  const found = bestMatch(emotes, groups.slice(directive ? directiveTags(directive).length : 0), rng);
+  if (found) return found;
 
-  // 4. The feeling the model said this line wants.
-  if (emoteIntent) {
-    const picked = matching(emotes, [emoteIntent]);
-    if (picked.length > 0) return rng.pick(picked);
-  }
-
-  // 5. What the intent generally calls for.
-  const generally = bestMatch(emotes, MOMENT_TAGS[intent], rng);
-  if (generally) return generally;
-
-  // 6. Mood, the weakest signal. "unknown" is not a mood, it is the absence
+  // 5. Mood, the weakest signal. "unknown" is not a mood, it is the absence
   //    of one, and posting those is how an in-joke ends up answering a death.
   const moods = emotion ? [emotion, ...MOMENT_MOODS[intent]] : MOMENT_MOODS[intent];
   for (const mood of moods) {
@@ -242,7 +287,8 @@ export function pickSemanticEmote({
     if (picked.length > 0) return rng.pick(picked);
   }
 
-  // 7. Anything the streamer marked usable anywhere, and otherwise nothing.
+  // 6. Anything the streamer marked usable anywhere, and otherwise nothing.
+  const general = emotes.filter((emote) => emote.tags?.includes("general"));
   return general.length > 0 ? rng.pick(general) : null;
 }
 
@@ -252,4 +298,53 @@ function directiveTags(token: string): ReadonlyArray<readonly EmoteTag[]> {
     if (pattern.test(token.trim())) return tags;
   }
   return [];
+}
+
+/** A meaning and the emotes offered to the model for it. */
+export interface EmoteGroup {
+  meaning: EmoteMeaning;
+  names: string[];
+}
+
+/**
+ * The emotes the model is shown, by what they mean.
+ *
+ * It used to see the first forty in pack order — in a real channel pack
+ * `DinkDonk`, `dudWhat`, `NOOOO`, `COCKA`, `LOSER` — and an emote it named
+ * was attached almost unconditionally, so chat posted whatever happened to
+ * sit at the front of the pack. Now every meaning the pack can answer gets
+ * a turn, the streamer's own tags first, a different pick each batch so the
+ * whole pack is reachable over a session, and emotes nothing is known about
+ * are not offered at all.
+ */
+export function emotesForPrompt(
+  emotes: readonly Emote[],
+  meanings: readonly EmoteMeaning[],
+  rng: Rng,
+  max: number,
+): EmoteGroup[] {
+  const usable = emotes.filter((emote) => !emote.blocked);
+  const pools = meanings
+    .map((meaning) => {
+      const pool = usable.filter((emote) => tagsFor(emote).includes(meaning));
+      const tagged = pool.filter((emote) => emote.tags?.includes(meaning));
+      const read = pool.filter((emote) => !emote.tags?.includes(meaning));
+      return { meaning, pool: [...rng.shuffle(tagged), ...rng.shuffle(read)] };
+    })
+    .filter(({ pool }) => pool.length > 0);
+
+  const groups = new Map<EmoteMeaning, string[]>();
+  const offered = new Set<string>();
+  // Round-robin, so a pack's thin meanings are offered before its deep
+  // ones are offered twice.
+  for (let round = 0; round < 3 && offered.size < max; round += 1) {
+    for (const { meaning, pool } of pools) {
+      if (offered.size >= max) break;
+      const next = pool.find((emote) => !offered.has(emote.name));
+      if (!next) continue;
+      offered.add(next.name);
+      groups.set(meaning, [...(groups.get(meaning) ?? []), next.name]);
+    }
+  }
+  return pools.filter(({ meaning }) => groups.has(meaning)).map(({ meaning }) => ({ meaning, names: groups.get(meaning)! }));
 }

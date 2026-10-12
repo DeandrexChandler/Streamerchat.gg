@@ -10,6 +10,8 @@ import type {
 } from "../ai/provider";
 import type { QueuedReaction, Reaction } from "../ai/reaction";
 import { MAX_EMOTES_IN_PROMPT } from "../ai/prompt";
+import { EMOTE_TAGS } from "./types";
+import { emotesForPrompt, type EmoteGroup } from "../emotes/semantic";
 import { shouldReact } from "./attention";
 import { classify } from "./classifier";
 import { ONE_SHOT_INTENTS, directOne } from "./director";
@@ -348,6 +350,7 @@ export class SimulationEngine {
 
   private emotes: readonly Emote[];
   private customTags: readonly CustomTag[] = [];
+  private readonly menuRng: Rng;
   private emoteNames = new Set<string>();
   private readonly topics = new TopicTracker();
   /** When the rate governor says the next message should land. */
@@ -474,6 +477,9 @@ export class SimulationEngine {
   constructor(options: EngineOptions = {}) {
     this.settings = { ...DEFAULT_SETTINGS, ...options.settings };
     this.rng = createRng(options.seed);
+    // Its own sequence: which emotes the model is offered must not shift the
+    // draws that pace and voice the room.
+    this.menuRng = createRng((options.seed ?? Date.now()) + 7919);
     this.emotes = options.emotes ?? [];
     this.emoteNames = new Set(this.emotes.map((emote) => emote.name));
     this.filter = createFilter(this.settings);
@@ -523,6 +529,17 @@ export class SimulationEngine {
   setEmotes(emotes: readonly Emote[]): void {
     this.emotes = emotes;
     this.emoteNames = new Set(emotes.map((emote) => emote.name));
+  }
+
+  /** What the model is offered: every emote it may name, grouped by meaning. */
+  private promptEmotes(): { emotes: string[]; emoteGroups: EmoteGroup[] } {
+    const emoteGroups = emotesForPrompt(
+      this.emotes,
+      [...EMOTE_TAGS, ...this.customTags.map((tag) => tag.name)],
+      this.menuRng,
+      MAX_EMOTES_IN_PROMPT,
+    );
+    return { emotes: [...new Set(emoteGroups.flatMap((group) => group.names))], emoteGroups };
   }
 
   /** The streamer's own meanings, so the model can ask for them. */
@@ -923,10 +940,7 @@ export class SimulationEngine {
       // A blocked emote is never offered: the model cannot ask for what the
       // streamer has said never to post, and it costs nothing to leave out.
       customTags: this.usableCustomTags(),
-      emotes: this.emotes
-        .filter((emote) => !emote.blocked)
-        .slice(0, MAX_EMOTES_IN_PROMPT)
-        .map((emote) => emote.name),
+      ...this.promptEmotes(),
       recent: [...this.recentLines],
       streamer: this.settings.streamerName || undefined,
       topic: this.settings.streamTopic || undefined,

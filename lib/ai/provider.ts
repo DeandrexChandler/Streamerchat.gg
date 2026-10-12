@@ -62,6 +62,11 @@ export interface CandidateRequest {
    * invented name renders as bare text and reads as a typo on stream.
    */
   emotes: readonly string[];
+  /**
+   * The same emotes, grouped by what they mean, so the model names one that
+   * fits rather than whichever happens to come first.
+   */
+  emoteGroups?: readonly { meaning: string; names: readonly string[] }[];
   /** Recent chat lines, so a refill doesn't echo what just went out. */
   recent: readonly string[];
   streamer?: string;

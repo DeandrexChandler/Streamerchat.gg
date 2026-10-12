@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickSemanticEmote } from "../semantic";
+import { emotesForPrompt, pickSemanticEmote } from "../semantic";
 import { meaningsOf } from "../meaning";
 import { createRng } from "../../engine/rng";
 import type { Emote } from "../../engine/types";
@@ -160,6 +160,102 @@ describe("emote accuracy", () => {
     );
     const seen = spread({ emotes: pack, intent: "struggle" });
     for (const name of seen.keys()) expect(["Sadge", "peepoHug"]).toContain(name);
+  });
+
+  describe("the line's own feeling comes first", () => {
+    const room: Emote[] = [
+      { id: "1", name: "LaughingHard", mood: "unknown", url: "u", tags: ["laugh", "agreement"] },
+      { id: "2", name: "Sadge", mood: "unknown", url: "u" },
+      { id: "3", name: "peepoHug", mood: "unknown", url: "u" },
+      { id: "4", name: "KEKW", mood: "unknown", url: "u" },
+      { id: "5", name: "HUH", mood: "unknown", url: "u" },
+    ];
+
+    it("posts a sad emote on a line the model called sad, even in casual chat with a tagged laugh emote", () => {
+      // Hand tags used to beat everything: the streamer's laugh emote,
+      // tagged for casual chat, answered a sad line.
+      const seen = spread({ emotes: room, intent: "mundane", emoteIntent: "sad" });
+      for (const name of seen.keys()) expect(["Sadge"]).toContain(name);
+    });
+
+    it("posts a confused emote when the model says the line is confused", () => {
+      // "chat what if the moon was cheese but louder" — nonsense, and the
+      // model knows; the emote has to follow it.
+      const seen = spread({ emotes: room, intent: "mundane", emoteIntent: "confused" });
+      for (const name of seen.keys()) expect(name).toBe("HUH");
+    });
+
+    it("drops the emote the model named when it contradicts the feeling it gave", () => {
+      const seen = spread({ emotes: room, intent: "story", preferred: "KEKW", emoteIntent: "sad" });
+      expect(seen.has("KEKW")).toBe(false);
+    });
+
+    it("reads bad news as bad news, though it classified as a story", () => {
+      // "my dog died yesterday": a story, negative. Stories reach for
+      // watching and laugh; this one must reach for grief.
+      const seen = spread({ emotes: room, intent: "story", sentiment: "negative" });
+      for (const name of seen.keys()) expect(["Sadge", "peepoHug"]).toContain(name);
+    });
+
+    it("never posts an emote nothing is known about, even when the model names it", () => {
+      const pack: Emote[] = [{ id: "1", name: "PLEASE", mood: "unknown", url: "u" }];
+      const seen = spread({ emotes: pack, intent: "mundane", preferred: "PLEASE" });
+      expect(seen.has("PLEASE")).toBe(false);
+    });
+
+    it("reads RIPBOZO as mockery, not grief", () => {
+      expect(meaningsOf("RIPBOZO")).toContain("troll");
+      expect(meaningsOf("RIPBOZO")).not.toContain("sad");
+    });
+
+    it("never laughs after bad news, even when the line or the model asks for it", () => {
+      const seen = spread({ emotes: room, intent: "mundane", sentiment: "negative", emoteIntent: "laugh", preferred: "KEKW" });
+      for (const name of seen.keys()) expect(["Sadge", "peepoHug"]).toContain(name);
+    });
+
+    it("still prefers the streamer's own emote among those that mean the same thing", () => {
+      const pack: Emote[] = [
+        { id: "1", name: "MySad", mood: "unknown", url: "u", tags: ["sad"] },
+        { id: "2", name: "Sadge", mood: "unknown", url: "u" },
+      ];
+      const seen = spread({ emotes: pack, intent: "mundane", emoteIntent: "sad" });
+      expect([...seen.keys()]).toEqual(["MySad"]);
+    });
+  });
+
+  describe("what the model is offered", () => {
+    const pack: Emote[] = [
+      "DinkDonk", "COCKA", "LOSER", "ome13", "KEKW", "LUL", "Sadge", "PepeHands", "HUH", "peepoHi", "catJAM",
+    ].map((name, i) => ({ id: `${i}`, name, mood: "unknown", url: "u" }));
+    const meanings = ["laugh", "sad", "confused", "greeting", "dance"];
+
+    it("offers emotes by what they mean, never the ones nothing is known about", () => {
+      // It used to be the first forty in pack order, whatever they were.
+      const groups = emotesForPrompt(pack, meanings, createRng(1), 50);
+      const offered = groups.flatMap((g) => g.names);
+      for (const name of ["DinkDonk", "COCKA", "LOSER", "ome13"]) expect(offered).not.toContain(name);
+      expect(groups.find((g) => g.meaning === "sad")?.names.sort()).toEqual(["PepeHands", "Sadge"]);
+      expect(groups.find((g) => g.meaning === "confused")?.names).toEqual(["HUH"]);
+    });
+
+    it("gives every meaning a turn before any gets a second, under the cap", () => {
+      const groups = emotesForPrompt(pack, meanings, createRng(1), 5);
+      expect(groups.map((g) => g.meaning)).toEqual(meanings);
+      expect(groups.every((g) => g.names.length === 1)).toBe(true);
+    });
+
+    it("offers the streamer's own tagged emote first, and leaves out blocked ones", () => {
+      const tagged: Emote[] = [
+        { id: "a", name: "Sadge", mood: "unknown", url: "u" },
+        { id: "b", name: "MySad", mood: "unknown", url: "u", tags: ["sad"] },
+        { id: "c", name: "PepeHands", mood: "unknown", url: "u", blocked: true },
+      ];
+      for (const seed of [1, 2, 3]) {
+        const sad = emotesForPrompt(tagged, ["sad"], createRng(seed), 1)[0];
+        expect(sad.names).toEqual(["MySad"]);
+      }
+      expect(emotesForPrompt(tagged, ["sad"], createRng(1), 50)[0].names).not.toContain("PepeHands");
+    });
   });
 
   it("reads what is on screen when capture is on", () => {
