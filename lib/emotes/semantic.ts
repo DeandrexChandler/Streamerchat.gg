@@ -46,18 +46,20 @@ export type EmoteMoment = Intent | "idle";
  * reaches for a heart while the pack owns a wave.
  */
 const MOMENT_TAGS: Record<EmoteMoment, ReadonlyArray<readonly EmoteTag[]>> = {
-  greeting: [["greeting"], ["love"]],
-  farewell: [["farewell"], ["love"]],
-  achievement: [["victory", "hype"], ["agreement"]],
-  excitement: [["hype", "victory"], ["laugh"]],
+  greeting: [["greeting"], ["love", "happy"]],
+  farewell: [["farewell"], ["love", "respect"]],
+  achievement: [["victory", "hype"], ["aura", "agreement"]],
+  excitement: [["hype", "victory"], ["shock"], ["laugh"]],
   directive: [["agreement", "victory", "hype", "spam"]],
-  struggle: [["sad", "frustrated"]],
-  confusion: [["confused"], ["question"]],
+  // Chat backs the streamer up when it goes wrong: grief, frustration on
+  // their behalf, a hug. Never a laugh.
+  struggle: [["sad", "frustrated", "comfort"], ["cope"]],
+  confusion: [["confused"], ["question", "sus"]],
   question_to_chat: [["question"], ["confused"]],
-  showing: [["hype"], ["love"]],
-  story: [["laugh"], ["love"], ["idle"]],
-  mundane: [["agreement", "laugh"], ["idle"]],
-  idle: [["idle"], ["laugh"]],
+  showing: [["hype", "watching"], ["love", "aura"]],
+  story: [["watching", "laugh"], ["love"], ["chill", "idle"]],
+  mundane: [["agreement", "laugh", "happy"], ["chill", "idle"]],
+  idle: [["idle", "chill"], ["dance", "laugh"]],
 };
 
 /**
@@ -72,7 +74,7 @@ const DIRECTIVE_TAGS: ReadonlyArray<readonly [RegExp, ReadonlyArray<readonly Emo
   [/^w+$/i, [["agreement", "victory", "hype", "spam"]]],
   [/^(gg|ggs|ez|ezclap)$/i, [["victory", "hype", "agreement"]]],
   [/^l+$/i, [["sad", "frustrated"]]],
-  [/^(f|rip)$/i, [["sad"]]],
+  [/^(f|rip)$/i, [["respect", "sad"]]],
   [/^(hi|hello|hey|wave)$/i, [["greeting"]]],
   [/^(bye|gn|o7)$/i, [["farewell"]]],
   [/^(kekw|lul|lmao|lol)$/i, [["laugh"]]],
@@ -82,14 +84,14 @@ const DIRECTIVE_TAGS: ReadonlyArray<readonly [RegExp, ReadonlyArray<readonly Emo
 const EVENT_TAGS: Partial<Record<GameEvent, ReadonlyArray<readonly EmoteTag[]>>> = {
   // Chat does laugh at a death, but grief leads when the pack has any:
   // posting LUL over Sadge three times out of four reads as mockery.
-  death: [["sad", "frustrated"], ["laugh"]],
-  win: [["victory", "hype", "agreement"]],
-  "close-call": [["hype", "confused"]],
-  boss: [["hype", "confused"]],
-  discovery: [["hype", "love"]],
-  struggling: [["frustrated", "sad"]],
-  downtime: [["idle"]],
-  menu: [["idle"]],
+  death: [["sad", "frustrated", "respect"], ["shock"], ["laugh"]],
+  win: [["victory", "hype", "agreement"], ["aura", "relief"]],
+  "close-call": [["shock", "scared", "relief"], ["hype"]],
+  boss: [["scared", "hype"], ["shock"]],
+  discovery: [["hype", "shock", "love"], ["watching"]],
+  struggling: [["frustrated", "sad", "angry"], ["comfort", "cope"]],
+  downtime: [["idle", "chill"], ["dance"]],
+  menu: [["idle", "chill"]],
 };
 
 /** Moods that suit each moment when nothing better matched, best first. */

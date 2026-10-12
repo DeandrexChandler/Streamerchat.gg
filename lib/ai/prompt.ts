@@ -148,7 +148,7 @@ export function buildPrompt(request: CandidateRequest): string {
     '    "emotion": one of hype | funny | sad | confused | love | chill,',
     '    "kind": one of answer | reaction | question | opinion | joke | callback | emote,',
     '    "emote": optional — one name from the emotes list to attach to this line, only if its feeling fits,',
-    `    "emoteIntent": optional — what the line wants from an emote, one of ${EMOTE_TAGS.join(" | ")}. Say this whenever an emote would fit, even when you also name one: it is what lets a pack without that exact emote still answer with the right kind.`,
+    `    "emoteIntent": optional — what the line wants from an emote, one of ${EMOTE_TAGS.join(" | ")}. Say this whenever an emote would fit, even when you also name one: it is what lets a pack without that exact emote still answer with the right kind. ${TAG_GLOSS}`,
     '    "eagerness": number 0-1, where 1 is a reflexive one-word reply and 0 is someone who took a while to type }',
     "No other text.",
   );
@@ -311,6 +311,10 @@ function situation(request: CandidateRequest): string[] {
     request.classification.intent === "directive" ? DIRECTIVE_NOTE : ANSWER_NOTE,
   ];
 }
+
+/** The tags whose names do not explain themselves. */
+const TAG_GLOSS =
+  "aura = confident, cool, 'he's him'; sus = suspicious, side-eye; troll = smug or sarcastic; cope = copium, denial; comfort = hugs, sympathy; crazy = unhinged; watching = eyes glued, popcorn; freaky = flirty jokes; respect = o7, F; idle = bored or afk.";
 
 const ANSWER_NOTE =
   "Answer THAT. Every line responds to it: answers it, feels something about it, asks about it, or gives the opinion it asked for. If it changes or contradicts something said earlier, chat notices.";

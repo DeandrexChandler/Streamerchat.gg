@@ -45,6 +45,11 @@ Choosing the right emote for a line, rather than a random one that exists.
 - [x] Disallowed contexts: block an emote outright, or bar it from moments
       ("KEKW, never after a death"). Applied before every tier, the model's
       own pick included (`lib/config/emote-rules.ts`)
+- [x] Every feeling first: 35 meanings in three groups — 21 feelings (happy
+      to cope), 7 chat actions, 6 topics — and a name reader that reads words
+      (`SpeedLaugh` is laugh, not "ends in ugh"). On a real 659-emote pack,
+      emotes with no meaning went from 519 to 320, most of the rest numbered
+- [ ] Custom tags the streamer writes, which the model can read
 - [ ] Per-emote usage counts, so tagging is informed by what chat reaches for
 
 Still to come in this phase: per-event priority weighting.
