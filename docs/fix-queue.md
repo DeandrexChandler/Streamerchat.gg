@@ -481,7 +481,7 @@ button, renamed) and reloading the window.
 Transcription first. OBS check moved to the very end (roadmap, "Final
 product check").
 
-## 27. Chat lags behind speech, or forgets what was said earlier — proposed
+## 27. Chat lags behind speech, or forgets what was said earlier — step 1 done
 
 **Want (owner):** chat never pauses or falls behind while the streamer
 talks, and earlier things said are not simply dropped — chat should feel
@@ -497,11 +497,13 @@ like it was listening to all of it.
   model to come back to them.
 
 **Proposal, in order of payoff:**
-1. **Stream the reply.** Ask for one line per row and release each as it
-   arrives, so the first lines post about a second after the request
-   instead of after the whole batch. A request with no first line in ~4s
-   is a hang: abort and retry then, not at 12s. Biggest single fix for lag
-   and for timeouts (item 28).
+1. **Stream the reply — done.** Each line is released as its JSON closes,
+   so the first lines post about a second after the request instead of
+   after the whole batch. No first line in 5s is a hang: abort and retry
+   then, not at 12s; a stall after lines keeps what arrived. A reply still
+   streaming about an older sentence is cut off when the streamer speaks,
+   and the provider stops writing it. Measured live, 2026-10-12: first lines
+   after 0.85–3.1s against 2.5–6.2s for the whole batch.
 2. **Hand over, don't replace.** When a reply to a newer sentence lands,
    keep two or three of the unsaid lines about the previous one, mixed in.
    Real chat answers the last thing and the thing before at once.

@@ -52,12 +52,9 @@ const httpError = (status: number) =>
 
 const replyText = (text: string, finishReason = "STOP") =>
   vi.fn(async () =>
-    ({
-      ok: true,
-      json: async () => ({
-        candidates: [{ content: { parts: [{ text }] }, finishReason }],
-      }),
-    }) as unknown as Response,
+    new Response(
+      `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text }] }, finishReason }] })}\n\n`,
+    ),
   );
 
 describe("provider failures are named, not merged", () => {

@@ -288,6 +288,8 @@ interface Pending {
   supersedes: boolean;
   /** Pulled forward by something on screen. Never preempted by another. */
   screen?: boolean;
+  /** Its first lines have landed; the rest may still be streaming in. */
+  landed?: boolean;
 }
 
 /**
@@ -801,6 +803,21 @@ export class SimulationEngine {
     if (this.inFlight && this.pendingScreenEvent !== null && !this.inFlight.wave && !this.inFlight.screen) {
       this.inFlight = null;
     }
+    /**
+     * A reply still streaming in about something said before.
+     *
+     * Its first lines are already out, so chat is not silent; the rest would
+     * hold up the answer to what was just said by however long the batch
+     * takes to finish writing. It is cut off and the new reply goes now.
+     */
+    if (
+      this.inFlight?.landed &&
+      this.phase === "active" &&
+      this.lastClassification !== null &&
+      this.inFlight.utteranceId !== this.utteranceId
+    ) {
+      this.inFlight = null;
+    }
     if (this.inFlight) return null;
     if (now - this.lastFailureAt < FAILURE_BACKOFF_MS) return null;
 
@@ -1085,12 +1102,18 @@ export class SimulationEngine {
    * moment are still queued, and those are still good. A batch that no
    * longer matches the moment — the streamer spoke while it was in flight —
    * is discarded, and the next `nextGeneration` asks for the right thing.
+   *
+   * A streamed batch arrives in pieces: each with `more` set, then a final
+   * call without it (an empty batch is fine) that closes the request. The
+   * first piece does everything a whole batch would — measures latency,
+   * replaces the queue, goes out at once — and the rest join behind it.
    */
   supplyReactions(
     batch: readonly Reaction[],
     now: number,
     ticket?: number,
     event?: GameEvent,
+    more = false,
   ): void {
     const pending = this.inFlight;
     if (ticket !== undefined && ticket !== pending?.id) {
@@ -1102,11 +1125,14 @@ export class SimulationEngine {
       this.issuedAt.delete(ticket);
       return;
     }
-    this.inFlight = null;
     if (!pending) return;
+    if (!more) this.inFlight = null;
 
-    this.observeLatency(now - pending.requestedAt);
-    this.issuedAt.delete(pending.id);
+    // Time to the first lines is what the refill planner has to cover.
+    if (!pending.landed) {
+      this.observeLatency(now - pending.requestedAt);
+      this.issuedAt.delete(pending.id);
+    }
     if (event) {
       this.event = event;
       this.eventAt = now;
@@ -1121,12 +1147,19 @@ export class SimulationEngine {
      * over. What is stale: an arrival or idle batch landing after the
      * streamer has spoken, which is about a room that had not heard them.
      */
-    if (pending.phase !== "active" && pending.utteranceId !== this.utteranceId) return;
-
-    if (batch.length === 0) {
-      this.lastFailureAt = now;
+    if (pending.phase !== "active" && pending.utteranceId !== this.utteranceId) {
+      // Still streaming, it would hold up the request that replaces it.
+      if (this.inFlight === pending) this.inFlight = null;
       return;
     }
+
+    if (batch.length === 0) {
+      // Closing a stream that delivered is not a failure; one that never did is.
+      if (!more && !pending.landed) this.lastFailureAt = now;
+      return;
+    }
+    const first = !pending.landed;
+    pending.landed = true;
 
     const batchId = this.nextBatchId++;
     const queued: QueuedReaction[] = batch.map((reaction) => ({
@@ -1164,15 +1197,17 @@ export class SimulationEngine {
      * said it. Only for a batch that answers something new: a routine
      * refill joining the queue must not jump the pacing.
      */
-    if (pending.supersedes) {
+    if (first && pending.supersedes) {
       this.nextEmitAt = Math.min(this.nextEmitAt, now);
       this.reactions = queued;
       this.waveSpeakers.clear();
     } else {
       this.reactions.push(...queued);
     }
-    this.current = pending;
-    this.phaseBatches += 1;
+    if (first) {
+      this.current = pending;
+      this.phaseBatches += 1;
+    }
   }
 
   /** The request last handed out could not be fulfilled. Chat waits it out. */
@@ -1181,8 +1216,9 @@ export class SimulationEngine {
     // A failure for a request the engine already abandoned is not news, and
     // must not back off the one that replaced it.
     if (ticket !== undefined && ticket !== this.inFlight?.id) return;
+    // A stream that broke after delivering lines did its job.
+    if (!this.inFlight?.landed) this.lastFailureAt = now;
     this.inFlight = null;
-    this.lastFailureAt = now;
   }
 
   /** Half-weight smoothing: quick to notice a slow day, quick to recover. */

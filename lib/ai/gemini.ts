@@ -2,10 +2,12 @@ import { buildPrompt } from "./prompt";
 import type {
   CandidateProvider,
   CandidateRequest,
+  GenerateOptions,
   GenerationResult,
   ProviderStatus,
 } from "./provider";
-import { parseReactions } from "./parse";
+import type { Reaction } from "./reaction";
+import { ReactionStream } from "./parse";
 import { GAME_EVENTS, type GameEvent } from "./moment";
 
 /**
@@ -24,26 +26,21 @@ import { GAME_EVENTS, type GameEvent } from "./moment";
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /**
- * Generous, because measured latency is bimodal.
+ * Deadlines for a streamed reply.
  *
- * Five consecutive identical calls returned in 1276, 912, 821, 757 and 30395
- * ms — usually under a second and a half, with occasional severe outliers.
- * At 12s roughly a fifth of refills were being thrown away mid-flight while
- * the model was still answering perfectly well.
- *
- * Kept under the budget guard's 25s minimum call interval so a slow request
- * cannot still be running when the next one is allowed. A timeout resolves to
- * an empty batch, which the client treats as "nothing to add" rather than as a
- * failure, so the cost of the remaining outliers is one skipped refill.
+ * Latency is bimodal: usually the first line is back in about a second, and
+ * now and then the call hangs for 15–30s. A whole-batch timeout could not
+ * tell the two apart until it was too late — 70 lines take about 8s on a
+ * good call, so the cutoff had to be 12s, and a hang cost all twelve.
+ * Streamed, a healthy reply shows itself almost at once: no line inside
+ * FIRST_LINE_MS is a hang, and the route's retry goes out then. Once lines
+ * flow, a gap of STALL_MS between them is the same hang starting late, and
+ * what already arrived is kept.
  */
-/**
- * Latency is bimodal: a few seconds when it answers, a hang when it does
- * not. Every successful call in the last session was under six seconds; the
- * one failure sat at the 30s limit and then retried in six. Twelve cuts a
- * hang's cost by more than half and only ever aborts a reply that was
- * already too slow to keep the room fed.
- */
-const TIMEOUT_MS = 12_000;
+const FIRST_LINE_MS = 5_000;
+const STALL_MS = 5_000;
+/** Backstop for a reply that keeps trickling. */
+const TOTAL_MS = 30_000;
 
 /**
  * Chosen by measuring, not by headline rates.
@@ -85,10 +82,28 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
   return {
     name: `gemini:${model}`,
 
-    async generate(request: CandidateRequest): Promise<GenerationResult> {
+    async generate(request: CandidateRequest, generateOptions?: GenerateOptions): Promise<GenerationResult> {
+      const controller = new AbortController();
+      let deadline = setTimeout(() => controller.abort("no first line"), FIRST_LINE_MS);
+      const backstop = setTimeout(() => controller.abort("too long"), TOTAL_MS);
+      generateOptions?.signal?.addEventListener("abort", () => controller.abort("caller gone"));
+      const stream = new ReactionStream();
+      const reactions: Reaction[] = [];
+      let event: GameEvent | undefined;
+
+      /** Lines out as soon as they close; each one buys the stream more time. */
+      const hand = (lines: Reaction[]) => {
+        if (lines.length === 0) return;
+        clearTimeout(deadline);
+        deadline = setTimeout(() => controller.abort("stalled"), STALL_MS);
+        event ??= parseEvent(stream.raw);
+        reactions.push(...lines);
+        generateOptions?.onLines?.(lines, event);
+      };
+
       try {
         const response = await doFetch(
-          `${ENDPOINT}/${encodeURIComponent(model)}:generateContent`,
+          `${ENDPOINT}/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,
           {
             method: "POST",
             headers: {
@@ -133,7 +148,7 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
                 responseMimeType: "application/json",
               },
             }),
-            signal: AbortSignal.timeout(TIMEOUT_MS),
+            signal: controller.signal,
           },
         );
 
@@ -146,41 +161,60 @@ export function createGeminiProvider(options: GeminiOptions): CandidateProvider 
           return { reactions: [], status, detail: detail.slice(0, 300) };
         }
 
-        const body = (await response.json()) as {
-          candidates?: Array<{
-            content?: { parts?: Array<{ text?: string }> };
-            finishReason?: string;
-          }>;
-          usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
-        };
+        const usage = { input: 0, output: 0 };
+        let finish = "none";
+        const reader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          // Server-sent events: one JSON response per "data:" line.
+          let newline;
+          while ((newline = buffer.indexOf("\n")) !== -1) {
+            const line = buffer.slice(0, newline).trim();
+            buffer = buffer.slice(newline + 1);
+            if (!line.startsWith("data:")) continue;
+            const chunk = JSON.parse(line.slice(5)) as {
+              candidates?: Array<{
+                content?: { parts?: Array<{ text?: string }> };
+                finishReason?: string;
+              }>;
+              usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+            };
+            const candidate = chunk.candidates?.[0];
+            finish = candidate?.finishReason ?? finish;
+            usage.input = chunk.usageMetadata?.promptTokenCount ?? usage.input;
+            usage.output = chunk.usageMetadata?.candidatesTokenCount ?? usage.output;
+            hand(stream.push((candidate?.content?.parts ?? []).map((part) => part.text ?? "").join("")));
+          }
+        }
+        // Whatever shape the model chose, the whole reply gets one last read.
+        hand(stream.finish());
 
-        const usage = {
-          input: body.usageMetadata?.promptTokenCount ?? 0,
-          output: body.usageMetadata?.candidatesTokenCount ?? 0,
-        };
-
-        const text = body.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-        if (!text.trim()) {
+        if (reactions.length > 0) return { reactions, status: "ok", event, usage };
+        if (!stream.raw.trim()) {
           // A 2xx with no text: usually a safety block or a finishReason that
           // stopped before any content was produced.
-          const finish = body.candidates?.[0]?.finishReason ?? "none";
           console.warn(`[ai] ${model} returned no text (finishReason ${finish})`);
           return { reactions: [], status: "empty", detail: `finishReason ${finish}` };
         }
-
-        const event = parseEvent(text);
-        const reactions = parseReactions(text);
-        if (reactions.length === 0) {
-          console.warn(`[ai] ${model} output could not be parsed: ${text.slice(0, 200)}`);
-          return { reactions, status: "bad-response", detail: text.slice(0, 200) };
-        }
-        return { reactions, status: "ok", event, usage };
+        console.warn(`[ai] ${model} output could not be parsed: ${stream.raw.slice(0, 200)}`);
+        return { reactions: [], status: "bad-response", detail: stream.raw.slice(0, 200) };
       } catch (error) {
+        // A hang or a stall after some lines landed is not a failed batch:
+        // what arrived is chat, and the route must not ask again for it.
+        if (reactions.length > 0) return { reactions, status: "ok", event };
         // Timeout, DNS, connection reset. Logged with the reason, because a
         // silent empty batch looks identical to a refusal.
-        const detail = String(error).slice(0, 200);
+        const reason = controller.signal.aborted ? String(controller.signal.reason) : "";
+        const detail = (reason || String(error)).slice(0, 200);
         console.warn(`[ai] ${model} request failed: ${detail}`);
-        return { reactions: [], status: "network", detail };
+        return { reactions: [], status: reason ? "timeout" : "network", detail };
+      } finally {
+        clearTimeout(deadline);
+        clearTimeout(backstop);
       }
     },
   };
