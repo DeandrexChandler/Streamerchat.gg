@@ -3,6 +3,7 @@ import { createCandidatesHandler, type BatchResponse } from "../../../app/api/ch
 import { AiRateLimiter, type AiConfig } from "../config";
 import { RateLimiter } from "../../http/rate-limit";
 import type { CandidateProvider, GenerationResult } from "../provider";
+import { readBatch } from "../batch-stream";
 
 /**
  * The route, driven end to end with a scripted provider.
@@ -75,8 +76,15 @@ function make(provider: CandidateProvider, overrides: Partial<AiConfig> = {}) {
   return { handler, log };
 }
 
+/** The whole batch, however it was sent: streamed lines and the final status. */
 async function read(response: Response): Promise<BatchResponse & Record<string, unknown>> {
-  return (await response.json()) as BatchResponse & Record<string, unknown>;
+  const out: BatchResponse & Record<string, unknown> = { reactions: [], status: "unavailable" };
+  await readBatch(response, (message) => {
+    out.reactions.push(...(message.reactions ?? []));
+    if (message.event) out.event = message.event;
+    if (message.status) out.status = message.status;
+  });
+  return out;
 }
 
 describe("chat-candidates route", () => {
@@ -140,7 +148,8 @@ describe("chat-candidates route", () => {
     const { handler, log } = make(provider);
     const raw = await (await handler(post())).text();
 
-    expect(JSON.parse(raw)).toEqual({ reactions: [], status: "unavailable" });
+    // The whole body: one closing line that says nothing but the outcome.
+    expect(raw).toBe(`${JSON.stringify({ status: "unavailable" })}\n`);
     for (const word of ["auth", "API key", "gemini", "detail", "quota", "rejected", "usage"]) {
       expect(raw.toLowerCase()).not.toContain(word.toLowerCase());
     }
@@ -206,6 +215,85 @@ describe("chat-candidates route", () => {
     expect(received!.history[0].length).toBeLessThanOrEqual(1000);
     expect(received!.roster![0].notes!.length).toBeLessThanOrEqual(400);
     expect(received!.roster![0].persona.length).toBeLessThanOrEqual(200);
+  });
+
+  it("sends lines to the browser as the provider writes them", async () => {
+    // The first lines reach chat while the rest of the batch is still being
+    // written, which is what keeps a 70-line batch from being an 8s wait.
+    let finishBatch!: () => void;
+    const provider: CandidateProvider = {
+      name: "slow",
+      generate(_request, options) {
+        options?.onLines?.([{ text: "first in" }, { text: "no shot" }]);
+        return new Promise((resolve) => {
+          finishBatch = () => {
+            const rest = [{ text: "late one" }];
+            options?.onLines?.(rest);
+            resolve({ reactions: [{ text: "first in" }, { text: "no shot" }, ...rest], status: "ok" });
+          };
+        });
+      },
+    };
+    const { handler } = make(provider);
+    const reader = (await handler(post())).body!.getReader();
+    const first = new TextDecoder().decode((await reader.read()).value);
+    expect(JSON.parse(first.trim()).reactions.map((r: { text: string }) => r.text)).toEqual(["first in", "no shot"]);
+
+    finishBatch();
+    let rest = "";
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+      rest += new TextDecoder().decode(chunk.value);
+    }
+    const messages = rest.trim().split("\n").map((line) => JSON.parse(line));
+    expect(messages.flatMap((m) => m.reactions ?? []).map((r: { text: string }) => r.text)).toEqual(["late one"]);
+    expect(messages.at(-1)).toEqual({ status: "ok" });
+  });
+
+  it("stops the provider writing when the browser hangs up", async () => {
+    // The engine cuts off a reply about an older sentence. Output is most of
+    // the bill, so the rest of that batch must not be written anyway.
+    let sawAbort = false;
+    const provider: CandidateProvider = {
+      name: "slow",
+      generate(_request, options) {
+        options?.onLines?.([{ text: "first in" }]);
+        return new Promise((resolve) => {
+          options?.signal?.addEventListener("abort", () => {
+            sawAbort = true;
+            resolve({ reactions: [{ text: "first in" }], status: "timeout" });
+          });
+        });
+      },
+    };
+    const { handler, log } = make(provider);
+    const browser = new AbortController();
+    const request = new Request("http://localhost/api/chat-candidates", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: browser.signal,
+    });
+    const response = await handler(request);
+    await response.body!.getReader().read();
+    browser.abort();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sawAbort).toBe(true);
+    expect(log.log.mock.calls.some(([line]) => String(line).includes("cut off"))).toBe(true);
+  });
+
+  it("does not ask again once lines have reached chat", async () => {
+    // A stream that stalls after a few lines has worked: a retry would
+    // repeat the moment, not rescue it.
+    const provider = scripted([
+      { reactions: [{ text: "got this far" }], status: "timeout" },
+      ok(["second call"]),
+    ]);
+    const { handler } = make(provider);
+    const res = await read(await handler(post()));
+    expect(res.status).toBe("ok");
+    expect(res.reactions.map((r) => r.text)).toEqual(["got this far"]);
+    expect(provider.calls).toBe(1);
   });
 
   it("clamps the batch to the configured ceiling", async () => {

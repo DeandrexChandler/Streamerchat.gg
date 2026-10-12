@@ -21,11 +21,20 @@ const request: CandidateRequest = {
   count: 3,
 };
 
+/** Gemini's streamed reply: the text in a few server-sent events. */
 function reply(text: string) {
-  return {
-    ok: true,
-    json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }),
-  } as Response;
+  return sse(text.match(/[\s\S]{1,7}/g) ?? [""]);
+}
+
+function sse(pieces: readonly string[], finishReason = "STOP") {
+  const events = pieces.map((piece, i) =>
+    `data: ${JSON.stringify({
+      candidates: [
+        { content: { parts: [{ text: piece }] }, ...(i === pieces.length - 1 ? { finishReason } : {}) },
+      ],
+    })}\n\n`,
+  );
+  return new Response(events.join(""));
 }
 
 function provider(fetchImpl: unknown) {
@@ -113,6 +122,97 @@ describe("gemini provider", () => {
       fetchImpl: impl as unknown as typeof fetch,
     }).generate(request);
     expect(String(impl.mock.calls[0][0])).toContain("gemini-3.6-flash");
+  });
+});
+
+/**
+ * A reply that arrives over time, honouring the abort signal the way a real
+ * fetch does. `script` is pieces of model text and the gaps before them.
+ */
+function streamed(script: ReadonlyArray<readonly [number, string]>) {
+  return vi.fn(async (_url: string, init?: RequestInit) => {
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const fail = () => controller.error(init?.signal?.reason ?? new Error("aborted"));
+        init?.signal?.addEventListener("abort", fail);
+        for (const [gap, text] of script) {
+          await new Promise((resolve) => setTimeout(resolve, gap));
+          if (init?.signal?.aborted) return;
+          const event = { candidates: [{ content: { parts: [{ text }] } }] };
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
+        }
+        if (!init?.signal?.aborted) controller.close();
+      },
+    });
+    return new Response(body);
+  });
+}
+
+describe("gemini provider, streamed", () => {
+  it("hands lines on as they arrive, not when the batch is done", async () => {
+    vi.useFakeTimers();
+    try {
+      const seen: Array<[number, string[]]> = [];
+      const started = Date.now();
+      const pending = provider(
+        streamed([
+          [800, '[{"text":"no shot"},{"te'],
+          [800, 'xt":"actual cinema"},'],
+          [2_000, '{"text":"clip it"}]'],
+        ]),
+      ).generate(request, {
+        onLines: (lines) => seen.push([Date.now() - started, lines.map((l) => l.text)]),
+      });
+      await vi.advanceTimersByTimeAsync(4_000);
+      const result = await pending;
+
+      expect(seen).toEqual([
+        [800, ["no shot"]],
+        [1_600, ["actual cinema"]],
+        [3_600, ["clip it"]],
+      ]);
+      expect(result.reactions.map((r) => r.text)).toEqual(["no shot", "actual cinema", "clip it"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("calls a reply with no first line inside five seconds a timeout, not 30", async () => {
+    // A hang used to cost the full whole-batch timeout before the retry
+    // could even go out. Streamed, a healthy reply shows itself at once.
+    vi.useFakeTimers();
+    try {
+      const pending = provider(streamed([[30_000, '[{"text":"late"}]']])).generate(request);
+      await vi.advanceTimersByTimeAsync(5_100);
+      const result = await pending;
+      expect(result.status).toBe("timeout");
+      expect(result.reactions).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps what arrived when the stream stalls, rather than calling it a failure", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = provider(
+        streamed([
+          [500, '[{"text":"no shot"},{"text":"actual cinema"},'],
+          [30_000, '{"text":"never"}]'],
+        ]),
+      ).generate(request);
+      await vi.advanceTimersByTimeAsync(6_000);
+      const result = await pending;
+      expect(result.status).toBe("ok");
+      expect(result.reactions.map((r) => r.text)).toEqual(["no shot", "actual cinema"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads a brace inside a line as text, not the end of the line", async () => {
+    const result = await provider(vi.fn(async () => reply('{"event":"win","reactions":[{"text":"hi :}"},{"text":"gg {"}]}'))).generate(request);
+    expect(result.reactions.map((r) => r.text)).toEqual(["hi :}", "gg {"]);
   });
 });
 
