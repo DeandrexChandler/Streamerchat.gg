@@ -96,6 +96,8 @@ function Simulator() {
         onMutedChange={(on) => void simulator.setMuted(on)}
         subscribeLevel={simulator.subscribeLevel}
         onClear={simulator.clear}
+        devModel={simulator.devModel}
+        onDevModelChange={simulator.setDevModel}
         onChange={simulator.updateSettings}
       />
       </div>

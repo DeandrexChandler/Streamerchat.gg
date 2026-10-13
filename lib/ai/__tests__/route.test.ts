@@ -296,6 +296,29 @@ describe("chat-candidates route", () => {
     expect(provider.calls).toBe(1);
   });
 
+  describe("DEV-MODEL-TOGGLE", () => {
+    it("answers with the model the request picked, when it is offered", async () => {
+      const gemini = scripted([ok(["from gemini"])]);
+      const openai = { ...scripted([ok(["from openai"])]), name: "openai:test" };
+      const merged = { ...config };
+      const handler = createCandidatesHandler({
+        config: merged,
+        provider: gemini,
+        devProviders: { openai },
+        limiter: new AiRateLimiter(merged),
+        httpLimiter: new RateLimiter({ windowMs: 60_000, maxRequests: 1000 }),
+        log: { log: vi.fn(), warn: vi.fn() },
+      });
+      expect((await read(await handler(post({ ...body, devModel: "openai" })))).reactions[0].text).toBe("from openai");
+      expect((await read(await handler(post(body)))).reactions[0].text).toBe("from gemini");
+    });
+
+    it("falls back to Gemini when the picked model has no key", async () => {
+      const { handler } = make(scripted([ok(["from gemini"])]));
+      expect((await read(await handler(post({ ...body, devModel: "openai" })))).reactions[0].text).toBe("from gemini");
+    });
+  });
+
   it("clamps the batch to the configured ceiling", async () => {
     let requested = 0;
     const provider: CandidateProvider = {

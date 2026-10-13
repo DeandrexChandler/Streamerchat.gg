@@ -9,6 +9,10 @@ import { localEmotePackStore, mergeEmotes } from "../config/emote-store";
 import { localRosterStore } from "../config/roster-store";
 import { localCustomTagStore } from "../config/custom-tags";
 import { readBatch } from "../ai/batch-stream";
+import type { DevModel } from "../ai/provider";
+
+/** DEV-MODEL-TOGGLE: which model answers, remembered in this browser. */
+const DEV_MODEL_KEY = "streamerchat-gg:dev-model";
 import type { Emote } from "../engine/types";
 import {
   SimulationEngine,
@@ -144,6 +148,10 @@ export interface UseSimulatorResult {
   muted: boolean;
   setMuted: (on: boolean) => Promise<void>;
 
+  /** DEV-MODEL-TOGGLE: which model answers. Removed once one is chosen. */
+  devModel: DevModel;
+  setDevModel: (model: DevModel) => void;
+
   /** Re-reads settings and emotes from storage, for after a trip to settings. */
   reloadStored: () => void;
 }
@@ -160,6 +168,9 @@ export function useSimulator(): UseSimulatorResult {
   const [overlaySubscribers, setOverlaySubscribers] = useState(0);
   const [watching, setWatching] = useState(false);
   const [muted, setMutedState] = useState(false);
+  // DEV-MODEL-TOGGLE
+  const [devModel, setDevModelState] = useState<DevModel>("gemini");
+  const devModelRef = useRef<DevModel>("gemini");
 
   const engineRef = useRef<SimulationEngine | null>(null);
   const micRef = useRef<MicSession | null>(null);
@@ -213,6 +224,15 @@ export function useSimulator(): UseSimulatorResult {
   // client markup agree.
   useEffect(() => {
     reloadStored();
+    try {
+      // DEV-MODEL-TOGGLE
+      if (window.localStorage.getItem(DEV_MODEL_KEY) === "openai") {
+        devModelRef.current = "openai";
+        setDevModelState("openai");
+      }
+    } catch {
+      // Storage blocked: Gemini, as always.
+    }
 
     // The OBS relay is created here rather than on start(), because the key
     // comes from localStorage and this is the first point at which it can be
@@ -281,7 +301,7 @@ export function useSimulator(): UseSimulatorResult {
         method: "POST",
         headers: { "content-type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify(frame ? { ...request, frame } : request),
+        body: JSON.stringify({ ...request, ...(frame ? { frame } : {}), devModel: devModelRef.current }),
         signal: controller.signal,
       });
       /**
@@ -735,5 +755,15 @@ export function useSimulator(): UseSimulatorResult {
     muted,
     setMuted,
     reloadStored,
+    devModel,
+    setDevModel: (model: DevModel) => {
+      devModelRef.current = model;
+      setDevModelState(model);
+      try {
+        window.localStorage.setItem(DEV_MODEL_KEY, model);
+      } catch {
+        // Only this session remembers it.
+      }
+    },
   };
 }
