@@ -42,13 +42,13 @@ const SUFFIXES = ["ge", "w", "s", "e", "ing", "ed", "hd", "x", "xd"];
 const MEANINGS: Readonly<Record<EmoteTag, readonly string[]>> = {
   // Feelings.
   happy: ["happy", "happi", "smile", "smiling", "glad", "joy", "nice", "pleased", "content", "grin", "yay"],
-  love: ["love", "heart", "hearts", "kiss", "cute", "uwu", "aww", "blush", "wholesome", "bless", "peepoye", "ily", "adore"],
+  love: ["love", "heart", "hearts", "kiss", "cute", "uwu", "aww", "blush", "wholesome", "bless", "peepoye", "ily", "adore", "thankyou", "thanku", "thanks", "ty"],
   hype: ["clap", "pog", "poggers", "pogu", "pogchamp", "pogo", "hype", "hypers", "letsgo", "lesgo", "sheesh", "fire", "boom", "cheer", "hooray", "banger", "raid", "wicked", "bussin", "insane", "yoo", "ayy", "lets"],
   laugh: ["kek", "kekw", "kekl", "lul", "lulw", "omegalul", "lol", "lolol", "lmao", "icant", "xd", "xdd", "haha", "hehe", "laugh", "giggl", "rofl", "pft", "pepega", "bruh", "roflan", "joel", "funny", "silly", "goofy", "dead"],
-  shock: ["shock", "shocked", "omg", "wtf", "woah", "whoah", "wow", "noway", "gasp", "omgbruh", "jaw", "surprise", "surprised", "ohshit", "ohshi", "speechless", "cantbelieve", "flashbang", "myeyes", "o", "what"],
+  shock: ["shock", "shocked", "omg", "wtf", "woah", "whoah", "wow", "noway", "gasp", "omgbruh", "jaw", "surprise", "surprised", "ohshit", "ohshi", "speechless", "cantbelieve", "flashbang", "myeyes", "o", "what", "wait"],
   scared: ["scared", "scawy", "scary", "monka", "fear", "afraid", "nervous", "sweat", "panic", "spook", "jumpscare", "alert", "alarm", "scream", "shake", "shaking", "stressed", "cortisol", "ohno", "help", "saveme", "gulp"],
   relief: ["relief", "relieved", "phew", "whew", "finally", "healed", "saved", "safe", "survived"],
-  sad: ["sad", "sadge", "sadeg", "cry", "sob", "tear", "tears", "pepehands", "feelsbad", "despair", "grief", "hurt", "rip", "pain", "ripbozo", "emotional", "lonely", "lone", "depressed", "agony", "widepeeposad", "naur", "crying"],
+  sad: ["sad", "sadge", "sadeg", "cry", "sob", "tear", "tears", "pepehands", "feelsbad", "despair", "grief", "hurt", "rip", "pain", "emotional", "lonely", "lone", "depressed", "agony", "widepeeposad", "naur", "crying"],
   comfort: ["hug", "hugs", "hugg", "pat", "pet", "pats", "cuddl", "comfort", "there", "snuggl"],
   angry: ["angry", "anger", "mad", "madge", "rage", "ragey", "reee", "ree", "mald", "malding", "fume", "furious", "triggered", "seethe"],
   frustrated: ["tilt", "tilted", "smh", "facepalm", "sigh", "ugh", "no", "aaa", "annoyed", "deadass", "why"],
@@ -57,12 +57,12 @@ const MEANINGS: Readonly<Record<EmoteTag, readonly string[]>> = {
   confused: ["huh", "hmm", "hmmge", "wut", "wat", "confus", "think", "thonk", "5head", "galaxybrain", "uh", "uhm", "um", "wdym", "que", "buh", "wuh", "juh", "guh", "tuh", "ponder", "pondering", "err", "lost"],
   sus: ["sus", "susge", "sussy", "sideeye", "suspicious", "pause", "ayo", "ayoo", "judg", "caught", "sneak", "devious", "scheming", "plot", "plotge", "aware"],
   aura: ["aura", "gigachad", "chad", "based", "goat", "goated", "flex", "strong", "sturdy", "cool", "kool", "imhim", "lockin", "focus", "sigma", "swag", "drip", "king", "cook", "cooked"],
-  respect: ["o7", "salute", "respect", "bow", "pray", "prayge", "praise", "thankyou", "thanku", "thanks", "ty", "f", "honor"],
+  respect: ["o7", "salute", "respect", "bow", "pray", "prayge", "praise", "f", "honor"],
   chill: ["chill", "relax", "comfy", "cozy", "snug", "sip", "coffee", "calm", "smoke", "peaceful", "zen"],
   crazy: ["crazy", "schizo", "tweak", "tweaker", "tweaking", "crashout", "tripout", "trip", "unhinged", "adhd", "cte", "wild", "chaos", "deranged"],
-  troll: ["troll", "kappa", "4head", "clown", "joker", "smug", "evil", "instigate", "gotem", "yougotme", "laughingatyou", "ez"],
+  troll: ["troll", "kappa", "4head", "clown", "joker", "smug", "evil", "instigate", "gotem", "ripbozo", "bozo", "yougotme", "laughingatyou", "ez"],
   cope: ["cope", "copium", "hopium", "clueless", "surely", "delusional", "denial", "copege"],
-  idle: ["afk", "sleep", "sleepo", "bedge", "zzz", "lurk", "lurkge", "bored", "wait", "waiting", "idle", "nap", "tired", "yawn", "offline", "unfocus"],
+  idle: ["afk", "sleep", "sleepo", "bedge", "zzz", "lurk", "lurkge", "bored", "waiting", "idle", "nap", "tired", "yawn", "offline", "unfocus"],
 
   // What chat is doing.
   greeting: ["hi", "hii", "hiya", "hello", "henlo", "hey", "heyy", "wave", "waving", "o7", "welcome", "sup", "yo", "gm", "morning", "arrive"],

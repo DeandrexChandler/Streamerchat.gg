@@ -27,7 +27,7 @@ const MAX_HISTORY = 6;
  * generation rejected as malformed. Sending what the prompt actually uses
  * removes the class of bug rather than raising a number.
  */
-export const MAX_EMOTES_IN_PROMPT = 40;
+export const MAX_EMOTES_IN_PROMPT = 50;
 
 /**
  * Recent chat lines shown, so a batch does not echo what just went out.
@@ -71,10 +71,11 @@ const RULES = [
   "Answer directly, react with a feeling, ask a follow-up, give an opinion when one was asked for. A couple of lines can be looser or a joke, but the batch stays about what was just said.",
   "Style, not script: 'nah he wylin', 'Ayo????', 'grown adult btw', 'slayyy', 'mhmm', 'i think you can idk tho', 'bet that', 'ooo good idea', 'leave the wall'.",
   "Short lines still react to what was said — not generic filler like nice, real, same, lol stacked up with nothing behind them.",
-  "Attach an emote to a line with the \"emote\" field when it fits the feeling. Do not write lines that are only an emote name, except one or two per batch at most.",
+  "Attach an emote with the \"emote\" field to about half the lines — the ones with the most feeling — and only one that means what that line feels. An emote on every line reads as a bot. Do not write lines that are only an emote name, except one or two per batch at most.",
   "No trailing punctuation on short lines. No hashtags. No quotation marks. No @mentions. Never number the lines.",
   "NEVER insult, mock, correct or express disappointment in the streamer. Not once, not as a joke. Teasing yourselves is fine.",
   "What the streamer said came from speech recognition, which mangles slang: 'low key' for 'lowkey', 'goaded' for 'goated', initialisms spelled out letter by letter, a name heard as a word. Read it the way it was meant and answer that. Never point out the wording or correct it.",
+  "If it still makes no sense read generously — the streamer is talking nonsense on purpose — chat is baffled and says so: 'what', 'huh??', 'bro is speaking in tongues', 'i need subtitles'. Those lines are confused, not agreeing.",
 ];
 
 /**
@@ -122,7 +123,14 @@ export function buildPrompt(request: CandidateRequest): string {
     );
   }
 
-  if (emotes.length > 0) {
+  if (request.emoteGroups?.length) {
+    lines.push(
+      "",
+      "Emotes available, by what they mean, spelled exactly:",
+      ...request.emoteGroups.map((group) => `  ${group.meaning}: ${group.names.join(" ")}`),
+      "Attach one to a line only when its meaning matches that line's feeling: a sad line gets a sad emote, a confused line a confused one, a hype moment a hype one. Any other name renders as plain text and looks broken.",
+    );
+  } else if (emotes.length > 0) {
     lines.push(
       "",
       `Emotes available, spelled exactly: ${emotes.slice(0, MAX_EMOTES_IN_PROMPT).join(" ")}`,
@@ -148,7 +156,7 @@ export function buildPrompt(request: CandidateRequest): string {
     '    "emotion": one of hype | funny | sad | confused | love | chill,',
     '    "kind": one of answer | reaction | question | opinion | joke | callback | emote,',
     '    "emote": optional — one name from the emotes list to attach to this line, only if its feeling fits,',
-    `    "emoteIntent": optional — what the line wants from an emote, one of ${[...EMOTE_TAGS, ...(request.customTags ?? []).map((tag) => tag.name)].join(" | ")}. Say this whenever an emote would fit, even when you also name one: it is what lets a pack without that exact emote still answer with the right kind. ${TAG_GLOSS}`,
+    `    "emoteIntent": optional — what the line wants from an emote, one of ${[...EMOTE_TAGS, ...(request.customTags ?? []).map((tag) => tag.name)].join(" | ")}. Give it on every line that has a feeling — most do — and make it the feeling of THAT line, not of the stream: a sad line says sad, a baffled line says confused, a hype line says hype. It is what picks the emote that goes with the line. ${TAG_GLOSS}`,
     ...(request.customTags?.length
       ? [
           "    This streamer's own meanings, for moments only their chat has — use one when the line is about that thing:",

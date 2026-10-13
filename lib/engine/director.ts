@@ -13,6 +13,7 @@ import type {
   MessageKind,
   MessageSource,
   PendingMessage,
+  Sentiment,
   Viewer,
 } from "./types";
 
@@ -22,6 +23,8 @@ interface EmoteContext {
   directive?: string;
   /** What the screen is doing, when capture is on. */
   event?: GameEvent;
+  /** How what the streamer said felt: bad news reaches for grief. */
+  sentiment?: Sentiment;
 }
 
 /**
@@ -97,6 +100,16 @@ const STEER_GAIN = 2;
  * streamer notices.
  */
 const EMOTE_TRAILER = 0.22;
+
+/**
+ * Chance an emote the model named is attached to its line.
+ *
+ * Not every time: the model names one on nearly every line whatever it is
+ * told — measured at 96–100% of lines — and an emote stapled to every
+ * message is the clearest tell a chat is generated. The emote-only lines
+ * come on top of this.
+ */
+const NAMED_EMOTE_TRAILER = 0.6;
 
 /** How many times an emote is repeated in an emote-only line. */
 function emoteSpamCount(rng: Rng): number {
@@ -242,6 +255,7 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
   const context: EmoteContext = {
     ...(topic?.directiveTarget ? { directive: topic.directiveTarget } : {}),
     ...(options.event ? { event: options.event } : {}),
+    ...(topic?.sentiment && phase === "active" ? { sentiment: topic.sentiment } : {}),
   };
 
   let text: string | null = null;
@@ -345,8 +359,9 @@ export function directOne(options: DirectOneOptions): DirectOneResult | null {
       source = "emote";
     } else if (
       !isEmoteOnly(text, emotes) &&
-      (reaction.emote ||
-        ((reaction.emotion || reaction.emoteIntent) && rng.chance(EMOTE_TRAILER)))
+      (reaction.emote
+        ? rng.chance(NAMED_EMOTE_TRAILER)
+        : (reaction.emotion || reaction.emoteIntent) && rng.chance(EMOTE_TRAILER))
     ) {
       /**
        * Emotes chosen from the reaction's own emotion, not at random.

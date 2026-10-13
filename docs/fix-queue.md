@@ -563,3 +563,34 @@ decided until measured: about twenty real calls per candidate on the real
 prompt (under a cent each) for latency, cost and whether the lines read
 like Twitch. Switching provider overturns the one-provider rule in
 CLAUDE.md and needs the owner's say-so.
+
+---
+
+## 29. Chat used emotes wrong, and missed the obvious ones — done
+
+**Seen (owner):** sad moments without sad emotes, nonsense without confused
+ones, hype missing the obvious hype emotes.
+
+**Causes, found in the code and confirmed on the owner's 659-emote pack:**
+- The model was shown the first forty emotes in pack order (`DinkDonk`,
+  `dudWhat`, `NOOOO`, `COCKA`, `LOSER`…) and an emote it named was attached
+  every time — and it named one on 96–100% of lines.
+- Hand tags outranked the line's own feeling, across meanings: a sad line
+  in casual chat got the streamer's tagged laugh emote.
+- Bad news read as neutral: the classifier had no grief words, so "my dog
+  passed away" was small talk, and got laughing emotes.
+
+**Now:**
+- The model is offered emotes grouped by meaning, every meaning a turn,
+  the streamer's tags first, a different pick each batch, nothing unknown.
+- Order: what chat was told to post; the line's own `emoteIntent` (the
+  emote the model named only if it fits that); the screen; the moment,
+  leaning sad after bad news; the coarse emotion. Hand tags win *within*
+  a meaning.
+- After bad news, no laugh, troll, hype, dance or freaky emotes at all.
+- A named emote is attached 60% of the time; the prompt asks for about half
+  the lines. Unknown emotes are never posted even when named.
+
+Measured live on the real pack (3 lines, before → after): the dead dog got
+three laughing emotes → none; nonsense got pondering / WHAT / huh-style;
+hype got MAXWIN, WEDIDIT, WWW, BANGER, WeCelebrating.

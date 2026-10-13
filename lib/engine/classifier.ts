@@ -105,6 +105,17 @@ const NEGATIVE_WORDS = [
   // Slang complaints.
   "cooked", "washed", "mid", "trash", "rough", "brutal", "clapped", "cringe",
   "ass", "garbage", "unlucky", "pain", "griefing",
+  /**
+   * Bad news. None of these were here, so "my dog passed away, im
+   * devastated" read as neutral and chat answered it like small talk —
+   * laughing emotes included. "dead" is left out on purpose: in chat it
+   * usually means laughing.
+   */
+  "passed away", "died", "funeral", "hospital", "cancer", "devastated",
+  "heartbroken", "depressed", "depression", "crying", "cried", "upset",
+  "laid off", "got fired", "broke up", "lost my", "grieving", "rest in peace",
+  "put down", "lonely", "anxious", "stressed", "scared", "hurt", "injured",
+  "bad news", "sucks", "miss her", "miss him",
 ];
 
 /** Words too common to be useful as template slots. */

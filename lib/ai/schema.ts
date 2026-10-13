@@ -69,6 +69,10 @@ export const CandidateRequestSchema = z
     silenceSeconds: z.number().min(0).max(100_000).default(0),
     idleStage: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
     emotes: z.array(z.string().max(60)).max(200).default([]),
+    emoteGroups: z
+      .array(z.object({ meaning: text(24), names: z.array(z.string().max(60)).max(4) }))
+      .max(60)
+      .optional(),
     recent: z.array(text(200)).max(30).default([]),
     /**
      * Nullish rather than optional: JSON.stringify drops `undefined`, but any
