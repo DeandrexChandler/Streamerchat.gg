@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertTriangle, Trash2 } from "lucide-react";
+import type { DevModel } from "@/lib/ai/provider";
 import { MuteButton } from "./MuteButton";
 import { MicMeter } from "@/app/components/MicMeter";
 import type { SimulationSettings } from "@/lib/config/settings";
@@ -95,6 +96,9 @@ export interface ControlPanelProps {
   subscribeLevel: (handler: (level: number) => void) => () => void;
   /** Wipes the log and resets the session back to Play. */
   onClear: () => void;
+  /** DEV-MODEL-TOGGLE: which model answers. Removed once one is chosen. */
+  devModel: DevModel;
+  onDevModelChange: (model: DevModel) => void;
   onChange: (patch: Partial<SimulationSettings>) => void;
 }
 
@@ -110,6 +114,8 @@ export function ControlPanel({
   subscribeLevel,
   onClear,
   onChange,
+  devModel,
+  onDevModelChange,
 }: ControlPanelProps) {
   return (
     <aside className="flex h-full w-56 flex-col gap-4 overflow-y-auto rounded-lg border border-gray-300 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
@@ -184,6 +190,30 @@ export function ControlPanel({
         <div className="flex justify-between">
           <span>Chat</span>
           <span className="text-gray-700 dark:text-gray-300">{PHASE_LABELS[stats.phase]}</span>
+        </div>
+
+        {/* DEV-MODEL-TOGGLE: for comparing the two models. Delete this block,
+            and everything else marked DEV-MODEL-TOGGLE, once one is chosen. */}
+        <div className="flex items-center justify-between gap-2 rounded border border-dashed border-amber-400/70 px-2 py-1">
+          <span className="text-amber-600 dark:text-amber-400">Dev: model</span>
+          <div className="flex overflow-hidden rounded border border-gray-300 dark:border-gray-600">
+            {(["gemini", "openai"] as const).map((model) => (
+              <button
+                key={model}
+                type="button"
+                aria-pressed={devModel === model}
+                onClick={() => onDevModelChange(model)}
+                title={model === "gemini" ? "Gemini 3.5 Flash-Lite" : "OpenAI gpt-6-luna"}
+                className={
+                  devModel === model
+                    ? "bg-gray-800 px-1.5 py-0.5 text-white dark:bg-gray-200 dark:text-gray-900"
+                    : "px-1.5 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-700"
+                }
+              >
+                {model === "gemini" ? "Gemini" : "Luna"}
+              </button>
+            ))}
+          </div>
         </div>
 
         <button

@@ -115,7 +115,12 @@ export interface CandidateRequest {
    * a minute ago instead of forgetting it.
    */
   callbacks?: readonly string[];
+  /** DEV-MODEL-TOGGLE: which model answers. Removed once one is chosen. */
+  devModel?: DevModel;
 }
+
+/** DEV-MODEL-TOGGLE: the two models being compared. */
+export type DevModel = "gemini" | "openai";
 
 export type ScreenReason = "changed" | "asked";
 
