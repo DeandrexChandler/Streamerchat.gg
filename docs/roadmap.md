@@ -11,7 +11,7 @@ is manually believable.
 - [x] Active AI responses and continuations
 - [x] AI idle responses after 5 minutes, escalating
 - [x] Continuous scheduler flow with low-water refill
-- [x] Stable viewer identities, roster of at most ten
+- [x] Stable viewer identities: regulars (3 to 12 by tier) plus strangers
 - [x] Stable Twitch-like colours
 - [x] Anti-repetition behaviour
 - [x] Speed-tier pacing, all six tiers reachable
@@ -53,9 +53,13 @@ Choosing the right emote for a line, rather than a random one that exists.
       name and a sentence saying what it is for. The model is shown the ones
       some emote carries and can ask for them like any other; they reach
       only the emotes tagged with them, and work in "never post it when…"
-- [ ] Per-emote usage counts, so tagging is informed by what chat reaches for
+- [x] Emotes chosen by what each line feels, offered to the model by
+      meaning, never laughing after bad news (fix queue 29)
+- [x] Tagger pages of a hundred, so a 600-emote pack is reachable
+- ~~Per-emote usage counts~~ — dropped by the owner: which emotes chat uses
+  matters, not how often
 
-Still to come in this phase: per-event priority weighting.
+Phase 2 is complete apart from confirming emote choice in a live session.
 
 ## Phase 3 — Product polish
 

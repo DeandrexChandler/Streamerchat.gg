@@ -71,7 +71,10 @@ Consequences that must stay true:
   (`FIRST_LINE_MS` in `lib/ai/gemini.ts`). A reply still streaming about an
   older sentence is cut off when the streamer says something new.
 - **One provider, one model, fixed.** Gemini `gemini-3.5-flash-lite` via
-  `GOOGLE_API_KEY`. No selection anywhere. If Gemini is down or the key is
+  `GOOGLE_API_KEY`. No selection anywhere — except, temporarily and with
+  the owner's approval, a dev switch comparing it with OpenAI `gpt-6-luna`.
+  Everything for that is marked `DEV-MODEL-TOGGLE` and is deleted, with the
+  losing provider, once the owner picks. If Gemini is down or the key is
   out of credit, the answer is to add credit — never another provider.
 - **"screen" points chat at the picture.** Said or typed, the bare word
   sends a frame with a small batch and tells the model the streamer is
