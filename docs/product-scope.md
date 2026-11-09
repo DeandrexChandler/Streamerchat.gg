@@ -162,11 +162,10 @@ Chat speed, emote-only mode, profanity mode and word lists, streamer name,
 stream topic, timestamps. Screen capture (opt-in). Emote packs, tags,
 custom meanings and rules. Regulars. OBS browser source.
 
-## Explicitly out of scope for now
+## Around the simulator
 
-UI and dashboard redesign. OBS polish. Saved session settings.
-Authentication. Security hardening for hosted deployment. Billing and
-monetisation. SaaS deployment. A permanent second provider or a model
-selector. Badges. Analytics. Marketing pages. Per-emote usage counts
-(dropped by the owner: what matters is which emotes chat uses, not how
-often).
+The website, accounts, dashboard, hosting and billing are being built as
+parallel tracks around a frozen simulator; see `docs/roadmap.md`. Still out
+of scope: a permanent second provider or a model selector, badges,
+analytics, and per-emote usage counts (dropped by the owner: what matters
+is which emotes chat uses, not how often).
