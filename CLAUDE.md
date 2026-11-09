@@ -185,12 +185,18 @@ say so.
 each other, be self-deprecating. They never bite the broadcaster. Slurs are
 dropped in every filter mode including "off".
 
-## Anti-feature-creep rule
+## Scope rule
 
-Before any change: *does this directly improve believable continuous
-AI-generated Twitch chat?* If not, record it in `docs/roadmap.md` and do not
-build it. Phases 2–4 (emote controls, polish, hosted product) are not
-started until Phase 1 is manually believable.
+The simulator is frozen to everyone but the owner. The frozen zone, and
+the check every agent PR runs against it, are in `docs/roadmap.md`. Inside
+it, before any change: *does this directly improve believable continuous
+AI-generated Twitch chat?* If not, record it in the roadmap and do not
+build it.
+
+Everything around the simulator (website, accounts, dashboard, hosting)
+runs as the parallel tracks in `docs/roadmap.md`. Build what your track
+lists, add files rather than modify frozen ones, and nothing outside your
+track.
 
 ## Testing
 

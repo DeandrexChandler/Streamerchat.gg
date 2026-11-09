@@ -1,94 +1,165 @@
 # Roadmap
 
-Phases are strict. Nothing from a later phase is built until the earlier one
-is manually believable.
+The simulator works and is signed off. Work now runs as five tracks in
+parallel: the owner keeps the simulator, and four tracks around it go to
+agents. No track waits for another to start. Where two tracks meet, the
+meeting point is named below, and whichever merges second wires it in.
 
-## Phase 1 — Core AI Twitch chat (current)
+## The frozen zone
 
-- [x] AI-only batch generation
-- [x] Gemini-only provider
-- [x] Startup AI intro
-- [x] Active AI responses and continuations
-- [x] AI idle responses after 5 minutes, escalating
-- [x] Continuous scheduler flow with low-water refill
-- [x] Stable viewer identities: regulars (3 to 12 by tier) plus strangers
-- [x] Stable Twitch-like colours
-- [x] Anti-repetition behaviour
-- [x] Speed-tier pacing, all six tiers reachable
-- [x] Basic contextual emote selection
-- [x] Silent provider failure behaviour
-- [x] Automated tests against a scripted provider
-- [ ] Transcription needs work — see `docs/fix-queue.md` items 24 and 25
-- [x] Manual verification with a real key: the chat feels continuously alive,
-      contextually responsive, varied, and recognisably like Twitch chat —
-      signed off by the owner 2026-10-06, apart from the OBS check below
-- [ ] OBS check — moved to the final product check below.
-- [x] Cost measured: about $0.90–1.90 an hour (fix queue item 12)
+The simulator and everything that decides what chat says, when it says it,
+and how it looks. Only the owner changes it. Agents may import from it and
+read it. They never modify or delete anything in it. Adding a new file
+alongside it (a new API route, a new shadcn component, a new `lib/` folder)
+is fine.
 
-## Phase 2 — Emote accuracy (current)
+```
+app/(shell)/simulator/   app/(shell)/settings/   app/(shell)/emotes/
+app/(shell)/obs/         app/overlay/            app/api/
+app/components/          app/globals.css         app/layout.tsx
+lib/                     components/ui/          scripts/
+tailwind.config.js       next.config.ts
+```
 
-Choosing the right emote for a line, rather than a random one that exists.
+There is one exception. Track C owns `app/(shell)/layout.tsx`, but only its
+navigation and chrome. `<SimulatorSession>` and the `<main>` it sits in stay
+exactly as they are: the session surviving navigation and the chat column's
+size depend on them.
 
-- [x] One meaning vocabulary shared by hand tags, automatic classification
-      and the model (`EMOTE_TAGS`)
-- [x] Automatic classification from the name, with anchored matching, so an
-      uploaded pack works without being configured (`lib/emotes/meaning.ts`)
-- [x] Layered selection: hand tags, the emote the model named, the token
-      chat was told to post and what is on screen, the model's stated
-      feeling, the intent, mood, nothing
-- [x] Unreadable emotes excluded entirely — a relevant line of text beats an
-      unrelated picture
-- [x] W / GG / hype treated as related but distinct families, with variety
-      inside a family and order between families
-- [x] Manual overrides on `/settings/emotes`: search, preview, tag, reset to
-      automatic, and a filter for emotes chat can never use
-- [x] Disallowed contexts: block an emote outright, or bar it from moments
-      ("KEKW, never after a death"). Applied before every tier, the model's
-      own pick included (`lib/config/emote-rules.ts`)
-- [x] Every feeling first: 35 meanings in three groups — 21 feelings (happy
-      to cope), 7 chat actions, 6 topics — and a name reader that reads words
-      (`SpeedLaugh` is laugh, not "ends in ugh"). On a real 659-emote pack,
-      emotes with no meaning went from 519 to 320, most of the rest numbered
-- [x] Custom meanings the streamer writes (`lib/config/custom-tags.ts`): a
-      name and a sentence saying what it is for. The model is shown the ones
-      some emote carries and can ask for them like any other; they reach
-      only the emotes tagged with them, and work in "never post it when…"
-- [x] Emotes chosen by what each line feels, offered to the model by
-      meaning, never laughing after bad news (fix queue 29)
-- [x] Tagger pages of a hundred, so a 600-emote pack is reachable
-- ~~Per-emote usage counts~~ — dropped by the owner: which emotes chat uses
-  matters, not how often
+Every agent PR runs this check, and it must print nothing:
 
-Phase 2 is complete apart from confirming emote choice in a live session.
+```
+git diff --name-only --diff-filter=MDR main... -- 'app/(shell)/simulator' \
+  'app/(shell)/settings' 'app/(shell)/emotes' 'app/(shell)/obs' app/overlay \
+  app/api app/components app/globals.css app/layout.tsx lib components/ui \
+  scripts tailwind.config.js next.config.ts
+```
 
-## Phase 3 — Product polish
+Plus `npm test`, `npm run typecheck` and `npm run lint`, as always.
 
-UI and dashboard redesign. Better settings information architecture. OBS
-validation and polish. Custom viewers (up to ten, same shape as generated
-ones). Saved session settings.
+## Track S — Simulator (owner)
 
-(Done early, out of phase: the screen-share privacy warning now sits in the
-control panel while capture is on.)
+Phases 1 and 2 are done: AI chat signed off live on 2026-10-06, and emote
+accuracy complete. The history is in git and `docs/fix-queue.md`.
 
-## Phase 4 — Hosted product
+- [ ] Transcription (fix queue 24)
+- [ ] Confirm live: talking without breaks (25), chat keeping up with
+      speech (27), emote choice
+- [ ] AI timeouts (28), proposed
+- [ ] Pick Gemini or gpt-6-luna and delete everything marked
+      `DEV-MODEL-TOGGLE`
+- [ ] Custom viewers: up to ten, same shape as generated ones
+- [ ] Saved session settings
+- [ ] Hosted overlay. Once Track D deploys, the in-memory OBS relay
+      (`lib/overlay/hub.ts`) needs a shared broker, because serverless runs
+      more than one instance. That change is inside the frozen zone, so it is
+      the owner's.
 
-Accounts. Authentication. Security hardening. Database. Billing. Usage
-limits. Deployment. Monetisation.
+## Track A — Website
+
+Public pages with no app chrome, in `app/(site)/`. `app/page.tsx` becomes
+the home page; today it redirects to `/simulator`.
+
+Nav: **Home · Features · Pricing · Creators · Docs · GitHub**. Footer:
+**Privacy · Terms**.
+
+- **Home.** What it is, on one screen. Show it working with a recorded clip
+  of a real session. Never hardcode chat lines: chat text is only ever
+  written by the model.
+- **Features.** What CLAUDE.md describes, in a streamer's words: a chat that
+  hears you, regulars who remember, emotes that fit, a screen chat reacts to,
+  an OBS overlay.
+- **Pricing.** Plans come from one file, `lib/site/plans.ts`, which the owner
+  edits. Prices are not invented.
+- **Creators.** Streamers using it. The page ships with its structure and
+  nobody listed until real people agree to be on it.
+- **Docs.** Setup: the key, the mic, screen capture, adding the OBS browser
+  source.
+- **GitHub.** The repo is private. Link it only if it goes public; otherwise
+  drop it or swap in a Changelog.
+- **Privacy and Terms.** Needed before accounts and payment exist. Mic
+  transcripts and screen frames go to the AI provider, and the privacy page
+  must say so. Drafted here, reviewed by the owner.
+
+Seam: the Pricing call to action goes to `/signup` once Track B merges, and
+to `/simulator` until then.
+
+## Track B — Accounts and login
+
+- Sign up, log in, log out, and an account page, in `app/(auth)/` and
+  `lib/account/`.
+- `proxy.ts` gates the app pages and `/api/*`. The OBS overlay cannot log
+  in, so `/overlay` and `/api/overlay/*` stay open. They are already guarded
+  by the session `key` in their URL.
+- **Local mode.** With no auth environment variables set, the proxy lets
+  everything through. Running on localhost never shows a login.
+- Settings stay in browser storage. Syncing them to an account would mean
+  editing `lib/config`, which is frozen, so it is not part of this track.
+- Exports a way to read the current user, for Tracks C and D.
+
+## Track C — App shell and dashboard
+
+- Navigation in `app/(shell)/layout.tsx`: Dashboard, Simulator, Settings,
+  plus Account once Track B merges. Chrome only (see the frozen zone). Keep
+  the light page surface; the comment in that file says why.
+- `/dashboard` lives inside `(shell)` so a running session survives going
+  there. It shows: start or resume, the OBS overlay link, a setup checklist
+  (key works, mic allowed, emotes imported) and the regulars at a glance.
+  All of it is read from existing modules; nothing in them is edited.
+- Account and usage panels appear when Tracks B and D provide the data.
+  Until then they are left out, not faked.
+- The simulator must look identical afterwards. Compare screenshots taken
+  before and after, at desktop and phone width.
+
+## Track D — Hosting and billing
+
+- Deployment, environment variables, the production build.
+- A database for accounts, subscriptions and usage.
+- Billing: checkout, plans from `lib/site/plans.ts`, and a webhook in a new
+  route under `app/api/billing/`.
+- Usage limits, counted per user in `proxy.ts` on each
+  `/api/chat-candidates` request. This counts batches, not cost; good enough
+  while one batch costs about the same as the next.
+- Hardening. The route's own rate limiter is in-memory per instance, so on
+  serverless it is not a global limit. The per-user limit in the proxy is
+  the real cap.
+
+Seams: until Track B merges, build against a placeholder user ID. Track B
+owns `proxy.ts`; Track D adds its usage check after B merges. Tell the owner
+when the deploy is live, so the hosted overlay work in Track S can start.
+
+## Merge order
+
+Every track starts now, each on its own branch and worktree, and reaches
+`main` by PR. Tracks A and C merge whenever they are ready. Track B merges
+before Track D. When two PRs both add dependencies, regenerate
+`package-lock.json` on rebase; don't hand-merge it.
+
+## Open decisions (owner)
+
+- Prices, and whether streamers bring their own Gemini key or the product
+  pays. Measured cost is about $0.90–1.90 per streamer-hour. Building does
+  not wait on this; real numbers on the Pricing page do.
+- Whether the repo goes public, which decides the GitHub tab.
+- Who appears on the Creators page.
+- Gemini or gpt-6-luna.
 
 ## Final product check (last)
 
-- [ ] OBS check on stream. Performance, not chat behaviour, run once
-      everything above is done. Emotes already verified rendering in a
-      browser source with a real pack.
+- [ ] OBS check on stream, hosted: performance, not chat behaviour. Emotes
+      are already verified rendering in a browser source with a real pack.
 
 ## Deferred and recorded, not planned
 
 - Badges.
 - Analytics.
-- Marketing pages.
-- Any second AI provider or model selector.
-- Hotkey screen capture (fix queue item 3). Dropped: capturing only on a
-  keypress makes chat later to react, not sooner, unless the press itself
-  triggers the batch — and the streamer's hands are on the game.
-- Fixing the two pre-existing `react-hooks/set-state-in-effect` lint
-  findings in `ChatList.tsx` — real, unrelated to the core loop.
+- Syncing settings and regulars to an account. Needs `lib/config`, so it
+  waits for the owner.
+- Any second AI provider or model selector, once the toggle is decided.
+- Hotkey screen capture (fix queue 3). Dropped: capturing only on a keypress
+  makes chat later to react, not sooner, and the streamer's hands are on the
+  game.
+- The two pre-existing `react-hooks/set-state-in-effect` lint findings in
+  `ChatList.tsx`.
+- ~~Per-emote usage counts~~. Dropped by the owner: which emotes chat uses
+  matters, not how often.
