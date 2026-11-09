@@ -1,0 +1,94 @@
+import { createHmac } from "node:crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { verifySignature } from "../stripe";
+import { limitFor, planForPrice, plans, BATCHES_PER_MONTH } from "../plans";
+import { recordAndCheck } from "../usage";
+import { usageKey } from "../db";
+
+const SECRET = "whsec_test";
+const sign = (body: string, t: number, secret = SECRET) =>
+  `t=${t},v1=${createHmac("sha256", secret).update(`${t}.${body}`).digest("hex")}`;
+
+describe("verifySignature", () => {
+  const now = 1_800_000_000_000;
+  const t = now / 1000;
+  it("accepts a fresh, correct signature", () => {
+    expect(verifySignature("{}", sign("{}", t), SECRET, now)).toBe(true);
+  });
+  it("accepts when any v1 matches (secret rotation)", () => {
+    expect(verifySignature("{}", `${sign("{}", t, "old")},v1=${sign("{}", t).split("v1=")[1]}`, SECRET, now)).toBe(true);
+  });
+  it("rejects a tampered body, wrong secret, stale timestamp, or no header", () => {
+    expect(verifySignature('{"a":1}', sign("{}", t), SECRET, now)).toBe(false);
+    expect(verifySignature("{}", sign("{}", t, "other"), SECRET, now)).toBe(false);
+    expect(verifySignature("{}", sign("{}", t - 301), SECRET, now)).toBe(false);
+    expect(verifySignature("{}", null, SECRET, now)).toBe(false);
+    expect(verifySignature("{}", `t=${t},v1=short`, SECRET, now)).toBe(false);
+  });
+});
+
+describe("plans", () => {
+  it("only an active or trialing subscription gets its plan's limit", () => {
+    expect(limitFor({ plan: "pro", status: "active" })).toBe(BATCHES_PER_MONTH.pro);
+    expect(limitFor({ plan: "pro", status: "trialing" })).toBe(BATCHES_PER_MONTH.pro);
+    expect(limitFor({ plan: "pro", status: "past_due" })).toBe(BATCHES_PER_MONTH.free);
+    expect(limitFor({})).toBe(BATCHES_PER_MONTH.free);
+    expect(limitFor({ plan: "gone", status: "active" })).toBe(BATCHES_PER_MONTH.free);
+  });
+  it("maps a price to its plan, and unknown prices to free", () => {
+    plans[1].stripePriceId = "price_pro";
+    expect(planForPrice("price_pro")).toBe("pro");
+    expect(planForPrice("price_x")).toBe("free");
+    expect(planForPrice(undefined)).toBe("free");
+    plans[1].stripePriceId = null;
+  });
+  it("buckets usage by UTC month", () => {
+    expect(usageKey("u", new Date("2026-11-30T23:59:59Z"))).toBe("usage:u:2026-11");
+    expect(usageKey("u", new Date("2026-12-01T00:00:00Z"))).toBe("usage:u:2026-12");
+  });
+});
+
+describe("recordAndCheck", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+  const withRedis = (count: number, plan: string | null, status: string | null) => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("KV_REST_API_URL", "https://kv.test");
+    vi.stubEnv("KV_REST_API_TOKEN", "tok");
+    const fetch = vi.fn(async () =>
+      Response.json([{ result: count }, { result: 1 }, { result: plan }, { result: status }]),
+    );
+    vi.stubGlobal("fetch", fetch);
+    return fetch;
+  };
+
+  it("is unlimited and touches nothing in local mode", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", "");
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    expect(await recordAndCheck("u")).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("counts the batch and allows up to the limit", async () => {
+    const fetch = withRedis(BATCHES_PER_MONTH.free, null, null);
+    expect(await recordAndCheck("u", new Date("2026-11-08T00:00:00Z"))).toBe(true);
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://kv.test/pipeline");
+    expect(JSON.parse(init.body as string)[0]).toEqual(["INCR", "usage:u:2026-11"]);
+  });
+  it("refuses past the limit", async () => {
+    withRedis(BATCHES_PER_MONTH.free + 1, null, null);
+    expect(await recordAndCheck("u")).toBe(false);
+  });
+  it("a paying user gets their plan's allowance", async () => {
+    withRedis(BATCHES_PER_MONTH.free + 1, "pro", "active");
+    expect(await recordAndCheck("u")).toBe(true);
+  });
+  it("fails closed when the database is down", async () => {
+    withRedis(0, null, null).mockResolvedValue(new Response("", { status: 500 }));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await recordAndCheck("u")).toBe(false);
+  });
+});
