@@ -3,7 +3,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, MessagesSquare, Radio, SlidersHorizontal, X } from "lucide-react";
+import {
+  LayoutDashboard,
+  Menu,
+  MessagesSquare,
+  Radio,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -27,6 +34,12 @@ import { SimulatorSession } from "@/lib/react/simulator-session";
  */
 
 const NAV = [
+  {
+    label: "Dashboard",
+    href: "/dashboard",
+    icon: LayoutDashboard,
+    hint: "Setup and session",
+  },
   {
     label: "Simulator",
     href: "/simulator",
@@ -62,7 +75,7 @@ export default function ShellLayout({
         aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
         className="fixed top-4 left-4 z-50 lg:hidden"
       >
-        {mobileOpen ? <Menu className="size-4" /> : <X className="size-4" />}
+        {mobileOpen ? <X className="size-4" /> : <Menu className="size-4" />}
       </Button>
 
       <aside
@@ -74,7 +87,7 @@ export default function ShellLayout({
         )}
       >
         <div className="p-5">
-          <Link href="/simulator" className="flex items-center gap-2.5">
+          <Link href="/dashboard" className="flex items-center gap-2.5">
             <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
               S
             </span>
