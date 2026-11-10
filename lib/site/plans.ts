@@ -1,6 +1,6 @@
 /**
  * Plans shown on /pricing. The owner edits this file; Track D fills in
- * `stripePriceId`. A `null` price renders as "Coming soon" — prices are an
+ * `stripePriceId`. Ids match Track D's billing (free/pro). A `null` price renders as "Coming soon" — prices are an
  * open decision (docs/roadmap.md), so none are invented here.
  */
 export type Plan = {
@@ -14,10 +14,10 @@ export type Plan = {
 
 export const PLANS: Plan[] = [
   {
-    id: "own-key",
-    name: "Bring your own key",
+    id: "free",
+    name: "Free",
     price: null,
-    blurb: "Run it with your own Gemini key. You pay Google for what chat uses.",
+    blurb: "Try it on your stream. No key and no setup; we cover the AI up to a monthly limit.",
     features: [
       "The full simulator",
       "Regulars who remember you between streams",
@@ -27,15 +27,11 @@ export const PLANS: Plan[] = [
     stripePriceId: null,
   },
   {
-    id: "hosted",
-    name: "Hosted",
+    id: "pro",
+    name: "Pro",
     price: null,
-    blurb: "Sign in and stream. No key, no setup, the AI is on us.",
-    features: [
-      "Everything in Bring your own key",
-      "No Gemini account needed",
-      "Works from any computer you sign in on",
-    ],
+    blurb: "For streaming with it every week. A much higher monthly limit.",
+    features: ["Everything in Free", "A much higher monthly limit"],
     stripePriceId: null,
   },
 ];

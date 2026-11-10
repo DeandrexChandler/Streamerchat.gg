@@ -16,8 +16,24 @@ export default function PrivacyPage() {
       <h2>The short version</h2>
       <p>
         To write chat, StreamerChat.gg sends what you say and, only if you turn screen
-        watching on, pictures of the window you share, to Google&apos;s Gemini API. There
-        are no accounts, no ads and no analytics. Your settings stay in your browser.
+        watching on, pictures of the window you share, to Google&apos;s Gemini API. You sign
+        in with Twitch. There are no ads and no analytics. Your settings stay in your
+        browser.
+      </p>
+
+      <h2>Your account</h2>
+      <p>
+        You sign in with Twitch. Twitch gives us your Twitch user ID, display name, email
+        address and profile picture. They&apos;re kept in an encrypted cookie in your
+        browser, not in a database.
+      </p>
+
+      <h2>Plans and usage</h2>
+      <p>
+        To apply your plan&apos;s limit we store, against your Twitch user ID: your plan,
+        your subscription status, your Stripe customer ID, and how many batches of chat
+        you&apos;ve generated each month. Payments are handled by Stripe; we never see
+        your card details.
       </p>
 
       <h2>What leaves your computer</h2>
@@ -65,13 +81,19 @@ export default function PrivacyPage() {
         source. It is held in memory only long enough to deliver, and not stored.
       </p>
 
+      <h2>Running it on your own computer</h2>
+      <p>
+        Run locally with your own key, there&apos;s no sign-in and nothing is stored
+        about you outside your browser. Requests go to Gemini under your key.
+      </p>
+
       <h2>Google&apos;s handling</h2>
       <p>
         What Google does with data sent to the Gemini API is covered by{" "}
         <a href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noreferrer">
           Google&apos;s Gemini API terms
         </a>
-        , which apply to the key used.
+        .
       </p>
     </div>
   );

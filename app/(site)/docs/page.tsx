@@ -1,73 +1,50 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CTA_HREF } from "@/lib/site/links";
 
 export const metadata: Metadata = {
   title: "Docs",
   description:
-    "Set up StreamerChat.gg: a Gemini key, the mic, optional screen watching, and the OBS browser source.",
+    "Set up StreamerChat.gg: sign in, allow the mic, bring your emotes, optional screen watching, and the OBS browser source.",
 };
 
 export default function DocsPage() {
   return (
     <div className="site-page site-page-narrow site-prose">
-      <p className="site-kicker">Docs</p>
       <h1>Setup</h1>
-      <p className="site-lede">Five steps, about ten minutes. Do them in order.</p>
+      <p className="site-lede">Five steps, about five minutes. Do them in order.</p>
 
       <ol className="site-docsteps">
         <li className="site-docstep">
-          <h2>Get a Gemini key</h2>
+          <h2>Sign in</h2>
           <p>
-            Chat is written by Google&apos;s Gemini. Sign in to{" "}
-            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
-              Google AI Studio
-            </a>
-            , click <strong>Create API key</strong> and copy it. Google bills you for what
-            chat uses.
+            Open <Link href={CTA_HREF}>the simulator</Link>. If it asks you to sign in, click{" "}
+            <strong>Continue with Twitch</strong> and use the account you stream from.
           </p>
         </li>
 
         <li className="site-docstep">
-          <h2>
-            Put it in <code>.env.local</code>
-          </h2>
-          <p>You need Node 20 or newer. In the project folder:</p>
-          <pre>
-            <code>{`npm install
-cp .env.example .env.local`}</code>
-          </pre>
+          <h2>Press Play and allow the mic</h2>
           <p>
-            Open <code>.env.local</code> and paste your key after{" "}
-            <code>GOOGLE_API_KEY=</code>. Then start the app:
-          </p>
-          <pre>
-            <code>npm run dev</code>
-          </pre>
-          <p className="site-note">
-            Without a key the simulator still opens, but chat says nothing. It never
-            falls back to canned lines. Keep the name exactly <code>GOOGLE_API_KEY</code>:
-            never add <code>NEXT_PUBLIC_</code> to it, or your key ships to every
-            browser that opens the page.
-          </p>
-        </li>
-
-        <li className="site-docstep">
-          <h2>Allow the mic</h2>
-          <p>
-            Open <Link href="/simulator">the simulator</Link> and press <strong>Play</strong>
-            . Your browser asks for the microphone; allow it. Talk and chat reacts to what
-            you say.
+            Press <strong>Play</strong>. Your browser asks for the microphone; allow it. Talk
+            and chat reacts to what you say.
           </p>
           <ul>
             <li>
               Use Chrome or Edge. Speech recognition doesn&apos;t work in other browsers;
               typing in the box under chat works everywhere.
             </li>
-            <li>
-              The mic only works on <code>localhost</code> or an <code>https</code> address.
-            </li>
             <li>The mic button next to the level meter mutes you without stopping chat.</li>
           </ul>
+        </li>
+
+        <li className="site-docstep">
+          <h2>Bring your emotes (optional)</h2>
+          <p>
+            In <Link href="/settings/emotes">Settings → Emotes</Link>, enter your Twitch
+            channel to import its 7TV emotes, or import the 7TV globals. Chat only uses an
+            emote when it fits the moment.
+          </p>
         </li>
 
         <li className="site-docstep">
@@ -96,7 +73,10 @@ cp .env.example .env.local`}</code>
               <strong>Browser</strong>.
             </li>
             <li>Paste the URL into the URL field.</li>
-            <li>Set the width and height to the size of your chat box. 400 × 800 is a good start.</li>
+            <li>
+              Set the width and height to the size of your chat box. 400 × 800 is a good
+              start.
+            </li>
             <li>Click OK and drag it where you want it.</li>
           </ol>
           <p>
@@ -111,12 +91,36 @@ cp .env.example .env.local`}</code>
         </li>
       </ol>
 
-      <h2>Emotes</h2>
+      <h2>Run it on your own computer</h2>
       <p>
-        Want your channel&apos;s emotes in chat? In{" "}
-        <Link href="/settings/emotes">Settings → Emotes</Link>, enter your Twitch channel to
-        import its 7TV emotes, or import the 7TV globals. Chat only uses an emote when it
-        fits the moment.
+        You can run StreamerChat.gg locally with your own Gemini key instead. There&apos;s
+        no sign-in, and Google bills you directly for what chat uses.
+      </p>
+      <ol>
+        <li>
+          Get a key from{" "}
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
+            Google AI Studio
+          </a>{" "}
+          (<strong>Create API key</strong>).
+        </li>
+        <li>
+          With Node 20 or newer, in the project folder:
+          <pre>
+            <code>{`npm install
+cp .env.example .env.local`}</code>
+          </pre>
+        </li>
+        <li>
+          Paste your key after <code>GOOGLE_API_KEY=</code> in <code>.env.local</code>, then
+          run <code>npm run dev</code> and open <code>http://localhost:3000/simulator</code>.
+        </li>
+      </ol>
+      <p className="site-note">
+        Without a key the simulator still opens, but chat says nothing. It never falls back
+        to canned lines. Keep the name exactly <code>GOOGLE_API_KEY</code>: never add{" "}
+        <code>NEXT_PUBLIC_</code> to it, or your key ships to every browser that opens the
+        page.
       </p>
     </div>
   );
