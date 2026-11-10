@@ -9,7 +9,6 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   return (
     <div className="site-page site-page-narrow site-prose">
-      <p className="site-kicker">Terms</p>
       <h1>Terms</h1>
       <p className="site-draft">Draft for review. Not legal text yet.</p>
 

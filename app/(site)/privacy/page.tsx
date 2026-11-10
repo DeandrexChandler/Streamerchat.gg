@@ -9,7 +9,6 @@ export const metadata: Metadata = {
 export default function PrivacyPage() {
   return (
     <div className="site-page site-page-narrow site-prose">
-      <p className="site-kicker">Privacy</p>
       <h1>Privacy</h1>
       <p className="site-draft">Draft for review. Not legal text yet.</p>
 

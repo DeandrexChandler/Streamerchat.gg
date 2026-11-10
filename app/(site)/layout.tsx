@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Bricolage_Grotesque } from "next/font/google";
+import { Archivo } from "next/font/google";
 import { SiteNav } from "@/components/site/SiteNav";
 import "./site.css";
 
@@ -9,7 +9,8 @@ import "./site.css";
  * app: Next keeps global stylesheets loaded across navigations, so an
  * unscoped rule here would restyle the simulator.
  */
-const display = Bricolage_Grotesque({ subsets: ["latin"], variable: "--site-display" });
+/** Archivo at full width: the wide, broadcast-graphics headline face. */
+const display = Archivo({ subsets: ["latin"], axes: ["wdth"], variable: "--site-display" });
 
 export const metadata: Metadata = {
   title: { template: "%s · StreamerChat.gg", default: "StreamerChat.gg" },

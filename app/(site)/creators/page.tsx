@@ -9,7 +9,6 @@ export const metadata: Metadata = {
 export default function CreatorsPage() {
   return (
     <div className="site-page">
-      <p className="site-kicker">Creators</p>
       <h1>Streamers using it</h1>
       {CREATORS.length === 0 ? (
         <p className="site-empty">
