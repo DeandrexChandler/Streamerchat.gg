@@ -50,7 +50,9 @@ export async function SignInCard({
       <CardContent className="space-y-3">
         {error && (
           <p role="alert" className="text-sm text-destructive">
-            That didn&apos;t work. Try again.
+            {error === "AccessDenied"
+              ? "This Twitch account isn’t on the list yet."
+              : "That didn’t work. Try again."}
           </p>
         )}
         <form
