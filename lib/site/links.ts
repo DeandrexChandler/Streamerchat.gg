@@ -11,5 +11,8 @@ export const NAV_LINKS = [
   { label: "Docs", href: "/docs" },
 ];
 
-/** Where every call to action points. Becomes /signup once accounts land. */
-export const CTA_HREF = "/simulator";
+/**
+ * Where every call to action points. Signed in, /signup goes straight on to
+ * the simulator; running locally it shows a button to it.
+ */
+export const CTA_HREF = "/signup";

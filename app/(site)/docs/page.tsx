@@ -16,10 +16,11 @@ export default function DocsPage() {
 
       <ol className="site-docsteps">
         <li className="site-docstep">
-          <h2>Sign in</h2>
+          <h2>Sign up</h2>
           <p>
-            Open <Link href={CTA_HREF}>the simulator</Link>. If it asks you to sign in, click{" "}
-            <strong>Continue with Twitch</strong> and use the account you stream from.
+            <Link href={CTA_HREF}>Sign up</Link> with <strong>Continue with Twitch</strong>,
+            using the account you stream from. You land in the simulator. Next time,{" "}
+            <Link href="/login">log in</Link> the same way.
           </p>
         </li>
 
