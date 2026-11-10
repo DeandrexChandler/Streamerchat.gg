@@ -2,25 +2,22 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CTA_HREF, navLinks } from "@/lib/site/links";
+import { CTA_HREF, NAV_LINKS } from "@/lib/site/links";
+import { GitHubLink } from "./GitHubLink";
 
 export function SiteNav() {
   const pathname = usePathname();
   return (
     <header className="site-header">
-      <Link href="/" className="site-logo">
-        <span className="site-live-dot" aria-hidden />
-        <span>
-          StreamerChat<span className="site-logo-tld">.gg</span>
-        </span>
-      </Link>
-      <nav aria-label="Site" className="site-nav">
-        {navLinks().map((link) =>
-          link.external ? (
-            <a key={link.href} href={link.href} target="_blank" rel="noreferrer">
-              {link.label}
-            </a>
-          ) : (
+      <div className="site-header-inner">
+        <Link href="/" className="site-logo">
+          <span className="site-live-dot" aria-hidden />
+          <span>
+            StreamerChat<span className="site-logo-tld">.gg</span>
+          </span>
+        </Link>
+        <nav aria-label="Site" className="site-nav">
+          {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
               href={link.href}
@@ -28,12 +25,13 @@ export function SiteNav() {
             >
               {link.label}
             </Link>
-          ),
-        )}
-      </nav>
-      <Link href={CTA_HREF} className="site-btn site-btn-sm site-header-cta">
-        Open the simulator
-      </Link>
+          ))}
+          <GitHubLink />
+        </nav>
+        <Link href={CTA_HREF} className="site-btn site-btn-sm">
+          Open the simulator
+        </Link>
+      </div>
     </header>
   );
 }
