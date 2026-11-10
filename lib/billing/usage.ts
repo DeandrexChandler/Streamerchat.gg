@@ -33,7 +33,7 @@ export async function recordAndCheck(userId: string, now = new Date()): Promise<
 export async function usageFor(userId: string, now = new Date()) {
   const [account, [used]] = await Promise.all([getAccount(userId), redis(["GET", usageKey(userId, now)])]);
   return {
-    plan: account.status === "active" || account.status === "trialing" ? (account.plan ?? "free") : "free",
+    plan: account.status === "active" || account.status === "trialing" ? (account.plan ?? null) : null,
     status: account.status ?? null,
     used: Number(used ?? 0),
     limit: limitFor(account),

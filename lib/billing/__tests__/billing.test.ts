@@ -28,19 +28,19 @@ describe("verifySignature", () => {
 });
 
 describe("plans", () => {
-  it("only an active or trialing subscription gets its plan's limit", () => {
+  it("no free tier: only an active or trialing subscription gets a limit", () => {
     expect(limitFor({ plan: "pro", status: "active" })).toBe(BATCHES_PER_MONTH.pro);
     expect(limitFor({ plan: "pro", status: "trialing" })).toBe(BATCHES_PER_MONTH.pro);
-    expect(limitFor({ plan: "pro", status: "past_due" })).toBe(BATCHES_PER_MONTH.free);
-    expect(limitFor({})).toBe(BATCHES_PER_MONTH.free);
-    expect(limitFor({ plan: "gone", status: "active" })).toBe(BATCHES_PER_MONTH.free);
+    expect(limitFor({ plan: "pro", status: "past_due" })).toBe(0);
+    expect(limitFor({})).toBe(0);
+    expect(limitFor({ plan: "unknown", status: "active" })).toBe(0);
   });
-  it("maps a price to its plan, and unknown prices to free", () => {
-    plans[1].stripePriceId = "price_pro";
+  it("maps a price to its plan, and unknown prices to no plan", () => {
+    plans[0].stripePriceId = "price_pro";
     expect(planForPrice("price_pro")).toBe("pro");
-    expect(planForPrice("price_x")).toBe("free");
-    expect(planForPrice(undefined)).toBe("free");
-    plans[1].stripePriceId = null;
+    expect(planForPrice("price_x")).toBe("unknown");
+    expect(planForPrice(undefined)).toBe("unknown");
+    plans[0].stripePriceId = null;
   });
   it("buckets usage by UTC month", () => {
     expect(usageKey("u", new Date("2026-11-30T23:59:59Z"))).toBe("usage:u:2026-11");
@@ -72,19 +72,19 @@ describe("recordAndCheck", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
   it("counts the batch and allows up to the limit", async () => {
-    const fetch = withRedis(BATCHES_PER_MONTH.free, null, null);
+    const fetch = withRedis(BATCHES_PER_MONTH.pro, "pro", "active");
     expect(await recordAndCheck("u", new Date("2026-11-08T00:00:00Z"))).toBe(true);
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://kv.test/pipeline");
     expect(JSON.parse(init.body as string)[0]).toEqual(["INCR", "usage:u:2026-11"]);
   });
   it("refuses past the limit", async () => {
-    withRedis(BATCHES_PER_MONTH.free + 1, null, null);
+    withRedis(BATCHES_PER_MONTH.pro + 1, "pro", "active");
     expect(await recordAndCheck("u")).toBe(false);
   });
-  it("a paying user gets their plan's allowance", async () => {
-    withRedis(BATCHES_PER_MONTH.free + 1, "pro", "active");
-    expect(await recordAndCheck("u")).toBe(true);
+  it("refuses anyone without a subscription", async () => {
+    withRedis(1, null, null);
+    expect(await recordAndCheck("u")).toBe(false);
   });
   it("fails closed when the database is down", async () => {
     withRedis(0, null, null).mockResolvedValue(new Response("", { status: 500 }));
