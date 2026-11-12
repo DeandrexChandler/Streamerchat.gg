@@ -1,31 +1,28 @@
+import { PLANS } from "@/lib/site/plans";
+
 /**
- * Local copy of `lib/site/plans.ts` (Track A) until it merges; then this
- * file re-exports from there and keeps only the limits.
- *
- * Names, prices and limits are the owner's call (roadmap: Open decisions).
- * No free tier (owner, 2026-11-09): without an active subscription the
- * limit is 0. The pro limit is a placeholder sized from `npm run simulate`,
- * about 5 batches a minute at the default tier, so 6000 is roughly 20 hours.
+ * Stripe price per plan id. Kept here, not in `lib/site/plans.ts`
+ * (`stripePriceId`), because editing that file trips the frozen check on
+ * `lib/`; a `stripePriceId` set there wins. These are *sandbox* prices
+ * ($1/month placeholder); live mode gets its own.
  */
-export interface Plan {
-  id: string;
-  name: string;
-  price: string | null;
-  blurb: string;
-  features: string[];
-  stripePriceId: string | null;
-}
+const SANDBOX_PRICES: Record<string, string> = { pro: "price_1UaNq8GjaoNXHWjYi2A8bqkA" };
 
-/** The price ID is the Stripe *sandbox* one ($1/month placeholder); live mode gets its own. */
-export const plans: Plan[] = [
-  { id: "pro", name: "Pro", price: null, blurb: "", features: [], stripePriceId: "price_1UaNq8GjaoNXHWjYi2A8bqkA" },
-];
-
-/** Batches per calendar month, by plan id. No active subscription means 0. */
+/**
+ * Batches per calendar month, by plan id. No free tier (owner, 2026-11-09):
+ * without an active subscription the limit is 0. The pro limit is a
+ * placeholder sized from `npm run simulate`, about 5 batches a minute at the
+ * default tier, so 6000 is roughly 20 hours.
+ */
 export const BATCHES_PER_MONTH: Record<string, number> = { pro: 6000 };
 
+export function priceIdFor(planId: string): string | null {
+  const plan = PLANS.find((p) => p.id === planId);
+  return plan ? (plan.stripePriceId ?? SANDBOX_PRICES[planId] ?? null) : null;
+}
+
 export function planForPrice(priceId: string | undefined): string {
-  return plans.find((p) => p.stripePriceId && p.stripePriceId === priceId)?.id ?? "unknown";
+  return PLANS.find((p) => priceId && priceIdFor(p.id) === priceId)?.id ?? "unknown";
 }
 
 export function limitFor(account: { plan?: string; status?: string }): number {

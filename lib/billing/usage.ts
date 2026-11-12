@@ -6,6 +6,8 @@ const USAGE_TTL_S = 40 * 24 * 3600;
 /**
  * Counts one /api/chat-candidates request (one batch) against the user's
  * month and says whether it is within their plan. Local mode is unlimited.
+ * Only batches let through are counted: the simulator retries every few
+ * seconds while refused, and those retries must not pile onto the count.
  *
  * Fails closed: if the database is unreachable the batch is refused, because
  * the thing being guarded is the owner's API spend. The refusal is silent in
@@ -22,7 +24,9 @@ export async function recordAndCheck(userId: string, now = new Date()): Promise<
       ["HGET", `user:${userId}`, "plan"],
       ["HGET", `user:${userId}`, "status"],
     );
-    return Number(count) <= limitFor({ plan: (plan as string) ?? undefined, status: (status as string) ?? undefined });
+    const ok = Number(count) <= limitFor({ plan: (plan as string) ?? undefined, status: (status as string) ?? undefined });
+    if (!ok) await redis(["DECR", key]);
+    return ok;
   } catch (err) {
     console.error("[billing] usage check failed, refusing batch:", err);
     return false;

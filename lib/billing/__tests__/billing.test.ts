@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { verifySignature } from "../stripe";
-import { limitFor, planForPrice, plans, BATCHES_PER_MONTH } from "../plans";
+import { limitFor, planForPrice, priceIdFor, BATCHES_PER_MONTH } from "../plans";
 import { recordAndCheck } from "../usage";
 import { usageKey } from "../db";
 
@@ -35,13 +35,14 @@ describe("plans", () => {
     expect(limitFor({})).toBe(0);
     expect(limitFor({ plan: "unknown", status: "active" })).toBe(0);
   });
-  it("maps a price to its plan, and unknown prices to no plan", () => {
-    const original = plans[0].stripePriceId;
-    plans[0].stripePriceId = "price_pro";
-    expect(planForPrice("price_pro")).toBe("pro");
+  it("maps plans to prices and back; free and unknown plans have no price", () => {
+    const pro = priceIdFor("pro")!;
+    expect(pro).toMatch(/^price_/);
+    expect(planForPrice(pro)).toBe("pro");
+    expect(priceIdFor("free")).toBeNull();
+    expect(priceIdFor("nope")).toBeNull();
     expect(planForPrice("price_x")).toBe("unknown");
     expect(planForPrice(undefined)).toBe("unknown");
-    plans[0].stripePriceId = original;
   });
   it("buckets usage by UTC month", () => {
     expect(usageKey("u", new Date("2026-11-30T23:59:59Z"))).toBe("usage:u:2026-11");
@@ -79,9 +80,11 @@ describe("recordAndCheck", () => {
     expect(url).toBe("https://kv.test/pipeline");
     expect(JSON.parse(init.body as string)[0]).toEqual(["INCR", "usage:u:2026-11"]);
   });
-  it("refuses past the limit", async () => {
-    withRedis(BATCHES_PER_MONTH.pro + 1, "pro", "active");
-    expect(await recordAndCheck("u")).toBe(false);
+  it("refuses past the limit, and takes the refused batch back off the count", async () => {
+    const fetch = withRedis(BATCHES_PER_MONTH.pro + 1, "pro", "active");
+    expect(await recordAndCheck("u", new Date("2026-11-08T00:00:00Z"))).toBe(false);
+    const [, init] = fetch.mock.calls[1] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual([["DECR", "usage:u:2026-11"]]);
   });
   it("refuses anyone without a subscription", async () => {
     withRedis(1, null, null);
