@@ -1,6 +1,6 @@
 import { billingEnabled } from "@/lib/billing/db";
 import { usageFor } from "@/lib/billing/usage";
-import { getUserId } from "@/lib/billing/user";
+import { getUserId } from "@/lib/account/user";
 
 export const dynamic = "force-dynamic";
 
