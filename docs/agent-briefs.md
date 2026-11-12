@@ -28,6 +28,11 @@ Then open a PR to `main` with `gh pr create`.
 **Dev server port:** A 3001, B 3002, C 3003, D 3004
 (`npm run dev -- -p 300X`), so the four of you never fight over 3000.
 
+**Desktop only.** StreamerChat.gg is used in a browser on a laptop or
+monitor, next to OBS. There is no mobile mode. Build, check and screenshot
+at desktop sizes (1440×900, plus 1280×800 if layout is tight). Don't spend
+time on phone widths.
+
 **The frozen zone.** Never modify or delete anything in it. Adding new files
 next to it is fine. Before every push, run this; it must print nothing:
 
@@ -111,7 +116,7 @@ home page), `components/site/**`, `lib/site/**`, `public/site/**`.
 scoped under a wrapper class in `app/(site)/layout.tsx` plus its own
 stylesheet there. `app/globals.css` and the Tailwind config are frozen; use
 CSS variables in your own stylesheet for anything they don't give you.
-Phone width with no horizontal scroll. Every page has a real `<title>` and
+Desktop widths only (see Everyone). Every page has a real `<title>` and
 description.
 
 **Calls to action** go to `/simulator`. Once Track B merges, change them to
@@ -172,7 +177,7 @@ as it did.
 `app/(shell)/dashboard/**`, `components/dashboard/**`.
 
 **Before you change anything,** screenshot `/simulator`, `/settings` and
-`/settings/obs` at 1440×900 and 390×844 (load the `run` skill to launch the
+`/settings/obs` at 1440×900 (load the `run` skill to launch the
 app, and use the browser tools). Retake them at the end. The simulator's
 content area must match. Attach both sets to the PR.
 
