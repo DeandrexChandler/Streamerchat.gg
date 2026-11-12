@@ -39,3 +39,14 @@ export const PLANS: Plan[] = [
 export function priceLabel(plan: Pick<Plan, "price">): string {
   return plan.price ?? "Coming soon";
 }
+
+/** The comparison table on /pricing. `true` is a tick; a string is shown as is. */
+export const COMPARISON: { label: string; free: true | string; pro: true | string }[] = [
+  { label: "The full simulator, every speed", free: true, pro: true },
+  { label: "Regulars who remember you", free: true, pro: true },
+  { label: "Your own 7TV emotes", free: true, pro: true },
+  { label: "Screen watching", free: true, pro: true },
+  { label: "Idle chatter", free: true, pro: true },
+  { label: "OBS browser source", free: true, pro: true },
+  { label: "Monthly limit", free: "Standard", pro: "Much higher" },
+];

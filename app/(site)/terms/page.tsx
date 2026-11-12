@@ -8,9 +8,9 @@ export const metadata: Metadata = {
 
 export default function TermsPage() {
   return (
-    <div className="site-page site-page-narrow site-prose">
-      <h1>Terms</h1>
-      <p className="site-draft">Draft for review. Not legal text yet.</p>
+    <div className="site-prose max-w-[720px] pb-24 pt-20">
+      <h1 className="site-h1">Terms</h1>
+      <p className="site-draft mt-6">Draft for review. Not legal text yet.</p>
 
       <h2>What this is</h2>
       <p>
