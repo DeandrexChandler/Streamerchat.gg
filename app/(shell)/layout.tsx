@@ -7,8 +7,8 @@ import {
   LayoutDashboard,
   Menu,
   MessagesSquare,
-  Radio,
   SlidersHorizontal,
+  UserRound,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -126,20 +126,26 @@ export default function ShellLayout({
               </Link>
             );
           })}
+
+          {/* A new tab, on purpose: /account is outside this shell, so opening
+              it here would unmount <SimulatorSession> and end the stream. */}
+          <a
+            href="/account"
+            target="_blank"
+            rel="noopener"
+            onClick={() => setMobileOpen(false)}
+            className="flex items-start gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground"
+          >
+            <UserRound className="mt-0.5 size-4 shrink-0" />
+            <span className="flex flex-col leading-tight">
+              <span>Account</span>
+              <span className="text-[11px] font-normal text-muted-foreground">
+                Opens in a new tab
+              </span>
+            </span>
+          </a>
         </nav>
 
-        {/* Honest status, not a fake account widget. Accounts are deliberately
-            deferred until the product works end to end. */}
-        <div className="p-3">
-          <Separator className="mb-3" />
-          <div className="flex items-start gap-2.5 rounded-md px-3 py-2 text-[11px] text-muted-foreground">
-            <Radio className="mt-0.5 size-3.5 shrink-0" />
-            <span className="leading-snug">
-              Running locally. No account needed — settings live in this
-              browser.
-            </span>
-          </div>
-        </div>
       </aside>
 
       <div data-app-content className="flex h-screen flex-col overflow-hidden lg:ml-64">
