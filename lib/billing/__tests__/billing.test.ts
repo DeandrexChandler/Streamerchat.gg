@@ -36,11 +36,12 @@ describe("plans", () => {
     expect(limitFor({ plan: "unknown", status: "active" })).toBe(0);
   });
   it("maps a price to its plan, and unknown prices to no plan", () => {
+    const original = plans[0].stripePriceId;
     plans[0].stripePriceId = "price_pro";
     expect(planForPrice("price_pro")).toBe("pro");
     expect(planForPrice("price_x")).toBe("unknown");
     expect(planForPrice(undefined)).toBe("unknown");
-    plans[0].stripePriceId = null;
+    plans[0].stripePriceId = original;
   });
   it("buckets usage by UTC month", () => {
     expect(usageKey("u", new Date("2026-11-30T23:59:59Z"))).toBe("usage:u:2026-11");

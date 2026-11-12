@@ -16,8 +16,9 @@ export interface Plan {
   stripePriceId: string | null;
 }
 
+/** The price ID is the Stripe *sandbox* one ($1/month placeholder); live mode gets its own. */
 export const plans: Plan[] = [
-  { id: "pro", name: "Pro", price: null, blurb: "", features: [], stripePriceId: null },
+  { id: "pro", name: "Pro", price: null, blurb: "", features: [], stripePriceId: "price_1UaNq8GjaoNXHWjYi2A8bqkA" },
 ];
 
 /** Batches per calendar month, by plan id. No active subscription means 0. */
