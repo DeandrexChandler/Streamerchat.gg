@@ -3,7 +3,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, MessagesSquare, Radio, SlidersHorizontal, X } from "lucide-react";
+import {
+  LayoutDashboard,
+  Menu,
+  MessagesSquare,
+  SlidersHorizontal,
+  UserRound,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -27,6 +34,12 @@ import { SimulatorSession } from "@/lib/react/simulator-session";
  */
 
 const NAV = [
+  {
+    label: "Dashboard",
+    href: "/dashboard",
+    icon: LayoutDashboard,
+    hint: "Setup and session",
+  },
   {
     label: "Simulator",
     href: "/simulator",
@@ -62,7 +75,7 @@ export default function ShellLayout({
         aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
         className="fixed top-4 left-4 z-50 lg:hidden"
       >
-        {mobileOpen ? <Menu className="size-4" /> : <X className="size-4" />}
+        {mobileOpen ? <X className="size-4" /> : <Menu className="size-4" />}
       </Button>
 
       <aside
@@ -74,7 +87,7 @@ export default function ShellLayout({
         )}
       >
         <div className="p-5">
-          <Link href="/simulator" className="flex items-center gap-2.5">
+          <Link href="/dashboard" className="flex items-center gap-2.5">
             <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
               S
             </span>
@@ -113,20 +126,26 @@ export default function ShellLayout({
               </Link>
             );
           })}
+
+          {/* A new tab, on purpose: /account is outside this shell, so opening
+              it here would unmount <SimulatorSession> and end the stream. */}
+          <a
+            href="/account"
+            target="_blank"
+            rel="noopener"
+            onClick={() => setMobileOpen(false)}
+            className="flex items-start gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground"
+          >
+            <UserRound className="mt-0.5 size-4 shrink-0" />
+            <span className="flex flex-col leading-tight">
+              <span>Account</span>
+              <span className="text-[11px] font-normal text-muted-foreground">
+                Opens in a new tab
+              </span>
+            </span>
+          </a>
         </nav>
 
-        {/* Honest status, not a fake account widget. Accounts are deliberately
-            deferred until the product works end to end. */}
-        <div className="p-3">
-          <Separator className="mb-3" />
-          <div className="flex items-start gap-2.5 rounded-md px-3 py-2 text-[11px] text-muted-foreground">
-            <Radio className="mt-0.5 size-3.5 shrink-0" />
-            <span className="leading-snug">
-              Running locally. No account needed — settings live in this
-              browser.
-            </span>
-          </div>
-        </div>
       </aside>
 
       <div data-app-content className="flex h-screen flex-col overflow-hidden lg:ml-64">

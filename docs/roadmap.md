@@ -109,7 +109,7 @@ to `/simulator` until then.
 - Account and usage panels appear when Tracks B and D provide the data.
   Until then they are left out, not faked.
 - The simulator must look identical afterwards. Compare screenshots taken
-  before and after, at desktop and phone width.
+  before and after, at desktop width (the app is desktop only).
 
 ## Track D — Hosting and billing
 
