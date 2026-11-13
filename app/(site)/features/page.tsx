@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { ChatSimulator } from "@/components/site/ChatSimulator";
 import { Button, Card, Tag } from "@/components/site/ui";
-import { CTA_HREF } from "@/lib/site/links";
+import { CTA_HREF, CTA_LABEL } from "@/lib/site/links";
 
 export const metadata: Metadata = {
   title: "Features",
@@ -228,7 +228,7 @@ export default function FeaturesPage() {
           </div>
         </div>
         <div className="mt-12 flex gap-3">
-          <Button href={CTA_HREF}>Open the simulator</Button>
+          <Button href={CTA_HREF}>{CTA_LABEL}</Button>
           <Button href="/docs/quickstart" variant="ghost">
             Read the quickstart
           </Button>

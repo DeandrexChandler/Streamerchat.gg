@@ -165,10 +165,6 @@
 /* Pricing */
 .site .site-plan-featured { border-color: rgb(61 255 122 / 0.45); }
 .site .site-check { color: var(--accent); }
-.site .site-table { width: 100%; border-collapse: collapse; font-size: 15px; }
-.site .site-table th, .site .site-table td { padding: 14px 16px; border-bottom: 1px solid var(--line); text-align: left; }
-.site .site-table th { font-weight: 500; color: var(--muted); }
-.site .site-table td:not(:first-child), .site .site-table th:not(:first-child) { text-align: center; width: 180px; }
 
 /* FAQ */
 .site .site-faq { border-bottom: 1px solid var(--line); }

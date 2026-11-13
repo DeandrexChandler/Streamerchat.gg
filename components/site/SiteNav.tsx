@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { CTA_HREF, NAV_LINKS } from "@/lib/site/links";
+import { CTA_HREF, CTA_LABEL, NAV_LINKS } from "@/lib/site/links";
 import { GitHubLink } from "./GitHubLink";
 import { Button } from "./ui";
 
@@ -47,7 +47,7 @@ export function SiteNav() {
           <GitHubLink />
         </nav>
         <Button href={CTA_HREF} small>
-          Open the simulator
+          {CTA_LABEL}
         </Button>
       </div>
     </header>

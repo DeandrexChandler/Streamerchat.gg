@@ -3,7 +3,6 @@ import Link from "next/link";
 import { ChatSimulator } from "@/components/site/ChatSimulator";
 import { DocPage } from "@/components/site/DocPage";
 import { Callout } from "@/components/site/ui";
-import { CTA_HREF } from "@/lib/site/links";
 
 export const metadata: Metadata = {
   title: "Quickstart",
@@ -15,7 +14,7 @@ export default function Quickstart() {
     <DocPage
       slug="quickstart"
       title="Quickstart"
-      lede="Four steps, about five minutes. Do them in order."
+      lede="Five steps, about five minutes. Do them in order."
       toc={[
         { id: "start", label: "Start a session" },
         { id: "obs", label: "Add it to OBS" },
@@ -31,9 +30,16 @@ export default function Quickstart() {
         <li>
           <h3>Sign up</h3>
           <p>
-            <Link href={CTA_HREF}>Sign up</Link> with <strong>Continue with Twitch</strong>,
-            using the account you stream from. You land in the simulator. Next time,{" "}
-            <Link href="/login">log in</Link> the same way.
+            <Link href="/signup">Sign up</Link> with <strong>Continue with Twitch</strong>,
+            using the account you stream from. Next time, <Link href="/login">log in</Link> the
+            same way.
+          </p>
+        </li>
+        <li>
+          <h3>Subscribe to Pro</h3>
+          <p>
+            Chat runs on a <Link href="/pricing">Pro</Link> subscription; without one it stays
+            quiet. Pro isn&apos;t on sale yet.
           </p>
         </li>
         <li>

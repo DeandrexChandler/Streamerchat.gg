@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { ChatSimulator } from "@/components/site/ChatSimulator";
 import { Button, Card, Tag } from "@/components/site/ui";
-import { CTA_HREF } from "@/lib/site/links";
+import { CTA_HREF, CTA_LABEL } from "@/lib/site/links";
 
 export const metadata: Metadata = {
   title: { absolute: "StreamerChat.gg — a live chat for quiet streams" },
@@ -60,7 +60,7 @@ export default function HomePage() {
             regulars, and drops into OBS.
           </p>
           <div className="mt-10 flex items-center gap-3">
-            <Button href={CTA_HREF}>Open the simulator</Button>
+            <Button href={CTA_HREF}>{CTA_LABEL}</Button>
             <Button href="/features" variant="ghost">
               See features
             </Button>
@@ -179,7 +179,7 @@ export default function HomePage() {
         <h2 className="site-h1 max-w-[16ch]">
           Never stream to an <em>empty</em> chat again.
         </h2>
-        <Button href={CTA_HREF}>Open the simulator</Button>
+        <Button href={CTA_HREF}>{CTA_LABEL}</Button>
       </section>
     </>
   );
