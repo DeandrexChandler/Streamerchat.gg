@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { ArrowRight, Check, Circle, Loader2, MonitorPlay } from "lucide-react";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useSimulatorSession } from "@/lib/react/simulator-session";
@@ -18,6 +18,7 @@ import {
   type MicStatus,
   type SetupItem,
 } from "./setup";
+import { accountSummary, type AccountSummary } from "./account";
 
 /** False on the server and the first client render, so storage reads don't break hydration. */
 const noop = () => () => {};
@@ -59,11 +60,36 @@ function useMicStatus(): MicStatus {
   return status;
 }
 
+/**
+ * Plan and usage, once, on load. Null (panel hidden) on localhost, where
+ * billing is off, and on any failure: a refusal is never shown as an error.
+ */
+function useAccount(): { summary: AccountSummary; name: string | null } | null {
+  const [account, setAccount] = useState<{ summary: AccountSummary; name: string | null } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const json = (url: string) =>
+      fetch(url, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    void (async () => {
+      const summary = accountSummary(await json("/api/billing/me"));
+      if (!summary) return;
+      // Auth.js's own session endpoint; null in local mode, which is fine.
+      const session = (await json("/api/auth/session")) as { user?: { name?: string } } | null;
+      if (!cancelled) setAccount({ summary, name: session?.user?.name ?? null });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return account;
+}
+
 export function Dashboard() {
   const simulator = useSimulatorSession();
   const mounted = useMounted();
   const keyStatus = useKeyStatus();
   const micStatus = useMicStatus();
+  const account = useAccount();
 
   const { emoteCount, regulars } = useMemo(
     () =>
@@ -106,6 +132,43 @@ export function Dashboard() {
             </Link>
           </CardContent>
         </Card>
+
+        {account && (
+          <Card className="md:col-span-2">
+            <CardHeader>
+              <CardTitle>
+                {account.summary.plan}
+                {account.name && (
+                  <span className="font-normal text-muted-foreground"> · {account.name}</span>
+                )}
+              </CardTitle>
+              <CardDescription>{account.summary.usage}</CardDescription>
+            </CardHeader>
+            {/* New tabs throughout: /account, /pricing and Stripe are all
+                outside this shell, and leaving it ends the session. */}
+            <CardContent className="flex flex-wrap gap-2">
+              {account.summary.action === "portal" ? (
+                <form action="/api/billing/portal" method="post" target="_blank">
+                  <Button type="submit" variant="outline">
+                    Manage billing
+                  </Button>
+                </form>
+              ) : (
+                <a href="/pricing" target="_blank" rel="noopener" className={buttonVariants()}>
+                  Choose a plan
+                </a>
+              )}
+              <a
+                href="/account"
+                target="_blank"
+                rel="noopener"
+                className={buttonVariants({ variant: "ghost" })}
+              >
+                Account
+              </a>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
