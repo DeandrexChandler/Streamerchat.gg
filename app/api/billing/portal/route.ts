@@ -1,6 +1,6 @@
 import { billingEnabled, getAccount } from "@/lib/billing/db";
 import { stripe } from "@/lib/billing/stripe";
-import { getUserId } from "@/lib/billing/user";
+import { getUserId } from "@/lib/account/user";
 
 /** Form POST → 303 to the Stripe customer portal (change plan, cancel, invoices). */
 export async function POST(request: Request) {
