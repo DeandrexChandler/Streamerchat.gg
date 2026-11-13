@@ -32,8 +32,14 @@ Every agent PR runs this check, and it must print nothing:
 git diff --name-only --diff-filter=MDR main... -- 'app/(shell)/simulator' \
   'app/(shell)/settings' 'app/(shell)/emotes' 'app/(shell)/obs' app/overlay \
   app/api app/components app/globals.css app/layout.tsx lib components/ui \
-  scripts tailwind.config.js next.config.ts
+  scripts tailwind.config.js next.config.ts \
+  ':!lib/site' ':!lib/account' ':!lib/billing' ':!app/api/auth' ':!app/api/billing'
 ```
+
+A track owns the files it created, even inside the frozen zone, and may
+change them in later PRs: `lib/site/` (A), `lib/account/` and
+`app/api/auth/` (B), `lib/billing/` and `app/api/billing/` (D). The check
+excludes them. Everything else in the zone stays the owner's.
 
 Plus `npm test`, `npm run typecheck` and `npm run lint`, as always.
 
