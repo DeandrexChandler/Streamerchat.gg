@@ -12,7 +12,8 @@ export const NAV_LINKS = [
 ];
 
 /**
- * Where every call to action points. Signed in, /signup goes straight on to
- * the simulator; running locally it shows a button to it.
+ * The site's main call to action. There's no free tier, so it goes to
+ * pricing rather than into a simulator that stays silent without a plan.
  */
-export const CTA_HREF = "/signup";
+export const CTA_HREF = "/pricing";
+export const CTA_LABEL = "See pricing";

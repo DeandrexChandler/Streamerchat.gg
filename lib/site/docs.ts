@@ -1,6 +1,6 @@
 /** The docs pages, in reading order. Sidebar, search, cards and prev/next all read this. */
 export const DOC_PAGES = [
-  { slug: "quickstart", title: "Quickstart", blurb: "Sign up, press Play and talk. Five minutes." },
+  { slug: "quickstart", title: "Quickstart", blurb: "Sign up, subscribe, press Play and talk." },
   { slug: "obs", title: "OBS setup", blurb: "Put chat on your stream as a browser source." },
   { slug: "regulars", title: "Regulars", blurb: "The people who keep coming back, and how to edit them." },
   { slug: "emotes", title: "Emotes", blurb: "Import your 7TV emotes and choose what they mean." },
